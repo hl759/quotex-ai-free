@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: quotex-ai-signals
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn backend.app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120
+    envVars:
+      - key: TWELVE_DATA_KEY
+        sync: false
+      - key: PYTHON_VERSION
+        value: 3.11.0
