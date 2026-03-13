@@ -250,14 +250,14 @@ HTML = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-<title>⚡ Quotex AI Signals</title>
+<title>⚡ NEXUS AI Signals</title>
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
 <style>
 :root{--bg:#030a14;--bg2:#071422;--green:#00e5a0;--red:#ff3d6b;--gold:#f5c842;--blue:#3d9eff;--text:#c8d8e8;--muted:#3a5060;}
 *{box-sizing:border-box;margin:0;padding:0;}
 body{background:var(--bg);color:var(--text);font-family:'Space Mono',monospace;min-height:100vh;}
 header{background:rgba(3,10,20,0.97);border-bottom:1px solid rgba(0,200,150,0.12);padding:14px 16px;position:sticky;top:0;z-index:99;display:flex;align-items:center;justify-content:space-between;}
-.logo-icon{width:36px;height:36px;background:linear-gradient(135deg,#00e5a0,#0088ff);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;margin-right:10px;}
+.logo-icon{width:36px;height:36px;background:linear-gradient(135deg,#7b2fff,#00e5a0);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;margin-right:10px;}
 .logo{display:flex;align-items:center;}
 .logo-text{font-family:'Syne',sans-serif;font-weight:800;font-size:16px;}
 .logo-text span{color:var(--green);}
@@ -316,7 +316,7 @@ header{background:rgba(3,10,20,0.97);border-bottom:1px solid rgba(0,200,150,0.12
   <div class="logo">
     <div class="logo-icon">⚡</div>
     <div>
-      <div class="logo-text">QUOTEX<span>·AI</span></div>
+      <div class="logo-text">NEXUS<span>·AI</span></div>
       <div style="font-size:9px;color:var(--muted);letter-spacing:.1em">M1 + M5 SIGNALS</div>
     </div>
   </div>
