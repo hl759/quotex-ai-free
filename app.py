@@ -13,14 +13,29 @@ CORS(app)
 TWELVE_DATA_KEY = os.environ.get("TWELVE_DATA_KEY", "demo")
 
 ASSETS = [
+    # Forex Major (8 pares)
     {"symbol": "EUR/USD", "type": "forex"},
     {"symbol": "GBP/USD", "type": "forex"},
     {"symbol": "USD/JPY", "type": "forex"},
     {"symbol": "AUD/USD", "type": "forex"},
+    {"symbol": "USD/CAD", "type": "forex"},
+    {"symbol": "USD/CHF", "type": "forex"},
+    {"symbol": "NZD/USD", "type": "forex"},
+    {"symbol": "EUR/GBP", "type": "forex"},
+    # Forex Cross (6 pares)
     {"symbol": "GBP/JPY", "type": "forex"},
     {"symbol": "EUR/JPY", "type": "forex"},
+    {"symbol": "EUR/CHF", "type": "forex"},
+    {"symbol": "AUD/JPY", "type": "forex"},
+    {"symbol": "GBP/CHF", "type": "forex"},
+    {"symbol": "CAD/JPY", "type": "forex"},
+    # Cripto (6 pares)
     {"symbol": "BTC/USD", "type": "crypto"},
     {"symbol": "ETH/USD", "type": "crypto"},
+    {"symbol": "LTC/USD", "type": "crypto"},
+    {"symbol": "XRP/USD", "type": "crypto"},
+    {"symbol": "ADA/USD", "type": "crypto"},
+    {"symbol": "SOL/USD", "type": "crypto"},
 ]
 
 state = {
