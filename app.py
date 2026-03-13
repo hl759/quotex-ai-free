@@ -403,4 +403,270 @@ header{background:rgba(3,10,20,.97);border-bottom:1px solid rgba(123,47,255,.2);
   <button class="tab active" onclick="showTab('signals',this)">⚡ SINAIS</button>
   <button class="tab" onclick="showTab('history',this)">📋 HISTÓRICO</button>
   <button class="tab" onclick="showTab('perf',this)">📊 STATS</button>
-  <button class="tab" o
+  <button class="tab" onclick="showTab('assets',this)">🏆 ATIVOS</button>
+</div>
+<div class="content">
+  <div id="page-signals" class="page active"><div id="sc"><div class="empty"><div class="icon"><span class="spin">⚡</span></div><div style="font-family:'Syne',sans-serif;font-size:16px;color:#e8f0f8;margin-bottom:8px">Iniciando NEXUS AI...</div><div>Escaneando 20 ativos via Yahoo Finance</div></div></div></div>
+  <div id="page-history" class="page"><div id="hc"><div class="empty"><div class="icon">📋</div><div>Nenhum trade registrado</div></div></div></div>
+  <div id="page-perf" class="page">
+    <div class="pcard"><div class="ptitle">Win Rate Geral</div><div class="bigstat" id="wr" style="color:var(--green)">—</div><div style="font-size:11px;color:var(--muted);margin-top:6px" id="ptotal">0 trades</div></div>
+    <div class="s3">
+      <div class="sbox"><div class="sv" id="pw" style="color:var(--green)">0</div><div class="sl">WINS</div></div>
+      <div class="sbox"><div class="sv" id="pl" style="color:var(--red)">0</div><div class="sl">LOSSES</div></div>
+      <div class="sbox"><div class="sv" id="ps" style="color:var(--purple)">0</div><div class="sl">SCANS</div></div>
+    </div>
+    <div class="pcard"><div class="ptitle">Win Rate por Horário (UTC)</div><div class="hgrid" id="hgrid"></div></div>
+    <div class="pcard"><div class="ptitle">Fonte de Dados</div><div style="font-size:11px;color:var(--muted);line-height:1.8">Yahoo Finance via yfinance<br>✅ Sem limite de requisições<br>✅ Scan a cada 2 minutos<br>✅ 20 ativos simultâneos</div></div>
+  </div>
+  <div id="page-assets" class="page"><div class="pcard"><div class="ptitle">Ranking de Ativos</div><div id="ar"><div style="font-size:11px;color:var(--muted)">Registre trades para ver o ranking.</div></div></div></div>
+</div>
+
+<script>
+let history=JSON.parse(localStorage.getItem('nx_h')||'[]');
+let stats=JSON.parse(localStorage.getItem('nx_s')||'{"w":0,"l":0}');
+let hourStats=JSON.parse(localStorage.getItem('nx_hs')||'{}');
+let assetStats=JSON.parse(localStorage.getItem('nx_as')||'{}');
+let prevSigs=[];
+let timers={};
+
+function showTab(t,el){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
+  document.getElementById('page-'+t).classList.add('active');
+  el.classList.add('active');
+  if(t==='perf'){updatePerf();renderHGrid();}
+  if(t==='history')renderHistory();
+  if(t==='assets')renderAssets();
+}
+
+function cc(v){return v>=85?'#00e5a0':v>=75?'#f5c842':'#ff9a3c';}
+
+function beep(){
+  try{
+    const ctx=new(window.AudioContext||window.webkitAudioContext)();
+    const o=ctx.createOscillator(),g=ctx.createGain();
+    o.connect(g);g.connect(ctx.destination);
+    o.frequency.setValueAtTime(880,ctx.currentTime);
+    o.frequency.setValueAtTime(1100,ctx.currentTime+0.1);
+    o.frequency.setValueAtTime(880,ctx.currentTime+0.2);
+    g.gain.setValueAtTime(0.3,ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.5);
+    o.start();o.stop(ctx.currentTime+0.5);
+  }catch(e){}
+}
+
+function startTimer(i,secs,iso){
+  if(timers[i])clearInterval(timers[i]);
+  const end=(iso?new Date(iso).getTime():Date.now())+secs*1000;
+  timers[i]=setInterval(()=>{
+    const rem=Math.max(0,Math.floor((end-Date.now())/1000));
+    const f=document.getElementById('tf-'+i);
+    const v=document.getElementById('tv-'+i);
+    if(!f||!v){clearInterval(timers[i]);return;}
+    f.style.width=(rem/secs*100)+'%';
+    v.textContent=`${Math.floor(rem/60)}:${(rem%60).toString().padStart(2,'0')}`;
+    if(rem===0){clearInterval(timers[i]);v.textContent='EXPIROU';v.style.color='#ff3d6b';}
+  },1000);
+}
+
+function renderSignals(data){
+  const c=document.getElementById('sc');
+  document.getElementById('scan-status').textContent=
+    data.scanning?'⚡ Escaneando...':
+    data.blocked_reason?`🔴 ${data.blocked_reason}`:
+    `Último: ${data.last_scan||'—'}`;
+  document.getElementById('scan-count').textContent=`${data.scan_count} scans`;
+  document.getElementById('ps').textContent=data.scan_count;
+
+  if(data.blocked_reason){
+    c.innerHTML=`<div class="blocked">🔴 ${data.blocked_reason}</div>
+    <div class="empty"><div class="icon">🕐</div>
+    <div style="font-family:'Syne',sans-serif;font-size:14px;color:#e8f0f8;margin-bottom:8px">Melhor horário: 06h–17h UTC</div>
+    <div style="font-size:11px">(09h–20h horário de Brasília)</div></div>`;
+    return;
+  }
+
+  if(!data.signals||!data.signals.length){
+    c.innerHTML=`<div class="src">⚡ Yahoo Finance · Sem limite · Scan a cada 2 min</div>
+    <div class="empty"><div class="icon">🔍</div>
+    <div style="font-family:'Syne',sans-serif;font-size:15px;color:#e8f0f8;margin-bottom:8px">Nenhum sinal agora</div>
+    <div>Analisando 20 ativos M1+M5.<br>Aguarde o próximo scan.</div>
+    <div style="margin-top:12px;font-size:10px;color:var(--muted)">Último: ${data.last_scan||'—'}</div></div>`;
+    return;
+  }
+
+  const newKey=data.signals.map(s=>s.asset+s.direction).join(',');
+  const oldKey=prevSigs.map(s=>s.asset+s.direction).join(',');
+  if(newKey!==oldKey&&prevSigs.length>0)beep();
+  prevSigs=data.signals;
+
+  const hasEx=data.signals.some(s=>s.quality==='EXCELENTE');
+  let html=`<div class="src">⚡ Yahoo Finance · Sem limite · Scan a cada 2 min</div>`;
+  if(hasEx)html+=`<div class="alert">⭐ Sinal EXCELENTE detectado — alta confluência!</div>`;
+
+  data.signals.forEach((s,i)=>{
+    const isC=s.direction==='CALL';
+    const gc=s.asset_grade==='A'?'#00e5a0':s.asset_grade==='B'?'#3d9eff':s.asset_grade==='C'?'#f5c842':'#888';
+    html+=`<div class="card ${isC?'call':'put'}" id="sig-${i}">
+    <div class="glow"></div>
+    <div class="sig-hdr">
+      <div>
+        <div class="${isC?'cb':'pb'} dbadge">${isC?'▲':'▼'} ${s.direction}</div>
+        <div class="aname">${s.asset}</div>
+        <div class="asub">${s.timeframe} · ${s.expiry} · <span style="color:${gc}">Nota ${s.asset_grade}</span></div>
+      </div>
+      <div>
+        <div class="conf" style="color:${cc(s.confidence)}">${s.confidence}%</div>
+        <div class="clbl">CONFIANÇA</div>
+      </div>
+    </div>
+    <div class="tbar">
+      <span style="font-size:9px;color:var(--muted)">EXPIRA EM</span>
+      <div class="ttrack"><div class="tfill" id="tf-${i}" style="width:100%"></div></div>
+      <div class="tval" id="tv-${i}">5:00</div>
+    </div>
+    <div class="s3">
+      <div class="sbox"><div class="sv">${s.confluence_score}</div><div class="sl">SCORE</div></div>
+      <div class="sbox"><div class="sv" style="font-size:11px;color:${s.quality==='EXCELENTE'?'#f5c842':'#00e5a0'}">${s.quality}</div><div class="sl">QUALIDADE</div></div>
+      <div class="sbox"><div class="sv" style="font-size:10px">${s.timestamp}</div><div class="sl">HORA</div></div>
+    </div>
+    <div style="margin-bottom:14px">${(s.explanation||[]).map(e=>`<div class="expl">${e}</div>`).join('')}</div>
+    <div class="prow"><span style="font-size:10px;color:var(--muted)">Preço entrada</span><span style="font-size:12px;font-weight:700;color:#e8f0f8">${s.entry_price}</span></div>
+    <button class="${isC?'btnc':'btnp'}">ABRIR ${s.direction} → ${s.asset}</button>
+    <div class="orrow">
+      <button class="bw" onclick="rec(${i},'WIN','${s.asset}','${s.direction}',${s.confidence},'${s.pattern||''}')">✓ WIN</button>
+      <button class="bl" onclick="rec(${i},'LOSS','${s.asset}','${s.direction}',${s.confidence},'${s.pattern||''}')">✗ LOSS</button>
+    </div></div>`;
+  });
+  c.innerHTML=html;
+  data.signals.forEach((s,i)=>startTimer(i,s.expiry_seconds||300,s.timestamp_iso));
+}
+
+function rec(i,o,a,d,cf,pat){
+  const w=o==='WIN';
+  history.unshift({asset:a,direction:d,confidence:cf,outcome:o,pattern:pat,
+    time:new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})});
+  if(history.length>200)history.pop();
+  localStorage.setItem('nx_h',JSON.stringify(history));
+  if(w)stats.w++;else stats.l++;
+  localStorage.setItem('nx_s',JSON.stringify(stats));
+  const h=new Date().getUTCHours().toString();
+  if(!hourStats[h])hourStats[h]={w:0,l:0};
+  if(w)hourStats[h].w++;else hourStats[h].l++;
+  localStorage.setItem('nx_hs',JSON.stringify(hourStats));
+  if(!assetStats[a])assetStats[a]={w:0,l:0};
+  if(w)assetStats[a].w++;else assetStats[a].l++;
+  localStorage.setItem('nx_as',JSON.stringify(assetStats));
+  fetch('/api/outcome',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({outcome:o,asset:a,pattern:pat,confidence:cf})}).catch(()=>{});
+  const card=document.getElementById('sig-'+i);
+  if(card){card.style.borderColor=w?'#00e5a0':'#ff3d6b';card.style.background=`rgba(${w?'0,229,160':'255,61,107'},.05)`;}
+  updatePerf();
+  alert(`${w?'✅':'❌'} ${o} registrado — ${a}!`);
+}
+
+function renderHistory(){
+  const c=document.getElementById('hc');
+  if(!history.length){c.innerHTML='<div class="empty"><div class="icon">📋</div><div>Nenhum trade registrado</div></div>';return;}
+  let html=`<div style="display:grid;grid-template-columns:1fr 55px 55px 60px;padding:8px 14px;font-size:9px;color:var(--muted);letter-spacing:.08em;margin-bottom:4px"><span>ATIVO</span><span>DIR.</span><span>HORA</span><span>RES.</span></div>`;
+  history.slice(0,50).forEach(h=>{
+    html+=`<div class="hrow"><div><div style="color:#e8f0f8;font-weight:700">${h.asset}</div><div style="font-size:9px;color:var(--muted)">${h.confidence}%</div></div><div style="color:${h.direction==='CALL'?'#00e5a0':'#ff3d6b'};font-weight:700">${h.direction==='CALL'?'▲':'▼'}</div><div style="color:var(--muted);font-size:10px">${h.time}</div><div class="${h.outcome==='WIN'?'wb':'lb'}">${h.outcome}</div></div>`;
+  });
+  c.innerHTML=html;
+}
+
+function updatePerf(){
+  const t=stats.w+stats.l;
+  const wr=t>0?((stats.w/t)*100).toFixed(1)+'%':'—';
+  const el=document.getElementById('wr');
+  el.textContent=wr;el.style.color=parseFloat(wr)>=60?'#00e5a0':'#ff3d6b';
+  document.getElementById('ptotal').textContent=`${t} trades registrados`;
+  document.getElementById('pw').textContent=stats.w;
+  document.getElementById('pl').textContent=stats.l;
+}
+
+function renderHGrid(){
+  const g=document.getElementById('hgrid');
+  if(!g)return;
+  let html='';
+  for(let h=0;h<24;h++){
+    const hs=hourStats[h.toString()];
+    const t=hs?hs.w+hs.l:0;
+    const wr=t>=3?Math.round(hs.w/t*100):null;
+    const cls=wr===null?'':wr>=60?'good':wr<45?'bad':'';
+    const col=wr===null?'var(--muted)':wr>=60?'var(--green)':wr<45?'var(--red)':'var(--gold)';
+    html+=`<div class="hbox ${cls}"><div style="font-size:9px;color:${col}">${h}h</div>${wr!==null?`<div style="font-size:10px;font-weight:700;color:${col}">${wr}%</div>`:''}</div>`;
+  }
+  g.innerHTML=html;
+}
+
+function renderAssets(){
+  const c=document.getElementById('ar');
+  if(!c)return;
+  const list=Object.entries(assetStats)
+    .map(([s,v])=>{const t=v.w+v.l;const wr=t>0?Math.round(v.w/t*100):0;const g=wr>=70?'A':wr>=60?'B':wr>=50?'C':'D';return{s,t,wr,g};})
+    .filter(a=>a.t>=2).sort((a,b)=>b.wr-a.wr);
+  if(!list.length){c.innerHTML='<div style="font-size:11px;color:var(--muted)">Registre pelo menos 2 trades por ativo.</div>';return;}
+  let html='';
+  list.forEach((a,i)=>{
+    const col=a.g==='A'?'#00e5a0':a.g==='B'?'#3d9eff':a.g==='C'?'#f5c842':'#ff3d6b';
+    html+=`<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.04)">
+    <div><span style="font-size:12px;color:#e8f0f8;font-weight:700">${i+1}. ${a.s}</span><span style="font-size:10px;color:var(--muted);margin-left:8px">${a.t} trades</span></div>
+    <div><span style="font-size:16px;font-weight:800;color:${col}">${a.wr}%</span><span style="font-size:11px;color:${col};margin-left:6px;font-weight:700">Nota ${a.g}</span></div></div>`;
+  });
+  c.innerHTML=html;
+}
+
+async function fetchSignals(){
+  try{
+    const r=await fetch('/api/signals');
+    const d=await r.json();
+    renderSignals(d);
+  }catch(e){document.getElementById('scan-status').textContent='⚠ Servidor iniciando...';}
+}
+
+fetchSignals();
+setInterval(fetchSignals,30000);
+updatePerf();
+</script>
+</body>
+</html>"""
+
+# ─── Endpoints ────────────────────────────────
+@app.route("/")
+def index():
+    return render_template_string(HTML)
+
+@app.route("/api/signals")
+def api_signals():
+    return jsonify({
+        "signals":        state["signals"],
+        "last_scan":      state["last_scan"],
+        "scan_count":     state["scan_count"],
+        "scanning":       state["scanning"],
+        "total_assets":   len(ASSETS),
+        "blocked_reason": state["blocked_reason"],
+    })
+
+@app.route("/api/outcome", methods=["POST"])
+def api_outcome():
+    data = request.json or {}
+    if data.get("outcome") in ["WIN","LOSS"]:
+        record_learning(data, data["outcome"])
+    return jsonify({"status":"ok","weights":learning["weights"]})
+
+@app.route("/api/learning")
+def api_learning():
+    return jsonify(learning)
+
+@app.route("/ping")
+def ping():
+    return "pong", 200
+
+# ─── Start ────────────────────────────────────
+t = threading.Thread(target=scanner_loop, daemon=True)
+t.start()
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False)
