@@ -38,3 +38,4 @@ class DataManager:
             return candles
         except Exception:
             return None
+            
