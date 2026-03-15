@@ -28,11 +28,22 @@ def scanner_loop():
                 latest_signals = signals
                 learning.update_stats(signals)
                 print("Signals:", signals, flush=True)
+            else:
+                print("No signals this cycle", flush=True)
 
         except Exception as e:
             print("Scanner error:", e, flush=True)
 
         time.sleep(60)
+
+
+@app.route("/")
+def home():
+    return {
+        "name": "NEXUS v8",
+        "status": "online",
+        "routes": ["/health", "/signals"]
+    }
 
 
 @app.route("/health")
