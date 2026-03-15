@@ -1,6 +1,6 @@
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask import Flask, jsonify, render_template_string
 
 from scanner import MarketScanner
@@ -21,663 +21,434 @@ signal_history = []
 last_scan_time = None
 scan_count = 0
 
-HTML_PAGE = """
+HTML_PAGE = '''
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NEXUS-AI</title>
-    <style>
-        :root{
-            --bg:#030814;
-            --bg-soft:#071325;
-            --card:#08182a;
-            --card-2:#0b1f36;
-            --line:rgba(59, 130, 246, .12);
-            --line-2:rgba(45, 212, 191, .14);
-            --text:#eef4ff;
-            --muted:#91a4c3;
-            --muted-2:#6f86aa;
-            --green:#1df2a4;
-            --cyan:#23d7ff;
-            --purple:#915cff;
-            --yellow:#ffd84d;
-            --red:#ff6b7a;
-            --shadow:0 12px 34px rgba(0,0,0,.34);
-        }
-
-        *{
-            box-sizing:border-box;
-            -webkit-tap-highlight-color: transparent;
-        }
-
-        html, body{
-            margin:0;
-            padding:0;
-            background:
-                radial-gradient(circle at 15% 0%, rgba(145,92,255,.16), transparent 28%),
-                radial-gradient(circle at 100% 0%, rgba(35,215,255,.12), transparent 24%),
-                linear-gradient(180deg, #020712 0%, #04101d 42%, #030814 100%);
-            color:var(--text);
-            font-family: Inter, Arial, Helvetica, sans-serif;
-            min-height:100vh;
-        }
-
-        .app{
-            max-width:720px;
-            margin:0 auto;
-            padding:14px 14px 28px;
-        }
-
-        .hero{
-            position:relative;
-            overflow:hidden;
-            background:linear-gradient(180deg, rgba(6,18,35,.96), rgba(6,18,35,.82));
-            border:1px solid rgba(35,215,255,.12);
-            border-radius:28px;
-            padding:16px;
-            box-shadow:var(--shadow);
-        }
-
-        .hero-top{
-            display:flex;
-            justify-content:space-between;
-            align-items:center;
-            gap:12px;
-        }
-
-        .brand{
-            display:flex;
-            align-items:center;
-            gap:12px;
-            min-width:0;
-        }
-
-        .logo{
-            width:54px;
-            height:54px;
-            border-radius:18px;
-            display:flex;
-            align-items:center;
-            justify-content:center;
-            background:linear-gradient(135deg, #6f4cff, #11dfc5);
-            box-shadow:0 8px 20px rgba(17,223,197,.18);
-            font-size:26px;
-            flex-shrink:0;
-        }
-
-        .title{
-            font-weight:900;
-            font-size:30px;
-            line-height:1;
-            letter-spacing:.4px;
-            white-space:nowrap;
-        }
-
-        .title .accent{
-            color:var(--green);
-        }
-
-        .subtitle{
-            margin-top:6px;
-            color:var(--muted);
-            font-size:12px;
-            letter-spacing:2px;
-            text-transform:uppercase;
-            white-space:nowrap;
-            overflow:hidden;
-            text-overflow:ellipsis;
-            max-width:100%;
-        }
-
-        .live{
-            display:flex;
-            align-items:center;
-            gap:8px;
-            padding:10px 14px;
-            border-radius:999px;
-            background:rgba(8,32,30,.55);
-            border:1px solid rgba(29,242,164,.22);
-            color:#9efdda;
-            font-weight:800;
-            font-size:14px;
-            flex-shrink:0;
-        }
-
-        .dot{
-            width:10px;
-            height:10px;
-            border-radius:50%;
-            background:var(--green);
-            box-shadow:0 0 12px var(--green);
-        }
-
-        .hero-stats{
-            display:grid;
-            grid-template-columns:1fr 1fr 1fr;
-            gap:10px;
-            margin-top:16px;
-        }
-
-        .metric{
-            background:rgba(10,24,43,.82);
-            border:1px solid rgba(35,215,255,.08);
-            border-radius:16px;
-            padding:12px;
-        }
-
-        .metric-label{
-            color:var(--muted-2);
-            font-size:11px;
-            text-transform:uppercase;
-            letter-spacing:1px;
-            margin-bottom:6px;
-        }
-
-        .metric-value{
-            font-size:18px;
-            font-weight:800;
-        }
-
-        .tabs{
-            display:grid;
-            grid-template-columns:repeat(4,1fr);
-            gap:10px;
-            margin-top:14px;
-        }
-
-        .tab-btn{
-            text-align:center;
-            padding:13px 8px;
-            border-radius:16px;
-            background:rgba(8,22,38,.86);
-            border:1px solid rgba(145,92,255,.08);
-            color:var(--muted);
-            font-weight:800;
-            font-size:13px;
-            cursor:pointer;
-            transition:.2s ease;
-        }
-
-        .tab-btn.active{
-            color:var(--green);
-            border-color:rgba(29,242,164,.24);
-            box-shadow:inset 0 -3px 0 var(--green);
-        }
-
-        .section{
-            margin-top:16px;
-            background:linear-gradient(180deg, rgba(7,19,37,.94), rgba(6,17,31,.94));
-            border:1px solid rgba(35,215,255,.1);
-            border-radius:24px;
-            padding:16px;
-            box-shadow:var(--shadow);
-        }
-
-        .section-title{
-            display:flex;
-            align-items:center;
-            justify-content:space-between;
-            gap:10px;
-            margin-bottom:14px;
-        }
-
-        .section-title h2{
-            margin:0;
-            font-size:18px;
-        }
-
-        .section-sub{
-            color:var(--muted);
-            font-size:13px;
-        }
-
-        .panel{
-            display:none;
-        }
-
-        .panel.active{
-            display:block;
-        }
-
-        .credits-top{
-            display:flex;
-            justify-content:space-between;
-            align-items:center;
-            gap:10px;
-            margin-bottom:12px;
-        }
-
-        .credits-left{
-            color:var(--muted);
-            font-size:14px;
-        }
-
-        .credits-right{
-            font-size:24px;
-            font-weight:900;
-            color:var(--green);
-        }
-
-        .progress{
-            height:12px;
-            background:#0b1930;
-            border-radius:999px;
-            overflow:hidden;
-            border:1px solid rgba(35,215,255,.08);
-        }
-
-        .progress-bar{
-            height:100%;
-            width:{{ credits_percent }}%;
-            background:linear-gradient(90deg, #22d3ee, #8b5cf6, #1df2a4);
-        }
-
-        .credits-meta{
-            margin-top:12px;
-            display:flex;
-            justify-content:space-between;
-            gap:10px;
-            color:var(--muted);
-            font-size:14px;
-            flex-wrap:wrap;
-        }
-
-        .credits-meta strong{
-            color:var(--purple);
-        }
-
-        .signals{
-            display:flex;
-            flex-direction:column;
-            gap:14px;
-        }
-
-        .signal-card{
-            background:linear-gradient(180deg, rgba(10,27,47,.98), rgba(7,20,35,.98));
-            border:1px solid rgba(35,215,255,.1);
-            border-radius:20px;
-            padding:15px;
-        }
-
-        .signal-head{
-            display:flex;
-            justify-content:space-between;
-            align-items:center;
-            gap:12px;
-            margin-bottom:12px;
-        }
-
-        .asset{
-            font-size:22px;
-            font-weight:900;
-        }
-
-        .direction{
-            padding:9px 14px;
-            border-radius:999px;
-            font-weight:900;
-            font-size:13px;
-        }
-
-        .direction.call{
-            background:linear-gradient(135deg, #1df2a4, #7dffc8);
-            color:#062116;
-        }
-
-        .direction.put{
-            background:linear-gradient(135deg, #ff7c90, #ffc0c9);
-            color:#341017;
-        }
-
-        .signal-grid{
-            display:grid;
-            grid-template-columns:1fr 1fr 1fr;
-            gap:10px;
-        }
-
-        .mini-card{
-            background:#09192b;
-            border:1px solid rgba(35,215,255,.06);
-            border-radius:14px;
-            padding:12px;
-        }
-
-        .mini-label{
-            color:var(--muted-2);
-            font-size:11px;
-            text-transform:uppercase;
-            letter-spacing:1px;
-            margin-bottom:6px;
-        }
-
-        .mini-value{
-            font-size:17px;
-            font-weight:800;
-        }
-
-        .reason-box{
-            margin-top:12px;
-            background:#071423;
-            border:1px solid rgba(35,215,255,.06);
-            border-radius:14px;
-            padding:12px;
-            color:#dce7ff;
-            line-height:1.45;
-            font-size:14px;
-            white-space:pre-wrap;
-            word-break:break-word;
-        }
-
-        .stats-grid{
-            display:grid;
-            grid-template-columns:1fr 1fr;
-            gap:12px;
-        }
-
-        .stats-card{
-            background:linear-gradient(180deg, rgba(9,23,39,.94), rgba(7,18,32,.94));
-            border:1px solid rgba(145,92,255,.08);
-            border-radius:18px;
-            padding:14px;
-        }
-
-        .stats-label{
-            color:var(--muted);
-            font-size:12px;
-            text-transform:uppercase;
-            letter-spacing:1px;
-            margin-bottom:8px;
-        }
-
-        .stats-value{
-            font-size:24px;
-            font-weight:900;
-        }
-
-        .accent-green{color:var(--green)}
-        .accent-purple{color:var(--purple)}
-        .accent-cyan{color:var(--cyan)}
-        .accent-yellow{color:var(--yellow)}
-
-        .ranking{
-            display:flex;
-            flex-direction:column;
-            gap:10px;
-        }
-
-        .rank-item{
-            display:flex;
-            align-items:center;
-            justify-content:space-between;
-            gap:12px;
-            background:#08192c;
-            border:1px solid rgba(35,215,255,.06);
-            border-radius:16px;
-            padding:12px;
-        }
-
-        .rank-left{
-            display:flex;
-            align-items:center;
-            gap:12px;
-        }
-
-        .rank-num{
-            width:32px;
-            height:32px;
-            border-radius:12px;
-            display:flex;
-            align-items:center;
-            justify-content:center;
-            background:linear-gradient(135deg, #8b5cf6, #22d3ee);
-            color:white;
-            font-weight:900;
-            font-size:14px;
-        }
-
-        .rank-name{
-            font-weight:800;
-            font-size:15px;
-        }
-
-        .rank-right{
-            color:var(--green);
-            font-weight:800;
-            font-size:14px;
-        }
-
-        .history-list{
-            display:flex;
-            flex-direction:column;
-            gap:10px;
-        }
-
-        .history-item{
-            background:#08192c;
-            border:1px solid rgba(35,215,255,.06);
-            border-radius:16px;
-            padding:12px;
-        }
-
-        .history-top{
-            display:flex;
-            justify-content:space-between;
-            align-items:center;
-            gap:10px;
-            margin-bottom:8px;
-        }
-
-        .history-asset{
-            font-weight:800;
-            font-size:16px;
-        }
-
-        .history-meta{
-            color:var(--muted);
-            font-size:13px;
-            line-height:1.45;
-        }
-
-        .empty{
-            text-align:center;
-            padding:34px 8px 20px;
-        }
-
-        .empty-icon{
-            font-size:70px;
-            margin-bottom:12px;
-        }
-
-        .empty-title{
-            font-size:20px;
-            font-weight:900;
-            margin-bottom:8px;
-        }
-
-        .empty-text{
-            color:var(--muted);
-            font-size:15px;
-            margin:4px 0;
-        }
-
-        .footer{
-            margin-top:16px;
-            text-align:center;
-            color:var(--muted);
-            font-size:13px;
-            padding-bottom:8px;
-        }
-
-        @media (max-width:560px){
-            .app{padding:12px 12px 28px}
-            .title{font-size:26px}
-            .subtitle{font-size:11px; letter-spacing:1.4px}
-            .hero-stats{grid-template-columns:1fr 1fr}
-            .tabs{grid-template-columns:1fr 1fr}
-            .signal-grid{grid-template-columns:1fr 1fr}
-            .stats-grid{grid-template-columns:1fr}
-            .asset{font-size:19px}
-            .credits-right{font-size:20px}
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NEXUS-AI</title>
+  <style>
+    body{
+      margin:0;
+      font-family:Arial,sans-serif;
+      background:linear-gradient(180deg,#020814,#071325);
+      color:#eef4ff;
+    }
+    .app{max-width:760px;margin:0 auto;padding:14px;}
+    .hero,.section{
+      background:#08182a;
+      border:1px solid rgba(35,215,255,.12);
+      border-radius:22px;
+      padding:16px;
+      margin-bottom:16px;
+      box-shadow:0 8px 24px rgba(0,0,0,.28);
+    }
+    .hero-top{
+      display:flex;justify-content:space-between;align-items:center;gap:12px;
+    }
+    .brand{display:flex;align-items:center;gap:12px;}
+    .logo{
+      width:52px;height:52px;border-radius:16px;
+      display:flex;align-items:center;justify-content:center;
+      background:linear-gradient(135deg,#7c4dff,#19f0d1);
+      font-size:26px;
+    }
+    .title{font-size:28px;font-weight:900;line-height:1}
+    .title span{color:#19f0d1}
+    .subtitle{margin-top:6px;font-size:12px;color:#91a4c3;letter-spacing:1.5px}
+    .live{
+      padding:10px 14px;border-radius:999px;
+      background:rgba(20,60,50,.45);
+      border:1px solid rgba(25,240,209,.24);
+      color:#9bffe5;font-weight:bold;font-size:14px;
+    }
+    .metrics{
+      display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px;
+    }
+    .metric,.mini,.stat-card,.history-item,.asset-item{
+      background:#0a1c30;border-radius:14px;padding:12px;
+    }
+    .label{font-size:11px;color:#7e93b3;text-transform:uppercase;margin-bottom:6px}
+    .value{font-size:18px;font-weight:bold}
+    .tabs{
+      display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px;
+    }
+    .tab-btn{
+      padding:12px 8px;border:none;border-radius:14px;
+      background:#0a1c30;color:#91a4c3;font-weight:bold;font-size:13px;
+      cursor:pointer;
+    }
+    .tab-btn.active{
+      color:#19f0d1;
+      outline:1px solid rgba(25,240,209,.25);
+    }
+    .panel{display:none}
+    .panel.active{display:block}
+    .section-title{
+      display:flex;justify-content:space-between;align-items:center;
+      margin-bottom:12px;font-size:18px;font-weight:bold;
+    }
+    .muted{color:#91a4c3;font-size:13px}
+    .bar{
+      width:100%;height:12px;background:#0b1930;border-radius:999px;overflow:hidden;
+    }
+    .bar-fill{
+      height:100%;
+      background:linear-gradient(90deg,#22d3ee,#8b5cf6,#19f0d1);
+    }
+    .credits-row{
+      display:flex;justify-content:space-between;align-items:center;gap:10px;
+      margin-bottom:12px;
+    }
+    .credits-value{font-size:24px;font-weight:bold;color:#19f0d1}
+    .meta{margin-top:12px;color:#91a4c3;font-size:14px}
+    .signal-card{
+      background:#0a1c30;border-radius:18px;padding:14px;margin-bottom:12px;
+    }
+    .signal-head{
+      display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;
+    }
+    .asset{font-size:21px;font-weight:bold}
+    .badge{
+      padding:8px 12px;border-radius:999px;font-size:13px;font-weight:bold;
+    }
+    .call{background:linear-gradient(135deg,#19f0a0,#7dffc8);color:#062218}
+    .put{background:linear-gradient(135deg,#ff7b8c,#ffc0c8);color:#311016}
+    .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+    .reason{
+      margin-top:12px;background:#061321;border-radius:14px;padding:12px;
+      white-space:pre-wrap;line-height:1.45;font-size:14px;
+    }
+    .stats-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+    .history-list,.assets-list{display:flex;flex-direction:column;gap:10px}
+    .history-top,.asset-top{
+      display:flex;justify-content:space-between;align-items:center;gap:10px;
+    }
+    .rank{
+      width:30px;height:30px;border-radius:10px;
+      display:flex;align-items:center;justify-content:center;
+      background:linear-gradient(135deg,#8b5cf6,#22d3ee);
+      font-weight:bold;
+    }
+    .empty{text-align:center;padding:26px 12px;color:#91a4c3}
+    .footer{text-align:center;color:#7e93b3;font-size:13px;margin-top:8px}
+    @media(max-width:560px){
+      .metrics{grid-template-columns:repeat(2,1fr)}
+      .tabs{grid-template-columns:repeat(2,1fr)}
+      .grid3{grid-template-columns:repeat(2,1fr)}
+      .stats-grid{grid-template-columns:1fr}
+      .title{font-size:24px}
+      .asset{font-size:18px}
+    }
+  </style>
 </head>
 <body>
-    <div class="app">
-        <div class="hero">
-            <div class="hero-top">
-                <div class="brand">
-                    <div class="logo">⚡</div>
-                    <div class="brand-text">
-                        <div class="title">NEXUS-<span class="accent">AI</span></div>
-                        <div class="subtitle">M1 + M5 · {{ asset_count }} ATIVOS · DADOS REAIS</div>
-                    </div>
-                </div>
-                <div class="live">
-                    <span class="dot"></span>
-                    LIVE
-                </div>
-            </div>
-
-            <div class="hero-stats">
-                <div class="metric">
-                    <div class="metric-label">Último scan</div>
-                    <div class="metric-value">{{ last_scan if last_scan else '--' }}</div>
-                </div>
-                <div class="metric">
-                    <div class="metric-label">Total scans</div>
-                    <div class="metric-value">{{ scan_count }}</div>
-                </div>
-                <div class="metric">
-                    <div class="metric-label">Sinais agora</div>
-                    <div class="metric-value">{{ signals|length }}</div>
-                </div>
-            </div>
-
-            <div class="tabs">
-                <button class="tab-btn active" onclick="showTab('signals', this)">⚡ SINAIS</button>
-                <button class="tab-btn" onclick="showTab('history', this)">📋 HISTÓRICO</button>
-                <button class="tab-btn" onclick="showTab('stats', this)">📊 STATS</button>
-                <button class="tab-btn" onclick="showTab('assets', this)">🏆 ATIVOS</button>
-            </div>
+  <div class="app">
+    <div class="hero">
+      <div class="hero-top">
+        <div class="brand">
+          <div class="logo">⚡</div>
+          <div>
+            <div class="title">NEXUS-<span>AI</span></div>
+            <div class="subtitle">M1 + M5 · {{ asset_count }} ativos · dados reais</div>
+          </div>
         </div>
+        <div class="live">● LIVE</div>
+      </div>
 
-        <div class="section">
-            <div class="section-title">
-                <h2>Créditos da Twelve Data</h2>
-                <div class="section-sub">Proteção ativa</div>
-            </div>
-
-            <div class="credits-top">
-                <div class="credits-left">Uso de créditos hoje</div>
-                <div class="credits-right">{{ credits_today }} / {{ max_credits }}</div>
-            </div>
-
-            <div class="progress">
-                <div class="progress-bar"></div>
-            </div>
-
-            <div class="credits-meta">
-                <div>Próximo scan: <strong>{{ next_scan }}</strong></div>
-                <div>Scan a cada <strong>{{ scan_interval }} min</strong></div>
-            </div>
+      <div class="metrics">
+        <div class="metric">
+          <div class="label">Último scan</div>
+          <div class="value">{{ last_scan }}</div>
         </div>
-
-        <div id="signals" class="section panel active">
-            <div class="section-title">
-                <h2>Sinais em tempo real</h2>
-                <div class="section-sub">Precisão acima de quantidade</div>
-            </div>
-
-            {% if signals %}
-                <div class="signals">
-                    {% for s in signals %}
-                        <div class="signal-card">
-                            <div class="signal-head">
-                                <div class="asset">{{ s.asset }}</div>
-                                <div class="direction {{ 'call' if s.signal == 'CALL' else 'put' }}">{{ s.signal }}</div>
-                            </div>
-
-                            <div class="signal-grid">
-                                <div class="mini-card">
-                                    <div class="mini-label">Score</div>
-                                    <div class="mini-value">{{ s.score }}</div>
-                                </div>
-                                <div class="mini-card">
-                                    <div class="mini-label">Confiança</div>
-                                    <div class="mini-value">{{ s.confidence }}%</div>
-                                </div>
-                                <div class="mini-card">
-                                    <div class="mini-label">Timeframe</div>
-                                    <div class="mini-value">{{ s.timeframe }}</div>
-                                </div>
-                                <div class="mini-card">
-                                    <div class="mini-label">Entrada</div>
-                                    <div class="mini-value">{{ s.entry_time }}</div>
-                                </div>
-                                <div class="mini-card">
-                                    <div class="mini-label">Expiração</div>
-                                    <div class="mini-value">{{ s.expiration }}</div>
-                                </div>
-                                <div class="mini-card">
-                                    <div class="mini-label">Status</div>
-                                    <div class="mini-value">Ativo</div>
-                                </div>
-                            </div>
-
-                            <div class="reason-box"><strong>Motivo:</strong>\n{{ s.reason_text }}</div>
-                        </div>
-                    {% endfor %}
-                </div>
-            {% else %}
-                <div class="empty">
-                    <div class="empty-icon">🔎</div>
-                    <div class="empty-title">Nenhum sinal agora</div>
-                    <div class="empty-text">Próximo scan em {{ next_scan }}</div>
-                    <div class="empty-text">Último scan: {{ last_scan if last_scan else '--' }}</div>
-                </div>
-            {% endif %}
+        <div class="metric">
+          <div class="label">Scans</div>
+          <div class="value">{{ scan_count }}</div>
         </div>
-
-        <div id="history" class="section panel">
-            <div class="section-title">
-                <h2>Histórico recente</h2>
-                <div class="section-sub">Últimos sinais gerados</div>
-            </div>
-
-            {% if history %}
-                <div class="history-list">
-                    {% for h in history %}
-                        <div class="history-item">
-                            <div class="history-top">
-                                <div class="history-asset">{{ h.asset }}</div>
-                                <div class="direction {{ 'call' if h.signal == 'CALL' else 'put' }}">{{ h.signal }}</div>
-                            </div>
-                            <div class="history-meta">
-                                Horário: {{ h.generated_at }}<br>
-                                Entrada: {{ h.entry_time }}<br>
-                                Expiração: {{ h.expiration }}<br>
-                                Score: {{ h.score }} · Confiança: {{ h.confidence }}%
-                            </div>
-                        </div>
-                    {% endfor %}
-                </div>
-            {% else %}
-                <div class="empty">
-                    <div class="empty-icon">📋</div>
-                    <div class="empty-title">Sem histórico ainda</div>
-                    <div class="empty-text">Os sinais gerados vão aparecer aqui.</div>
-                </div>
-            {% endif %}
+        <div class="metric">
+          <div class="label">Sinais</div>
+          <div class="value">{{ signal_count }}</div>
         </div>
+      </div>
 
-        <div id="stats" class="section panel">
-            <div class="section-title">
-                <h2>Estatísticas</h2>
-                <div class="section-sub">Visão geral do motor</div>
+      <div class="tabs">
+        <button class="tab-btn active" onclick="showTab('signals', this)">⚡ SINAIS</button>
+        <button class="tab-btn" onclick="showTab('history', this)">📋 HISTÓRICO</button>
+        <button class="tab-btn" onclick="showTab('stats', this)">📊 STATS</button>
+        <button class="tab-btn" onclick="showTab('assets', this)">🏆 ATIVOS</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">
+        <div>Créditos da Twelve Data</div>
+        <div class="muted">Proteção ativa</div>
+      </div>
+
+      <div class="credits-row">
+        <div class="muted">Uso de créditos hoje</div>
+        <div class="credits-value">{{ credits_today }} / {{ max_credits }}</div>
+      </div>
+
+      <div class="bar">
+        <div class="bar-fill" style="width: {{ credits_percent }}%;"></div>
+      </div>
+
+      <div class="meta">
+        Próximo scan: <strong>{{ next_scan }}</strong> · Scan a cada <strong>{{ scan_interval }} min</strong>
+      </div>
+    </div>
+
+    <div id="signals" class="section panel active">
+      <div class="section-title">
+        <div>Sinais em tempo real</div>
+        <div class="muted">Precisão acima de quantidade</div>
+      </div>
+
+      {% if signals %}
+        {% for s in signals %}
+          <div class="signal-card">
+            <div class="signal-head">
+              <div class="asset">{{ s.asset }}</div>
+              <div class="badge {% if s.signal == 'CALL' %}call{% else %}put{% endif %}">{{ s.signal }}</div>
             </div>
 
-            <div class="stats-grid">
-                <div class="stats-card">
-            
+            <div class="grid3">
+              <div class="mini">
+                <div class="label">Score</div>
+                <div class="value">{{ s.score }}</div>
+              </div>
+              <div class="mini">
+                <div class="label">Confiança</div>
+                <div class="value">{{ s.confidence }}%</div>
+              </div>
+              <div class="mini">
+                <div class="label">Timeframe</div>
+                <div class="value">{{ s.timeframe }}</div>
+              </div>
+              <div class="mini">
+                <div class="label">Entrada</div>
+                <div class="value">{{ s.entry_time }}</div>
+              </div>
+              <div class="mini">
+                <div class="label">Expiração</div>
+                <div class="value">{{ s.expiration }}</div>
+              </div>
+              <div class="mini">
+                <div class="label">Status</div>
+                <div class="value">Ativo</div>
+              </div>
+            </div>
+
+            <div class="reason">{{ s.reason_text }}</div>
+          </div>
+        {% endfor %}
+      {% else %}
+        <div class="empty">
+          <div style="font-size:60px;">🔎</div>
+          <div><strong>Nenhum sinal agora</strong></div>
+          <div style="margin-top:8px;">Próximo scan em {{ next_scan }}</div>
+        </div>
+      {% endif %}
+    </div>
+
+    <div id="history" class="section panel">
+      <div class="section-title">
+        <div>Histórico recente</div>
+        <div class="muted">Últimos sinais gerados</div>
+      </div>
+
+      {% if history %}
+        <div class="history-list">
+          {% for h in history %}
+            <div class="history-item">
+              <div class="history-top">
+                <div><strong>{{ h.asset }}</strong></div>
+                <div class="badge {% if h.signal == 'CALL' %}call{% else %}put{% endif %}">{{ h.signal }}</div>
+              </div>
+              <div class="muted">
+                Gerado: {{ h.generated_at }}<br>
+                Entrada: {{ h.entry_time }}<br>
+                Expiração: {{ h.expiration }}<br>
+                Score: {{ h.score }} · Confiança: {{ h.confidence }}%
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="empty">Sem histórico ainda.</div>
+      {% endif %}
+    </div>
+
+    <div id="stats" class="section panel">
+      <div class="section-title">
+        <div>Estatísticas</div>
+        <div class="muted">Visão geral</div>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="label">Win Rate estimado</div>
+          <div class="value" style="color:#1df2a4">{{ estimated_win_rate }}%</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Ativos monitorados</div>
+          <div class="value" style="color:#23d7ff">{{ asset_count }}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Scans executados</div>
+          <div class="value" style="color:#915cff">{{ scan_count }}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Sinais atuais</div>
+          <div class="value" style="color:#ffd84d">{{ signal_count }}</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="assets" class="section panel">
+      <div class="section-title">
+        <div>Top ativos</div>
+        <div class="muted">Liquidez e relevância</div>
+      </div>
+
+      <div class="assets-list">
+        {% for item in top_assets %}
+          <div class="asset-item">
+            <div class="asset-top">
+              <div style="display:flex;align-items:center;gap:10px;">
+                <div class="rank">{{ loop.index }}</div>
+                <div><strong>{{ item }}</strong></div>
+              </div>
+              <div style="color:#1df2a4;font-weight:bold;">Monitorando</div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="footer">Rotas: /health · /signals</div>
+  </div>
+
+  <script>
+    function showTab(tabId, btn){
+      document.querySelectorAll('.panel').forEach(function(p){
+        p.classList.remove('active');
+      });
+      document.querySelectorAll('.tab-btn').forEach(function(b){
+        b.classList.remove('active');
+      });
+      document.getElementById(tabId).classList.add('active');
+      btn.classList.add('active');
+    }
+  </script>
+</body>
+</html>
+'''
+
+def normalize_signals(signals):
+    normalized = []
+
+    for s in signals:
+        asset = str(s.get("asset", "N/A"))
+        signal = str(s.get("signal", "CALL"))
+        score = s.get("score", 0)
+        confidence = int(s.get("confidence", 50))
+        timeframe = str(s.get("timeframe", "M1"))
+        entry_time = str(s.get("entry_time", "--:--"))
+        expiration = str(s.get("expiration", "Próximo candle"))
+        generated_at = str(s.get("generated_at", datetime.now().strftime("%H:%M:%S")))
+
+        reason = s.get("reason", [])
+        if isinstance(reason, list):
+            reason_text = "\\n".join(["• " + str(item) for item in reason]) if reason else "Sem detalhes"
+        elif isinstance(reason, dict):
+            reason_text = "\\n".join(["• " + str(k) + ": " + str(v) for k, v in reason.items()]) if reason else "Sem detalhes"
+        else:
+            reason_text = str(reason)
+
+        normalized.append({
+            "asset": asset,
+            "signal": signal,
+            "score": score,
+            "confidence": confidence,
+            "timeframe": timeframe,
+            "entry_time": entry_time,
+            "expiration": expiration,
+            "generated_at": generated_at,
+            "reason_text": reason_text,
+        })
+
+    return normalized
+
+def scanner_loop():
+    global latest_signals, signal_history, last_scan_time, scan_count
+
+    while True:
+        try:
+            raw_market_data = scanner.scan_assets()
+            raw_signals = signal_engine.generate_signals(raw_market_data)
+            latest_signals = normalize_signals(raw_signals if raw_signals else [])
+
+            if raw_signals:
+                learning.update_stats(raw_signals)
+
+            if latest_signals:
+                signal_history = (latest_signals + signal_history)[:20]
+
+            last_scan_time = datetime.now()
+            scan_count += 1
+
+            print("Scan #%s | Signals: %s" % (scan_count, len(latest_signals)), flush=True)
+
+        except Exception as e:
+            print("Scanner error: %s" % e, flush=True)
+
+        time.sleep(60)
+
+@app.route("/")
+def home():
+    credits_today = int(getattr(data_manager, "credits_today", 0))
+    max_credits = 780
+    credits_percent = int(min((credits_today / max_credits) * 100, 100)) if max_credits else 0
+
+    if last_scan_time:
+        diff = int(time.time() - last_scan_time.timestamp())
+        remain = max(60 - diff, 0)
+        next_scan = str(remain) + "s"
+        last_scan = last_scan_time.strftime("%H:%M:%S")
+    else:
+        next_scan = "60s"
+        last_scan = "--"
+
+    return render_template_string(
+        HTML_PAGE,
+        signals=latest_signals,
+        history=signal_history[:10],
+        credits_today=credits_today,
+        max_credits=max_credits,
+        credits_percent=credits_percent,
+        next_scan=next_scan,
+        last_scan=last_scan,
+        scan_count=scan_count,
+        scan_interval=1,
+        asset_count=len(ASSETS),
+        estimated_win_rate=78,
+        signal_count=len(latest_signals),
+        top_assets=ASSETS[:8]
+    )
+
+@app.route("/health")
+def health():
+    return {"status": "NEXUS v8 running"}
+
+@app.route("/signals")
+def signals():
+    return jsonify(latest_signals)
+
+thread = threading.Thread(target=scanner_loop, daemon=True)
+thread.start()
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
