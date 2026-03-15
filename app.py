@@ -1,10 +1,10 @@
 import threading
 import time
 from flask import Flask, jsonify
-from core.scanner import MarketScanner
-from core.signal_engine import SignalEngine
-from data.data_manager import DataManager
-from learning.learning_engine import LearningEngine
+from scanner import MarketScanner
+from signal_engine import SignalEngine
+from data_manager import DataManager
+from learning_engine import LearningEngine
 
 app = Flask(__name__)
 
