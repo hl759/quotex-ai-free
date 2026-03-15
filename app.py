@@ -25,514 +25,355 @@ HTML_PAGE = """
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NEXUS-AI</title>
     <style>
-        :root{
-            --bg:#030814;
-            --bg-soft:#071325;
-            --card:#08182a;
-            --card-2:#0b1f36;
-            --line:rgba(59, 130, 246, .12);
-            --line-2:rgba(45, 212, 191, .14);
-            --text:#eef4ff;
-            --muted:#91a4c3;
-            --muted-2:#6f86aa;
-            --green:#1df2a4;
-            --cyan:#23d7ff;
-            --purple:#915cff;
-            --yellow:#ffd84d;
-            --red:#ff6b7a;
-            --shadow:0 12px 34px rgba(0,0,0,.34);
-            --radius-xl:24px;
-            --radius-lg:18px;
-            --radius-md:14px;
+        body {
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(180deg, #020814 0%, #041325 100%);
+            color: #ecf3ff;
+            font-family: Arial, sans-serif;
         }
 
-        *{
-            box-sizing:border-box;
-            -webkit-tap-highlight-color: transparent;
+        .container {
+            max-width: 760px;
+            margin: 0 auto;
+            padding: 14px;
         }
 
-        html, body{
-            margin:0;
-            padding:0;
-            background:
-                radial-gradient(circle at 15% 0%, rgba(145,92,255,.16), transparent 28%),
-                radial-gradient(circle at 100% 0%, rgba(35,215,255,.12), transparent 24%),
-                linear-gradient(180deg, #020712 0%, #04101d 42%, #030814 100%);
-            color:var(--text);
-            font-family: Inter, Arial, Helvetica, sans-serif;
-            min-height:100vh;
+        .hero {
+            background: linear-gradient(180deg, #071728 0%, #081d33 100%);
+            border: 1px solid rgba(0,255,200,0.12);
+            border-radius: 24px;
+            padding: 16px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.35);
         }
 
-        .app{
-            max-width:720px;
-            margin:0 auto;
-            padding:14px 14px 28px;
+        .hero-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
         }
 
-        .hero{
-            position:relative;
-            overflow:hidden;
-            background:linear-gradient(180deg, rgba(6,18,35,.96), rgba(6,18,35,.82));
-            border:1px solid rgba(35,215,255,.12);
-            border-radius:28px;
-            padding:16px;
-            box-shadow:var(--shadow);
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
         }
 
-        .hero::before{
-            content:"";
-            position:absolute;
-            inset:auto -40px -40px auto;
-            width:180px;
-            height:180px;
-            background:radial-gradient(circle, rgba(29,242,164,.12), transparent 60%);
-            pointer-events:none;
+        .logo {
+            width: 54px;
+            height: 54px;
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            background: linear-gradient(135deg, #7c4dff, #19f0d1);
         }
 
-        .hero-top{
-            display:flex;
-            justify-content:space-between;
-            align-items:center;
-            gap:12px;
+        .title {
+            font-size: 30px;
+            font-weight: 900;
+            line-height: 1;
         }
 
-        .brand{
-            display:flex;
-            align-items:center;
-            gap:12px;
-            min-width:0;
+        .title span {
+            color: #19f0d1;
         }
 
-        .logo{
-            width:54px;
-            height:54px;
-            border-radius:18px;
-            display:flex;
-            align-items:center;
-            justify-content:center;
-            background:linear-gradient(135deg, #6f4cff, #11dfc5);
-            box-shadow:
-                0 0 0 1px rgba(255,255,255,.06),
-                0 8px 20px rgba(17,223,197,.18);
-            font-size:26px;
-            flex-shrink:0;
+        .subtitle {
+            margin-top: 6px;
+            font-size: 12px;
+            color: #8ea3c2;
+            letter-spacing: 2px;
+            text-transform: uppercase;
         }
 
-        .brand-text{
-            min-width:0;
+        .live {
+            padding: 10px 14px;
+            border-radius: 999px;
+            background: rgba(20,60,50,0.45);
+            border: 1px solid rgba(25,240,209,0.24);
+            color: #9bffe5;
+            font-weight: bold;
+            font-size: 14px;
+            white-space: nowrap;
         }
 
-        .title{
-            font-weight:900;
-            font-size:30px;
-            line-height:1;
-            letter-spacing:.4px;
-            white-space:nowrap;
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-top: 14px;
         }
 
-        .title .accent{
-            color:var(--green);
+        .stat-card {
+            background: #0a1b31;
+            border: 1px solid rgba(255,255,255,0.05);
+            border-radius: 16px;
+            padding: 12px;
         }
 
-        .subtitle{
-            margin-top:6px;
-            color:var(--muted);
-            font-size:12px;
-            letter-spacing:2px;
-            text-transform:uppercase;
-            white-space:nowrap;
-            overflow:hidden;
-            text-overflow:ellipsis;
-            max-width:100%;
+        .stat-label {
+            font-size: 11px;
+            color: #7e93b3;
+            text-transform: uppercase;
+            margin-bottom: 6px;
         }
 
-        .live{
-            display:flex;
-            align-items:center;
-            gap:8px;
-            padding:10px 14px;
-            border-radius:999px;
-            background:rgba(8,32,30,.55);
-            border:1px solid rgba(29,242,164,.22);
-            color:#9efdda;
-            font-weight:800;
-            font-size:14px;
-            flex-shrink:0;
-            box-shadow:inset 0 0 14px rgba(29,242,164,.06);
+        .stat-value {
+            font-size: 18px;
+            font-weight: bold;
         }
 
-        .dot{
-            width:10px;
-            height:10px;
-            border-radius:50%;
-            background:var(--green);
-            box-shadow:0 0 12px var(--green);
+        .tabs {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin-top: 14px;
         }
 
-        .hero-stats{
-            display:grid;
-            grid-template-columns:1fr 1fr 1fr;
-            gap:10px;
-            margin-top:16px;
+        .tab {
+            text-align: center;
+            padding: 12px 8px;
+            border-radius: 14px;
+            background: #08182c;
+            color: #89a0c0;
+            border: 1px solid rgba(255,255,255,0.05);
+            font-size: 13px;
+            font-weight: bold;
         }
 
-        .metric{
-            background:rgba(10,24,43,.82);
-            border:1px solid rgba(35,215,255,.08);
-            border-radius:16px;
-            padding:12px;
+        .tab.active {
+            color: #19f0d1;
+            border-color: rgba(25,240,209,0.24);
         }
 
-        .metric-label{
-            color:var(--muted-2);
-            font-size:11px;
-            text-transform:uppercase;
-            letter-spacing:1px;
-            margin-bottom:6px;
+        .section {
+            margin-top: 16px;
+            background: linear-gradient(180deg, #071728 0%, #08182d 100%);
+            border: 1px solid rgba(0,255,200,0.10);
+            border-radius: 22px;
+            padding: 16px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.28);
         }
 
-        .metric-value{
-            font-size:18px;
-            font-weight:800;
-            color:var(--text);
+        .section-title {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 12px;
         }
 
-        .tabs{
-            display:grid;
-            grid-template-columns:repeat(4,1fr);
-            gap:10px;
-            margin-top:14px;
+        .credits-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
         }
 
-        .tab{
-            text-align:center;
-            padding:13px 8px;
-            border-radius:16px;
-            background:rgba(8,22,38,.86);
-            border:1px solid rgba(145,92,255,.08);
-            color:var(--muted);
-            font-weight:800;
-            font-size:13px;
+        .credits-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #19f0d1;
         }
 
-        .tab.active{
-            color:var(--green);
-            border-color:rgba(29,242,164,.24);
-            box-shadow:inset 0 -3px 0 var(--green);
+        .bar {
+            width: 100%;
+            height: 12px;
+            background: #0b1930;
+            border-radius: 999px;
+            overflow: hidden;
         }
 
-        .section{
-            margin-top:16px;
-            background:linear-gradient(180deg, rgba(7,19,37,.94), rgba(6,17,31,.94));
-            border:1px solid rgba(35,215,255,.1);
-            border-radius:24px;
-            padding:16px;
-            box-shadow:var(--shadow);
+        .bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #22d3ee, #8b5cf6, #19f0d1);
         }
 
-        .section-title{
-            display:flex;
-            align-items:center;
-            justify-content:space-between;
-            gap:10px;
-            margin-bottom:14px;
+        .credits-meta {
+            margin-top: 12px;
+            font-size: 14px;
+            color: #8ea3c2;
         }
 
-        .section-title h2{
-            margin:0;
-            font-size:18px;
-            letter-spacing:.2px;
+        .signal-card {
+            background: #0a1c30;
+            border: 1px solid rgba(255,255,255,0.05);
+            border-radius: 18px;
+            padding: 14px;
+            margin-bottom: 12px;
         }
 
-        .section-sub{
-            color:var(--muted);
-            font-size:13px;
+        .signal-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
         }
 
-        .credits-top{
-            display:flex;
-            justify-content:space-between;
-            align-items:center;
-            gap:10px;
-            margin-bottom:12px;
+        .asset {
+            font-size: 22px;
+            font-weight: bold;
         }
 
-        .credits-left{
-            color:var(--muted);
-            font-size:14px;
+        .badge {
+            padding: 8px 12px;
+            border-radius: 999px;
+            font-size: 13px;
+            font-weight: bold;
         }
 
-        .credits-right{
-            font-size:24px;
-            font-weight:900;
-            color:var(--green);
+        .call {
+            background: linear-gradient(135deg, #19f0a0, #7dffc8);
+            color: #062218;
         }
 
-        .progress{
-            height:12px;
-            background:#0b1930;
-            border-radius:999px;
-            overflow:hidden;
-            border:1px solid rgba(35,215,255,.08);
+        .put {
+            background: linear-gradient(135deg, #ff7b8c, #ffc0c8);
+            color: #311016;
         }
 
-        .progress-bar{
-            height:100%;
-            width:{{ credits_percent }}%;
-            background:linear-gradient(90deg, #22d3ee, #8b5cf6, #1df2a4);
-            box-shadow:0 0 18px rgba(35,215,255,.25);
+        .signal-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
         }
 
-        .credits-meta{
-            margin-top:12px;
-            display:flex;
-            justify-content:space-between;
-            gap:10px;
-            color:var(--muted);
-            font-size:14px;
-            flex-wrap:wrap;
+        .mini {
+            background: #09192a;
+            border-radius: 14px;
+            padding: 12px;
         }
 
-        .credits-meta strong{
-            color:var(--purple);
+        .mini-label {
+            font-size: 11px;
+            color: #7e93b3;
+            text-transform: uppercase;
+            margin-bottom: 6px;
         }
 
-        .empty{
-            text-align:center;
-            padding:34px 8px 20px;
+        .mini-value {
+            font-size: 17px;
+            font-weight: bold;
         }
 
-        .empty-icon{
-            font-size:70px;
-            margin-bottom:12px;
+        .reason {
+            margin-top: 12px;
+            background: #061321;
+            border-radius: 14px;
+            padding: 12px;
+            color: #d7e3f8;
+            font-size: 14px;
+            line-height: 1.45;
+            white-space: pre-wrap;
+            word-break: break-word;
         }
 
-        .empty-title{
-            font-size:20px;
-            font-weight:900;
-            margin-bottom:8px;
+        .empty {
+            text-align: center;
+            padding: 34px 12px;
+            color: #8ea3c2;
         }
 
-        .empty-text{
-            color:var(--muted);
-            font-size:15px;
-            margin:4px 0;
+        .empty .icon {
+            font-size: 70px;
+            margin-bottom: 10px;
         }
 
-        .signals{
-            display:flex;
-            flex-direction:column;
-            gap:14px;
+        .ranking-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #09192a;
+            border-radius: 14px;
+            padding: 12px;
+            margin-bottom: 10px;
         }
 
-        .signal-card{
-            background:linear-gradient(180deg, rgba(10,27,47,.98), rgba(7,20,35,.98));
-            border:1px solid rgba(35,215,255,.1);
-            border-radius:20px;
-            padding:15px;
+        .ranking-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
 
-        .signal-head{
-            display:flex;
-            justify-content:space-between;
-            align-items:center;
-            gap:12px;
-            margin-bottom:12px;
+        .rank-num {
+            width: 30px;
+            height: 30px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #8b5cf6, #22d3ee);
+            font-weight: bold;
         }
 
-        .asset{
-            font-size:22px;
-            font-weight:900;
-            letter-spacing:.2px;
+        .ranking-status {
+            color: #19f0d1;
+            font-size: 14px;
+            font-weight: bold;
         }
 
-        .direction{
-            padding:9px 14px;
-            border-radius:999px;
-            font-weight:900;
-            font-size:13px;
-            letter-spacing:.4px;
+        .footer {
+            margin-top: 16px;
+            text-align: center;
+            color: #7e93b3;
+            font-size: 13px;
         }
 
-        .direction.call{
-            background:linear-gradient(135deg, #1df2a4, #7dffc8);
-            color:#062116;
-        }
+        @media (max-width: 560px) {
+            .title {
+                font-size: 26px;
+            }
 
-        .direction.put{
-            background:linear-gradient(135deg, #ff7c90, #ffc0c9);
-            color:#341017;
-        }
+            .stats {
+                grid-template-columns: repeat(2, 1fr);
+            }
 
-        .signal-grid{
-            display:grid;
-            grid-template-columns:1fr 1fr 1fr;
-            gap:10px;
-        }
+            .tabs {
+                grid-template-columns: repeat(2, 1fr);
+            }
 
-        .mini-card{
-            background:#09192b;
-            border:1px solid rgba(35,215,255,.06);
-            border-radius:14px;
-            padding:12px;
-        }
+            .signal-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
 
-        .mini-label{
-            color:var(--muted-2);
-            font-size:11px;
-            text-transform:uppercase;
-            letter-spacing:1px;
-            margin-bottom:6px;
-        }
-
-        .mini-value{
-            font-size:17px;
-            font-weight:800;
-        }
-
-        .reason-box{
-            margin-top:12px;
-            background:#071423;
-            border:1px solid rgba(35,215,255,.06);
-            border-radius:14px;
-            padding:12px;
-            color:#dce7ff;
-            line-height:1.45;
-            font-size:14px;
-            word-break:break-word;
-        }
-
-        .stats-grid{
-            display:grid;
-            grid-template-columns:1fr 1fr;
-            gap:12px;
-        }
-
-        .stats-card{
-            background:linear-gradient(180deg, rgba(9,23,39,.94), rgba(7,18,32,.94));
-            border:1px solid rgba(145,92,255,.08);
-            border-radius:18px;
-            padding:14px;
-        }
-
-        .stats-label{
-            color:var(--muted);
-            font-size:12px;
-            text-transform:uppercase;
-            letter-spacing:1px;
-            margin-bottom:8px;
-        }
-
-        .stats-value{
-            font-size:24px;
-            font-weight:900;
-        }
-
-        .accent-green{color:var(--green)}
-        .accent-purple{color:var(--purple)}
-        .accent-cyan{color:var(--cyan)}
-        .accent-yellow{color:var(--yellow)}
-
-        .ranking{
-            display:flex;
-            flex-direction:column;
-            gap:10px;
-        }
-
-        .rank-item{
-            display:flex;
-            align-items:center;
-            justify-content:space-between;
-            gap:12px;
-            background:#08192c;
-            border:1px solid rgba(35,215,255,.06);
-            border-radius:16px;
-            padding:12px;
-        }
-
-        .rank-left{
-            display:flex;
-            align-items:center;
-            gap:12px;
-        }
-
-        .rank-num{
-            width:32px;
-            height:32px;
-            border-radius:12px;
-            display:flex;
-            align-items:center;
-            justify-content:center;
-            background:linear-gradient(135deg, #8b5cf6, #22d3ee);
-            color:white;
-            font-weight:900;
-            font-size:14px;
-        }
-
-        .rank-name{
-            font-weight:800;
-            font-size:15px;
-        }
-
-        .rank-right{
-            color:var(--green);
-            font-weight:800;
-            font-size:14px;
-        }
-
-        .footer{
-            margin-top:16px;
-            text-align:center;
-            color:var(--muted);
-            font-size:13px;
-            padding-bottom:8px;
-        }
-
-        @media (max-width:560px){
-            .app{padding:12px 12px 28px}
-            .title{font-size:26px}
-            .subtitle{font-size:11px; letter-spacing:1.4px}
-            .hero-stats{grid-template-columns:1fr 1fr}
-            .tabs{grid-template-columns:1fr 1fr}
-            .signal-grid{grid-template-columns:1fr 1fr}
-            .stats-grid{grid-template-columns:1fr}
-            .asset{font-size:19px}
-            .credits-right{font-size:20px}
+            .asset {
+                font-size: 19px;
+            }
         }
     </style>
 </head>
 <body>
-    <div class="app">
+    <div class="container">
         <div class="hero">
             <div class="hero-top">
                 <div class="brand">
                     <div class="logo">⚡</div>
-                    <div class="brand-text">
-                        <div class="title">NEXUS-<span class="accent">AI</span></div>
-                        <div class="subtitle">M1 + M5 · {{ asset_count }} ATIVOS · DADOS REAIS</div>
+                    <div>
+                        <div class="title">NEXUS-<span>AI</span></div>
+                        <div class="subtitle">M1 + M5 · {{ asset_count }} ativos · dados reais</div>
                     </div>
                 </div>
-                <div class="live">
-                    <span class="dot"></span>
-                    LIVE
-                </div>
+                <div class="live">● LIVE</div>
             </div>
 
-            <div class="hero-stats">
-                <div class="metric">
-                    <div class="metric-label">Último scan</div>
-                    <div class="metric-value">{{ last_scan if last_scan else '--' }}</div>
+            <div class="stats">
+                <div class="stat-card">
+                    <div class="stat-label">Último scan</div>
+                    <div class="stat-value">{{ last_scan }}</div>
                 </div>
-                <div class="metric">
-                    <div class="metric-label">Total scans</div>
-                    <div class="metric-value">{{ scan_count }}</div>
+                <div class="stat-card">
+                    <div class="stat-label">Scans</div>
+                    <div class="stat-value">{{ scan_count }}</div>
                 </div>
-                <div class="metric">
-                    <div class="metric-label">Sinais agora</div>
-                    <div class="metric-value">{{ signals|length }}</div>
+                <div class="stat-card">
+                    <div class="stat-label">Sinais</div>
+                    <div class="stat-value">{{ signal_count }}</div>
                 </div>
             </div>
 
@@ -545,121 +386,115 @@ HTML_PAGE = """
         </div>
 
         <div class="section">
-            <div class="section-title">
-                <h2>Créditos da Twelve Data</h2>
-                <div class="section-sub">Proteção ativa</div>
-            </div>
+            <div class="section-title">Créditos da Twelve Data</div>
 
             <div class="credits-top">
-                <div class="credits-left">Uso de créditos hoje</div>
-                <div class="credits-right">{{ credits_today }} / {{ max_credits }}</div>
+                <div>Uso de créditos hoje</div>
+                <div class="credits-value">{{ credits_today }} / {{ max_credits }}</div>
             </div>
 
-            <div class="progress">
-                <div class="progress-bar"></div>
+            <div class="bar">
+                <div class="bar-fill" style="width: {{ credits_percent }}%;"></div>
             </div>
 
             <div class="credits-meta">
-                <div>Próximo scan: <strong>{{ next_scan }}</strong></div>
-                <div>Scan a cada <strong>{{ scan_interval }} min</strong></div>
+                Próximo scan: <strong>{{ next_scan }}</strong> · Scan a cada <strong>{{ scan_interval }} min</strong>
             </div>
         </div>
 
         <div class="section">
-            <div class="section-title">
-                <h2>Sinais em tempo real</h2>
-                <div class="section-sub">Precisão acima de quantidade</div>
-            </div>
+            <div class="section-title">Sinais em tempo real</div>
 
             {% if signals %}
-                <div class="signals">
-                    {% for s in signals %}
-                        <div class="signal-card">
-                            <div class="signal-head">
-                                <div class="asset">{{ s.asset }}</div>
-                                <div class="direction {{ 'call' if s.signal == 'CALL' else 'put' }}">{{ s.signal }}</div>
-                            </div>
-
-                            <div class="signal-grid">
-                                <div class="mini-card">
-                                    <div class="mini-label">Score</div>
-                                    <div class="mini-value">{{ s.score }}</div>
-                                </div>
-                                <div class="mini-card">
-                                    <div class="mini-label">Timeframe</div>
-                                    <div class="mini-value">M1</div>
-                                </div>
-                                <div class="mini-card">
-                                    <div class="mini-label">Status</div>
-                                    <div class="mini-value">{{ 'Ativo' if s.signal else 'Aguardando' }}</div>
-                                </div>
-                            </div>
-
-                            <div class="reason-box">
-                                <strong>Motivo:</strong><br>
-                                {{ s.reason }}
+                {% for s in signals %}
+                    <div class="signal-card">
+                        <div class="signal-head">
+                            <div class="asset">{{ s.asset }}</div>
+                            <div class="badge {% if s.signal == 'CALL' %}call{% else %}put{% endif %}">
+                                {{ s.signal }}
                             </div>
                         </div>
-                    {% endfor %}
-                </div>
+
+                        <div class="signal-grid">
+                            <div class="mini">
+                                <div class="mini-label">Score</div>
+                                <div class="mini-value">{{ s.score }}</div>
+                            </div>
+                            <div class="mini">
+                                <div class="mini-label">Timeframe</div>
+                                <div class="mini-value">M1</div>
+                            </div>
+                            <div class="mini">
+                                <div class="mini-label">Confiança</div>
+                                <div class="mini-value">{{ s.confidence }}%</div>
+                            </div>
+                        </div>
+
+                        <div class="reason">{{ s.reason_text }}</div>
+                    </div>
+                {% endfor %}
             {% else %}
                 <div class="empty">
-                    <div class="empty-icon">🔎</div>
-                    <div class="empty-title">Nenhum sinal agora</div>
-                    <div class="empty-text">Próximo scan em {{ next_scan }}</div>
-                    <div class="empty-text">Último scan: {{ last_scan if last_scan else '--' }}</div>
+                    <div class="icon">🔎</div>
+                    <div><strong>Nenhum sinal agora</strong></div>
+                    <div style="margin-top:8px;">Próximo scan em {{ next_scan }}</div>
                 </div>
             {% endif %}
         </div>
 
-        <div class="stats-grid">
-            <div class="section stats-card">
-                <div class="stats-label">Win Rate estimado</div>
-                <div class="stats-value accent-green">{{ estimated_win_rate }}%</div>
-            </div>
-
-            <div class="section stats-card">
-                <div class="stats-label">Ativos monitorados</div>
-                <div class="stats-value accent-cyan">{{ asset_count }}</div>
-            </div>
-
-            <div class="section stats-card">
-                <div class="stats-label">Scans executados</div>
-                <div class="stats-value accent-purple">{{ scan_count }}</div>
-            </div>
-
-            <div class="section stats-card">
-                <div class="stats-label">Sinais atuais</div>
-                <div class="stats-value accent-yellow">{{ signals|length }}</div>
-            </div>
-        </div>
-
         <div class="section">
-            <div class="section-title">
-                <h2>Top ativos</h2>
-                <div class="section-sub">Liquidez e relevância</div>
-            </div>
+            <div class="section-title">Top ativos</div>
 
-            <div class="ranking">
-                {% for item in top_assets %}
-                    <div class="rank-item">
-                        <div class="rank-left">
-                            <div class="rank-num">{{ loop.index }}</div>
-                            <div class="rank-name">{{ item }}</div>
-                        </div>
-                        <div class="rank-right">Monitorando</div>
+            {% for item in top_assets %}
+                <div class="ranking-item">
+                    <div class="ranking-left">
+                        <div class="rank-num">{{ loop.index }}</div>
+                        <div>{{ item }}</div>
                     </div>
-                {% endfor %}
-            </div>
+                    <div class="ranking-status">Monitorando</div>
+                </div>
+            {% endfor %}
         </div>
 
         <div class="footer">
-            Rotas disponíveis: /health · /signals
+            Rotas: /health · /signals
         </div>
     </div>
 </body>
 </html>
 """
+
+def normalize_signals(signals):
+    normalized = []
+
+    for s in signals:
+        asset = str(s.get("asset", "N/A"))
+        signal = str(s.get("signal", "CALL"))
+        score = s.get("score", 0)
+
+        try:
+            confidence = int(min(max(float(score) * 20, 50), 99))
+        except Exception:
+            confidence = 50
+
+        reason = s.get("reason", {})
+        if isinstance(reason, dict):
+            reason_lines = []
+            for k, v in reason.items():
+                reason_lines.append(f"{k}: {v}")
+            reason_text = "\\n".join(reason_lines) if reason_lines else "Sem detalhes"
+        else:
+            reason_text = str(reason)
+
+        normalized.append({
+            "asset": asset,
+            "signal": signal,
+            "score": score,
+            "confidence": confidence,
+            "reason_text": reason_text,
+        })
+
+    return normalized
 
 def scanner_loop():
     global latest_signals, last_scan_time, scan_count
@@ -667,12 +502,11 @@ def scanner_loop():
     while True:
         try:
             market_data = scanner.scan_assets()
-            signals = signal_engine.generate_signals(market_data)
+            raw_signals = signal_engine.generate_signals(market_data)
+            latest_signals = normalize_signals(raw_signals if raw_signals else [])
 
-            latest_signals = signals if signals else []
-
-            if signals:
-                learning.update_stats(signals)
+            if latest_signals:
+                learning.update_stats(raw_signals)
 
             last_scan_time = datetime.now()
             scan_count += 1
@@ -686,9 +520,9 @@ def scanner_loop():
 
 @app.route("/")
 def home():
-    credits_today = getattr(data_manager, "credits_today", 0)
+    credits_today = int(getattr(data_manager, "credits_today", 0))
     max_credits = 780
-    credits_percent = min((credits_today / max_credits) * 100, 100) if max_credits else 0
+    credits_percent = int(min((credits_today / max_credits) * 100, 100)) if max_credits else 0
 
     if last_scan_time:
         diff = int(time.time() - last_scan_time.timestamp())
@@ -697,4 +531,33 @@ def home():
         last_scan = last_scan_time.strftime("%H:%M:%S")
     else:
         next_scan = "60s"
-        las
+        last_scan = "--"
+
+    return render_template_string(
+        HTML_PAGE,
+        signals=latest_signals,
+        credits_today=credits_today,
+        max_credits=max_credits,
+        credits_percent=credits_percent,
+        next_scan=next_scan,
+        last_scan=last_scan,
+        scan_count=scan_count,
+        scan_interval=1,
+        asset_count=len(ASSETS),
+        signal_count=len(latest_signals),
+        top_assets=ASSETS[:5]
+    )
+
+@app.route("/health")
+def health():
+    return {"status": "NEXUS v8 running"}
+
+@app.route("/signals")
+def signals():
+    return jsonify(latest_signals)
+
+thread = threading.Thread(target=scanner_loop, daemon=True)
+thread.start()
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
