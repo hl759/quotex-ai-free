@@ -27,4 +27,4 @@ class MarketScanner:
             })
 
         return results
-        
+
