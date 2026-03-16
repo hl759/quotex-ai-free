@@ -242,4 +242,5 @@ class DataManager:
                 }
                 for i, item in enumerate(self.key_usage)
             ]
-    }
+            }
+            
