@@ -5,7 +5,6 @@ class LearningEngine:
         self.journal = JournalManager()
 
     def update_stats(self, signals):
-        # mantém compatibilidade com o app atual
         return
 
     def register_result(self, signal, result_data):
