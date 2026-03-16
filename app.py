@@ -15,6 +15,133 @@ from config import ASSETS, SCAN_INTERVAL_SECONDS
 
 app = Flask(__name__)
 
+data_manager = DataManager()
+learning = LearningEngine()
+scanner = MarketScanner(data_manager)
+signal_engine = SignalEngine(learning)
+result_evaluator = ResultEvaluator()
+journal = JournalManager()
+
+STATE_DIR = "/tmp/nexus_state"
+LATEST_SIGNALS_FILE = os.path.join(STATE_DIR, "latest_signals.json")
+SIGNAL_HISTORY_FILE = os.path.join(STATE_DIR, "history.json")
+META_FILE = os.path.join(STATE_DIR, "meta.json")
+
+os.makedirs(STATE_DIR, exist_ok=True)
+
+scan_count = 0
+last_scan_time = None
+
+
+def read_json(path, default):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+
+def write_json(path, data):
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+    os.replace(tmp, path)
+
+
+def normalize_signals(signals):
+    normalized = []
+
+    for s in signals:
+        analysis = datetime.utcnow() - timedelta(hours=3)
+        entry = analysis + timedelta(minutes=1)
+        expiration = entry + timedelta(minutes=1)
+
+        reason = s.get("reason", [])
+        if isinstance(reason, list):
+            reason_text = "\n".join(["• " + str(r) for r in reason]) if reason else "Sem detalhes"
+        else:
+            reason_text = str(reason)
+
+        normalized.append({
+            "asset": s.get("asset"),
+            "signal": s.get("signal"),
+            "score": s.get("score", 0),
+            "confidence": s.get("confidence", 50),
+            "provider": s.get("provider", "auto"),
+            "analysis_time": analysis.strftime("%H:%M"),
+            "entry_time": entry.strftime("%H:%M"),
+            "expiration": expiration.strftime("%H:%M"),
+            "reason_text": reason_text
+        })
+
+    return normalized
+
+
+def save_state(signals, history, scan_time, scans):
+    write_json(LATEST_SIGNALS_FILE, signals)
+    write_json(SIGNAL_HISTORY_FILE, history[:50])
+    write_json(META_FILE, {
+        "last_scan": scan_time.strftime("%H:%M:%S"),
+        "scan_count": scans
+    })
+
+
+def load_state():
+    signals = read_json(LATEST_SIGNALS_FILE, [])
+    history = read_json(SIGNAL_HISTORY_FILE, [])
+    meta = read_json(META_FILE, {"last_scan": "--", "scan_count": 0})
+    return signals, history, meta
+
+
+def scanner_loop():
+    global scan_count, last_scan_time
+
+    while True:
+        try:
+            market = scanner.scan_assets()
+            raw_signals = signal_engine.generate_signals(market)
+            signals = normalize_signals(raw_signals if raw_signals else [])
+
+            if raw_signals:
+                learning.update_stats(raw_signals)
+
+                for signal in raw_signals:
+                    matched_asset = None
+
+                    for item in market:
+                        if item.get("asset") == signal.get("asset"):
+                            matched_asset = item
+                            break
+
+                    if matched_asset:
+                        result_data = result_evaluator.evaluate(signal, matched_asset.get("candles", []))
+                        if result_data:
+                            learning.register_result(signal, result_data)
+
+            history = read_json(SIGNAL_HISTORY_FILE, [])
+
+            if signals:
+                history = signals + history
+
+            scan_count += 1
+            last_scan_time = datetime.utcnow
+import json
+import os
+import threading
+import time
+from datetime import datetime, timedelta
+from flask import Flask, jsonify, render_template_string
+
+from scanner import MarketScanner
+from signal_engine import SignalEngine
+from data_manager import DataManager
+from learning_engine import LearningEngine
+from result_evaluator import ResultEvaluator
+from journal_manager import JournalManager
+from config import ASSETS, SCAN_INTERVAL_SECONDS
+
+app = Flask(__name__)
+
 # ================================
 # INICIALIZAÇÃO
 # ================================
