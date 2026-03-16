@@ -181,6 +181,26 @@ def scanner_loop():
             if raw_signals:
                 learning.update_stats(raw_signals)
 
+                for signal in raw_signals:
+                    matched_asset = None
+                    for item in raw_market_data:
+                        if item.get("asset") == signal.get("asset"):
+                            matched_asset = item
+                            break
+
+                    if matched_asset:
+                        result_data = result_evaluator.evaluate(signal, matched_asset.get("candles", []))
+                        if result_data:
+                            learning.register_result(signal, result_data)
+                            print(
+                                "Result evaluated | %s | %s | %s" % (
+                                    signal.get("asset"),
+                                    signal.get("signal"),
+                                    result_data.get("result")
+                                ),
+                                flush=True
+                            )
+
             current_history = read_json_file(SIGNAL_HISTORY_FILE, [])
             if normalized:
                 current_history = (normalized + current_history)[:20]
@@ -195,8 +215,6 @@ def scanner_loop():
             print("Scanner error: %s" % e, flush=True)
 
         time.sleep(SCAN_INTERVAL_SECONDS)
-
-@app.route("/")
 def home():
     signals, _, meta = load_state()
     usage = data_manager.get_usage_snapshot()
