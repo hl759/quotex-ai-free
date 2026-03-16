@@ -2,7 +2,7 @@ import json
 import os
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask import Flask, jsonify, render_template_string
 
 from scanner import MarketScanner
@@ -15,12 +15,25 @@ from config import ASSETS, SCAN_INTERVAL_SECONDS
 
 app = Flask(__name__)
 
+# =========================
+# INICIALIZAÇÃO CORRETA
+# =========================
+
 data_manager = DataManager()
-scanner = MarketScanner(data_manager)
-signal_engine = SignalEngine()
+
 learning = LearningEngine()
+
+scanner = MarketScanner(data_manager)
+
+signal_engine = SignalEngine(learning)
+
 result_evaluator = ResultEvaluator()
+
 journal = JournalManager()
+
+# =========================
+# ESTADO
+# =========================
 
 STATE_DIR = "/tmp/nexus_state"
 LATEST_SIGNALS_FILE = os.path.join(STATE_DIR, "latest_signals.json")
@@ -32,193 +45,132 @@ os.makedirs(STATE_DIR, exist_ok=True)
 scan_count = 0
 last_scan_time = None
 
-HTML_PAGE = """
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>NEXUS-AI v10.1</title>
-  <style>
-    body{margin:0;font-family:Arial,sans-serif;background:#06111f;color:#eef4ff}
-    .wrap{max-width:760px;margin:0 auto;padding:16px}
-    .card{background:#0b1b30;border:1px solid rgba(0,255,200,.12);border-radius:20px;padding:16px;margin-bottom:16px}
-    .title{font-size:28px;font-weight:900}
-    .title span{color:#19f0d1}
-    .muted{color:#91a4c3}
-    .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-top:16px}
-    .item{background:#10233c;border-radius:14px;padding:12px}
-    .label{font-size:12px;color:#91a4c3;text-transform:uppercase;margin-bottom:6px}
-    .value{font-size:22px;font-weight:800}
-    .signal{background:#10233c;border-radius:16px;padding:14px;margin-top:12px}
-    .badge{display:inline-block;padding:8px 12px;border-radius:999px;font-weight:800;font-size:13px}
-    .call{background:#1df2a4;color:#062116}
-    .put{background:#ff7b8c;color:#311016}
-    pre{white-space:pre-wrap;word-break:break-word}
-    .row{margin-top:8px;line-height:1.5}
-    @media(max-width:560px){.grid{grid-template-columns:1fr 1fr}.title{font-size:24px}}
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <div class="card">
-      <div class="title">NEXUS-<span>AI</span> v10.1</div>
-      <div class="muted">AUTO-LEARNING ESTÁVEL</div>
-
-      <div class="grid">
-        <div class="item">
-          <div class="label">Último scan</div>
-          <div class="value">{{ last_scan }}</div>
-        </div>
-        <div class="item">
-          <div class="label">Scans</div>
-          <div class="value">{{ scan_count }}</div>
-        </div>
-        <div class="item">
-          <div class="label">Sinais</div>
-          <div class="value">{{ signal_count }}</div>
-        </div>
-        <div class="item">
-          <div class="label">Ativos</div>
-          <div class="value">{{ asset_count }}</div>
-        </div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="label">Aprendizado</div>
-      <div class="row muted">
-        Total de operações avaliadas: <strong>{{ learning_stats.total }}</strong><br>
-        Wins: <strong>{{ learning_stats.wins }}</strong><br>
-        Loss: <strong>{{ learning_stats.loss }}</strong><br>
-        Win rate: <strong>{{ learning_stats.winrate }}%</strong>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="label">Status das APIs</div>
-      <div class="row muted">
-        Twelve congelada: <strong>{{ "SIM" if usage.twelve_frozen else "NÃO" }}</strong><br>
-        Twelve pausa minuto: <strong>{{ "SIM" if usage.twelve_minute_paused else "NÃO" }}</strong><br>
-        Finnhub congelada: <strong>{{ "SIM" if usage.finnhub_frozen else "NÃO" }}</strong><br>
-        Alpha congelada: <strong>{{ "SIM" if usage.alpha_frozen else "NÃO" }}</strong>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="label">Sinais atuais</div>
-      {% if signals %}
-        {% for s in signals %}
-          <div class="signal">
-            <strong>{{ s.asset }}</strong>
-            <div style="margin:8px 0;">
-              <span class="badge {% if s.signal == 'CALL' %}call{% else %}put{% endif %}">{{ s.signal }}</span>
-            </div>
-            Análise: {{ s.analysis_time }}<br>
-            Entrada: {{ s.entry_time }}<br>
-            Expiração: {{ s.expiration }}<br>
-            Score: {{ s.score }} · Confiança: {{ s.confidence }}% · Fonte: {{ s.provider }}
-            <pre>{{ s.reason_text }}</pre>
-          </div>
-        {% endfor %}
-      {% else %}
-        <div class="muted">Nenhum sinal disponível agora.</div>
-      {% endif %}
-    </div>
-
-    <div class="card">
-      <div class="label">Melhores ativos</div>
-      {% if best_assets %}
-        {% for item in best_assets %}
-          <div class="row muted">
-            <strong>{{ item.asset }}</strong> · Win rate: <strong>{{ item.winrate }}%</strong> · Trades: <strong>{{ item.total }}</strong>
-          </div>
-        {% endfor %}
-      {% else %}
-        <div class="muted">Ainda sem dados suficientes.</div>
-      {% endif %}
-    </div>
-  </div>
-</body>
-</html>
-"""
+# =========================
+# FUNÇÕES DE ARQUIVO
+# =========================
 
 def read_json_file(path, default):
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, "r") as f:
             return json.load(f)
-    except Exception:
+    except:
         return default
 
 def write_json_file(path, data):
-    tmp_path = path + ".tmp"
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False)
-    os.replace(tmp_path, path)
+    with open(path, "w") as f:
+        json.dump(data, f)
+
+# =========================
+# NORMALIZAÇÃO DE SINAIS
+# =========================
 
 def normalize_signals(signals):
+
     normalized = []
+
     for s in signals:
+
+        analysis_time = datetime.utcnow() - timedelta(hours=3)
+
+        entry_time = analysis_time + timedelta(minutes=1)
+
+        expiration = entry_time + timedelta(minutes=1)
+
         reason = s.get("reason", [])
+
         if isinstance(reason, list):
-            reason_text = "\\n".join(["• " + str(item) for item in reason]) if reason else "Sem detalhes"
+            reason_text = "\n".join(["• " + str(r) for r in reason])
         else:
             reason_text = str(reason)
 
         normalized.append({
-            "asset": str(s.get("asset", "N/A")),
-            "signal": str(s.get("signal", "CALL")),
+            "asset": s.get("asset"),
+            "signal": s.get("signal"),
             "score": s.get("score", 0),
-            "confidence": int(s.get("confidence", 50)),
-            "timeframe": str(s.get("timeframe", "M1")),
-            "analysis_time": str(s.get("analysis_time", "--:--")),
-            "entry_time": str(s.get("entry_time", "--:--")),
-            "expiration": str(s.get("expiration", "--:--")),
-            "generated_at": str(s.get("generated_at", datetime.now().strftime("%H:%M:%S"))),
-            "provider": str(s.get("provider", "auto")),
+            "confidence": s.get("confidence", 50),
+            "provider": s.get("provider", "auto"),
+            "analysis_time": analysis_time.strftime("%H:%M"),
+            "entry_time": entry_time.strftime("%H:%M"),
+            "expiration": expiration.strftime("%H:%M"),
             "reason_text": reason_text
         })
+
     return normalized
 
+# =========================
+# SALVAR ESTADO
+# =========================
+
 def save_state(signals, history, scan_time, scan_count_value):
+
     write_json_file(LATEST_SIGNALS_FILE, signals)
+
     write_json_file(SIGNAL_HISTORY_FILE, history[:50])
+
     write_json_file(META_FILE, {
-        "last_scan": scan_time.strftime("%H:%M:%S") if scan_time else "--",
+        "last_scan": scan_time.strftime("%H:%M:%S"),
         "scan_count": scan_count_value
     })
 
+# =========================
+# CARREGAR ESTADO
+# =========================
+
 def load_state():
+
     signals = read_json_file(LATEST_SIGNALS_FILE, [])
+
     history = read_json_file(SIGNAL_HISTORY_FILE, [])
+
     meta = read_json_file(META_FILE, {"last_scan": "--", "scan_count": 0})
+
     return signals, history, meta
 
+# =========================
+# SCANNER LOOP
+# =========================
+
 def scanner_loop():
+
     global last_scan_time, scan_count
 
     while True:
+
         try:
+
             raw_market_data = scanner.scan_assets()
+
             raw_signals = signal_engine.generate_signals(raw_market_data)
+
             normalized = normalize_signals(raw_signals if raw_signals else [])
 
             if raw_signals:
+
                 learning.update_stats(raw_signals)
 
                 for signal in raw_signals:
+
                     matched_asset = None
+
                     for item in raw_market_data:
+
                         if item.get("asset") == signal.get("asset"):
+
                             matched_asset = item
+
                             break
 
                     if matched_asset:
+
                         result_data = result_evaluator.evaluate(signal, matched_asset.get("candles", []))
+
                         if result_data:
+
                             learning.register_result(signal, result_data)
+
                             print(
-                                "Result evaluated | %s | %s | %s" % (
+                                "Result evaluated | %s | %s | %s"
+                                % (
                                     signal.get("asset"),
                                     signal.get("signal"),
                                     result_data.get("result")
@@ -226,71 +178,122 @@ def scanner_loop():
                                 flush=True
                             )
 
-            current_history = read_json_file(SIGNAL_HISTORY_FILE, [])
-            if normalized:
-                current_history = (normalized + current_history)[:50]
+            history = read_json_file(SIGNAL_HISTORY_FILE, [])
 
-            last_scan_time = datetime.now()
+            if normalized:
+
+                history = normalized + history
+
+            last_scan_time = datetime.utcnow()
+
             scan_count += 1
 
-            save_state(normalized, current_history, last_scan_time, scan_count)
+            save_state(normalized, history, last_scan_time, scan_count)
+
             print("Scan #%s | Signals: %s" % (scan_count, len(normalized)), flush=True)
 
         except Exception as e:
-            print("Scanner error: %s" % e, flush=True)
+
+            print("Scanner error:", e, flush=True)
 
         time.sleep(SCAN_INTERVAL_SECONDS)
 
+# =========================
+# HTML
+# =========================
+
+HTML_PAGE = """
+<html>
+<head>
+<title>NEXUS AI</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+body{background:#06101f;color:white;font-family:Arial;padding:20px}
+.card{background:#0c1c30;padding:20px;border-radius:15px;margin-bottom:15px}
+</style>
+</head>
+<body>
+
+<h2>NEXUS AI v10.1</h2>
+
+<div class="card">
+Último scan: {{last_scan}}<br>
+Scans: {{scan_count}}<br>
+Sinais: {{signal_count}}<br>
+Ativos: {{asset_count}}
+</div>
+
+{% for s in signals %}
+<div class="card">
+<b>{{s.asset}}</b><br>
+Sinal: {{s.signal}}<br>
+Score: {{s.score}}<br>
+Confiança: {{s.confidence}}%<br>
+Análise: {{s.analysis_time}}<br>
+Entrada: {{s.entry_time}}<br>
+Expiração: {{s.expiration}}<br>
+<pre>{{s.reason_text}}</pre>
+</div>
+{% endfor %}
+
+</body>
+</html>
+"""
+
+# =========================
+# ROTAS
+# =========================
+
 @app.route("/")
 def home():
-    signals, _, meta = load_state()
-    usage = data_manager.get_usage_snapshot()
-    learning_stats = journal.stats()
-    best_assets = journal.best_assets()
 
-    template_usage = {
-        "twelve_frozen": usage.get("twelve_frozen", False),
-        "twelve_minute_paused": usage.get("twelve_minute_paused", False),
-        "finnhub_frozen": usage.get("finnhub_frozen", False),
-        "alpha_frozen": usage.get("alpha_frozen", False),
-    }
+    signals, history, meta = load_state()
 
     return render_template_string(
         HTML_PAGE,
         signals=signals,
-        last_scan=meta.get("last_scan", "--"),
-        scan_count=meta.get("scan_count", 0),
+        last_scan=meta.get("last_scan"),
+        scan_count=meta.get("scan_count"),
         signal_count=len(signals),
-        asset_count=len(ASSETS),
-        usage=template_usage,
-        learning_stats=learning_stats,
-        best_assets=best_assets
+        asset_count=len(ASSETS)
     )
 
 @app.route("/health")
 def health():
-    return {"status": "NEXUS v10.1 running"}
+
+    return {"status": "running"}
 
 @app.route("/signals")
 def signals():
-    signals, _, _ = load_state()
-    return jsonify(signals)
 
-@app.route("/usage")
-def usage():
-    return jsonify(data_manager.get_usage_snapshot())
+    signals, _, _ = load_state()
+
+    return jsonify(signals)
 
 @app.route("/learning-stats")
 def learning_stats():
+
     return jsonify(journal.stats())
 
 @app.route("/best-assets")
 def best_assets():
+
     return jsonify(journal.best_assets())
 
+# =========================
+# THREAD
+# =========================
+
 thread = threading.Thread(target=scanner_loop, daemon=True)
+
 thread.start()
 
+# =========================
+# START SERVER
+# =========================
+
 if __name__ == "__main__":
+
     port = int(os.environ.get("PORT", 10000))
+
     app.run(host="0.0.0.0", port=port)
