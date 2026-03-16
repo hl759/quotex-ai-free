@@ -25,13 +25,18 @@ META_FILE = os.path.join(STATE_DIR, "meta.json")
 
 os.makedirs(STATE_DIR, exist_ok=True)
 
+latest_signals = []
+signal_history = []
+last_scan_time = None
+scan_count = 0
+
 HTML_PAGE = """
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>NEXUS-AI</title>
+  <title>NEXUS-AI v10</title>
   <style>
     body{margin:0;font-family:Arial,sans-serif;background:linear-gradient(180deg,#020814,#071325);color:#eef4ff}
     .app{max-width:760px;margin:0 auto;padding:14px}
@@ -43,7 +48,7 @@ HTML_PAGE = """
     .subtitle{margin-top:6px;font-size:12px;color:#91a4c3;letter-spacing:1.5px}
     .live{padding:10px 14px;border-radius:999px;background:rgba(20,60,50,.45);border:1px solid rgba(25,240,209,.24);color:#9bffe5;font-weight:bold;font-size:14px}
     .metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px}
-    .metric,.mini,.history-item,.asset-item{background:#0a1c30;border-radius:14px;padding:12px}
+    .metric,.mini,.history-item,.asset-item,.stat-card{background:#0a1c30;border-radius:14px;padding:12px}
     .label{font-size:11px;color:#7e93b3;text-transform:uppercase;margin-bottom:6px}
     .value{font-size:18px;font-weight:bold}
     .tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px}
@@ -51,7 +56,7 @@ HTML_PAGE = """
     .tab-btn.active{color:#19f0d1;outline:1px solid rgba(25,240,209,.25)}
     .panel{display:none}.panel.active{display:block}
     .section-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;font-size:18px;font-weight:bold}
-    .muted{color:#91a4c3;font-size:13px}
+    .muted{color:#91a4c3;font-size:13px;line-height:1.5}
     .signal-card{background:#0a1c30;border-radius:18px;padding:14px;margin-bottom:12px}
     .signal-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px}
     .asset{font-size:21px;font-weight:bold}
@@ -60,8 +65,13 @@ HTML_PAGE = """
     .put{background:linear-gradient(135deg,#ff7b8c,#ffc0c8);color:#311016}
     .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
     .reason{margin-top:12px;background:#061321;border-radius:14px;padding:12px;white-space:pre-wrap;line-height:1.45;font-size:14px}
+    .stats-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+    .history-list,.assets-list{display:flex;flex-direction:column;gap:10px}
+    .history-top,.asset-top{display:flex;justify-content:space-between;align-items:center;gap:10px}
+    .rank{width:30px;height:30px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#8b5cf6,#22d3ee);font-weight:bold}
     .empty{text-align:center;padding:26px 12px;color:#91a4c3}
-    @media(max-width:560px){.metrics{grid-template-columns:repeat(2,1fr)}.tabs{grid-template-columns:repeat(2,1fr)}.grid3{grid-template-columns:repeat(2,1fr)}.title{font-size:24px}.asset{font-size:18px}}
+    .footer{text-align:center;color:#7e93b3;font-size:13px;margin-top:8px}
+    @media(max-width:560px){.metrics{grid-template-columns:repeat(2,1fr)}.tabs{grid-template-columns:repeat(2,1fr)}.grid3{grid-template-columns:repeat(2,1fr)}.stats-grid{grid-template-columns:1fr}.title{font-size:24px}.asset{font-size:18px}}
   </style>
 </head>
 <body>
@@ -71,8 +81,8 @@ HTML_PAGE = """
         <div class="brand">
           <div class="logo">⚡</div>
           <div>
-            <div class="title">NEXUS-<span>AI</span></div>
-            <div class="subtitle">ESTADO PERSISTIDO · FRONT SINCRONIZADO</div>
+            <div class="title">NEXUS-<span>AI</span> v10</div>
+            <div class="subtitle">ULTRA ROBUSTA · BALANCEAMENTO DE APIS</div>
           </div>
         </div>
         <div class="live">● LIVE</div>
@@ -90,6 +100,22 @@ HTML_PAGE = """
         <button class="tab-btn" onclick="showTab('history', this)">📋 HISTÓRICO</button>
         <button class="tab-btn" onclick="showTab('stats', this)">📊 STATS</button>
         <button class="tab-btn" onclick="showTab('assets', this)">🏆 ATIVOS</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">
+        <div>Proteção e Balanceamento</div>
+        <div class="muted">Binance · Finnhub · Twelve · Alpha</div>
+      </div>
+
+      <div class="muted">
+        Twelve congelada hoje: <strong>{{ "SIM" if usage.twelve_frozen else "NÃO" }}</strong><br>
+        Twelve pausa minuto: <strong>{{ "SIM" if usage.twelve_minute_paused else "NÃO" }}</strong><br>
+        Finnhub congelada hoje: <strong>{{ "SIM" if usage.finnhub_frozen else "NÃO" }}</strong><br>
+        Alpha congelada hoje: <strong>{{ "SIM" if usage.alpha_frozen else "NÃO" }}</strong><br>
+        Chave Twelve 1 hoje: <strong>{{ usage.key1_daily }}</strong><br>
+        Chave Twelve 2 hoje: <strong>{{ usage.key2_daily }}</strong>
       </div>
     </div>
 
@@ -130,11 +156,20 @@ HTML_PAGE = """
     <div id="history" class="section panel">
       <div class="section-title"><div>Histórico</div><div class="muted">Últimos sinais</div></div>
       {% if history %}
-        {% for h in history %}
-          <div class="history-item">
-            <strong>{{ h.asset }}</strong> · {{ h.signal }} · {{ h.generated_at }}
-          </div>
-        {% endfor %}
+        <div class="history-list">
+          {% for h in history %}
+            <div class="history-item">
+              <div class="history-top">
+                <div><strong>{{ h.asset }}</strong></div>
+                <div class="badge {% if h.signal == 'CALL' %}call{% else %}put{% endif %}">{{ h.signal }}</div>
+              </div>
+              <div class="muted">
+                Gerado: {{ h.generated_at }}<br>
+                Score: {{ h.score }} · Fonte: {{ h.provider }}
+              </div>
+            </div>
+          {% endfor %}
+        </div>
       {% else %}
         <div class="empty">Sem histórico.</div>
       {% endif %}
@@ -142,15 +177,30 @@ HTML_PAGE = """
 
     <div id="stats" class="section panel">
       <div class="section-title"><div>Stats</div><div class="muted">Resumo</div></div>
-      <div class="metric"><div class="label">Total de sinais atuais</div><div class="value">{{ signal_count }}</div></div>
+      <div class="stats-grid">
+        <div class="stat-card"><div class="label">Scans</div><div class="value">{{ scan_count }}</div></div>
+        <div class="stat-card"><div class="label">Sinais</div><div class="value">{{ signal_count }}</div></div>
+      </div>
     </div>
 
     <div id="assets" class="section panel">
       <div class="section-title"><div>Ativos</div><div class="muted">Monitorados</div></div>
-      {% for item in top_assets %}
-        <div class="asset-item"><strong>{{ item }}</strong></div>
-      {% endfor %}
+      <div class="assets-list">
+        {% for item in top_assets %}
+          <div class="asset-item">
+            <div class="asset-top">
+              <div style="display:flex;align-items:center;gap:10px;">
+                <div class="rank">{{ loop.index }}</div>
+                <div><strong>{{ item }}</strong></div>
+              </div>
+              <div style="color:#1df2a4;font-weight:bold;">{{ providers_map.get(item, 'Auto') }}</div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
     </div>
+
+    <div class="footer">Rotas: /health · /signals · /usage</div>
   </div>
 
   <script>
@@ -182,7 +232,10 @@ def normalize_signals(signals):
     normalized = []
     for s in signals:
         reason = s.get("reason", [])
-        reason_text = "\\n".join(["• " + str(item) for item in reason]) if isinstance(reason, list) else str(reason)
+        if isinstance(reason, list):
+            reason_text = "\\n".join(["• " + str(item) for item in reason]) if reason else "Sem detalhes"
+        else:
+            reason_text = str(reason)
 
         normalized.append({
             "asset": str(s.get("asset", "N/A")),
@@ -198,11 +251,11 @@ def normalize_signals(signals):
         })
     return normalized
 
-def save_state(signals, history, last_scan, scan_count_value):
+def save_state(signals, history, scan_time, scan_count_value):
     write_json_file(LATEST_SIGNALS_FILE, signals)
     write_json_file(SIGNAL_HISTORY_FILE, history[:20])
     write_json_file(META_FILE, {
-        "last_scan": last_scan.strftime("%H:%M:%S") if last_scan else "--",
+        "last_scan": scan_time.strftime("%H:%M:%S") if scan_time else "--",
         "scan_count": scan_count_value
     })
 
@@ -243,6 +296,20 @@ def scanner_loop():
 @app.route("/")
 def home():
     signals, history, meta = load_state()
+    usage = data_manager.get_usage_snapshot()
+
+    providers_map = {}
+    for symbol in ASSETS[:8]:
+        providers_map[symbol] = data_manager.last_provider_used.get(symbol, "Auto")
+
+    template_usage = {
+        "twelve_frozen": usage.get("twelve_frozen", False),
+        "twelve_minute_paused": usage.get("twelve_minute_paused", False),
+        "finnhub_frozen": usage.get("finnhub_frozen", False),
+        "alpha_frozen": usage.get("alpha_frozen", False),
+        "key1_daily": usage.get("keys", [{}])[0].get("daily_used", 0) if len(usage.get("keys", [])) > 0 else 0,
+        "key2_daily": usage.get("keys", [{}, {}])[1].get("daily_used", 0) if len(usage.get("keys", [])) > 1 else 0,
+    }
 
     return render_template_string(
         HTML_PAGE,
@@ -252,12 +319,14 @@ def home():
         scan_count=meta.get("scan_count", 0),
         signal_count=len(signals),
         asset_count=len(ASSETS),
-        top_assets=ASSETS[:8]
+        top_assets=ASSETS[:8],
+        providers_map=providers_map,
+        usage=template_usage
     )
 
 @app.route("/health")
 def health():
-    return {"status": "NEXUS sync running"}
+    return {"status": "NEXUS v10 sync running"}
 
 @app.route("/signals")
 def signals():
