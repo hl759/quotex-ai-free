@@ -2,8 +2,6 @@ import json
 import os
 import threading
 import time
-from result_evaluator import ResultEvaluator
-from journal_manager import JournalManager
 from datetime import datetime
 from flask import Flask, jsonify, render_template_string
 
@@ -11,6 +9,8 @@ from scanner import MarketScanner
 from signal_engine import SignalEngine
 from data_manager import DataManager
 from learning_engine import LearningEngine
+from result_evaluator import ResultEvaluator
+from journal_manager import JournalManager
 from config import ASSETS, SCAN_INTERVAL_SECONDS
 
 app = Flask(__name__)
@@ -38,7 +38,7 @@ HTML_PAGE = """
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>NEXUS-AI</title>
+  <title>NEXUS-AI v10.1</title>
   <style>
     body{margin:0;font-family:Arial,sans-serif;background:#06111f;color:#eef4ff}
     .wrap{max-width:760px;margin:0 auto;padding:16px}
@@ -55,13 +55,15 @@ HTML_PAGE = """
     .call{background:#1df2a4;color:#062116}
     .put{background:#ff7b8c;color:#311016}
     pre{white-space:pre-wrap;word-break:break-word}
+    .row{margin-top:8px;line-height:1.5}
+    @media(max-width:560px){.grid{grid-template-columns:1fr 1fr}.title{font-size:24px}}
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="card">
-      <div class="title">NEXUS-<span>AI</span></div>
-      <div class="muted">Modo estável</div>
+      <div class="title">NEXUS-<span>AI</span> v10.1</div>
+      <div class="muted">AUTO-LEARNING ESTÁVEL</div>
 
       <div class="grid">
         <div class="item">
@@ -84,8 +86,18 @@ HTML_PAGE = """
     </div>
 
     <div class="card">
+      <div class="label">Aprendizado</div>
+      <div class="row muted">
+        Total de operações avaliadas: <strong>{{ learning_stats.total }}</strong><br>
+        Wins: <strong>{{ learning_stats.wins }}</strong><br>
+        Loss: <strong>{{ learning_stats.loss }}</strong><br>
+        Win rate: <strong>{{ learning_stats.winrate }}%</strong>
+      </div>
+    </div>
+
+    <div class="card">
       <div class="label">Status das APIs</div>
-      <div class="muted">
+      <div class="row muted">
         Twelve congelada: <strong>{{ "SIM" if usage.twelve_frozen else "NÃO" }}</strong><br>
         Twelve pausa minuto: <strong>{{ "SIM" if usage.twelve_minute_paused else "NÃO" }}</strong><br>
         Finnhub congelada: <strong>{{ "SIM" if usage.finnhub_frozen else "NÃO" }}</strong><br>
@@ -111,6 +123,19 @@ HTML_PAGE = """
         {% endfor %}
       {% else %}
         <div class="muted">Nenhum sinal disponível agora.</div>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <div class="label">Melhores ativos</div>
+      {% if best_assets %}
+        {% for item in best_assets %}
+          <div class="row muted">
+            <strong>{{ item.asset }}</strong> · Win rate: <strong>{{ item.winrate }}%</strong> · Trades: <strong>{{ item.total }}</strong>
+          </div>
+        {% endfor %}
+      {% else %}
+        <div class="muted">Ainda sem dados suficientes.</div>
       {% endif %}
     </div>
   </div>
@@ -157,7 +182,7 @@ def normalize_signals(signals):
 
 def save_state(signals, history, scan_time, scan_count_value):
     write_json_file(LATEST_SIGNALS_FILE, signals)
-    write_json_file(SIGNAL_HISTORY_FILE, history[:20])
+    write_json_file(SIGNAL_HISTORY_FILE, history[:50])
     write_json_file(META_FILE, {
         "last_scan": scan_time.strftime("%H:%M:%S") if scan_time else "--",
         "scan_count": scan_count_value
@@ -203,7 +228,7 @@ def scanner_loop():
 
             current_history = read_json_file(SIGNAL_HISTORY_FILE, [])
             if normalized:
-                current_history = (normalized + current_history)[:20]
+                current_history = (normalized + current_history)[:50]
 
             last_scan_time = datetime.now()
             scan_count += 1
@@ -215,9 +240,13 @@ def scanner_loop():
             print("Scanner error: %s" % e, flush=True)
 
         time.sleep(SCAN_INTERVAL_SECONDS)
+
+@app.route("/")
 def home():
     signals, _, meta = load_state()
     usage = data_manager.get_usage_snapshot()
+    learning_stats = journal.stats()
+    best_assets = journal.best_assets()
 
     template_usage = {
         "twelve_frozen": usage.get("twelve_frozen", False),
@@ -233,12 +262,14 @@ def home():
         scan_count=meta.get("scan_count", 0),
         signal_count=len(signals),
         asset_count=len(ASSETS),
-        usage=template_usage
+        usage=template_usage,
+        learning_stats=learning_stats,
+        best_assets=best_assets
     )
 
 @app.route("/health")
 def health():
-    return {"status": "NEXUS running"}
+    return {"status": "NEXUS v10.1 running"}
 
 @app.route("/signals")
 def signals():
@@ -248,6 +279,14 @@ def signals():
 @app.route("/usage")
 def usage():
     return jsonify(data_manager.get_usage_snapshot())
+
+@app.route("/learning-stats")
+def learning_stats():
+    return jsonify(journal.stats())
+
+@app.route("/best-assets")
+def best_assets():
+    return jsonify(journal.best_assets())
 
 thread = threading.Thread(target=scanner_loop, daemon=True)
 thread.start()
