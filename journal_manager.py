@@ -69,6 +69,7 @@ class JournalManager:
         for asset, info in grouped.items():
             if info["total"] == 0:
                 continue
+
             winrate = round((info["wins"] / info["total"]) * 100, 2)
             result.append({
                 "asset": asset,
