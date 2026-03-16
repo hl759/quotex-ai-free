@@ -1,6 +1,6 @@
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from flask import Flask, jsonify, render_template_string
 
 from scanner import MarketScanner
@@ -27,120 +27,47 @@ HTML_PAGE = '''
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>NEXUS-AI</title>
+  <title>NEXUS-AI Safe</title>
   <style>
-    body{
-      margin:0;
-      font-family:Arial,sans-serif;
-      background:linear-gradient(180deg,#020814,#071325);
-      color:#eef4ff;
-    }
-    .app{max-width:760px;margin:0 auto;padding:14px;}
-    .hero,.section{
-      background:#08182a;
-      border:1px solid rgba(35,215,255,.12);
-      border-radius:22px;
-      padding:16px;
-      margin-bottom:16px;
-      box-shadow:0 8px 24px rgba(0,0,0,.28);
-    }
-    .hero-top{
-      display:flex;justify-content:space-between;align-items:center;gap:12px;
-    }
-    .brand{display:flex;align-items:center;gap:12px;}
-    .logo{
-      width:52px;height:52px;border-radius:16px;
-      display:flex;align-items:center;justify-content:center;
-      background:linear-gradient(135deg,#7c4dff,#19f0d1);
-      font-size:26px;
-    }
-    .title{font-size:28px;font-weight:900;line-height:1}
-    .title span{color:#19f0d1}
+    body{margin:0;font-family:Arial,sans-serif;background:linear-gradient(180deg,#020814,#071325);color:#eef4ff}
+    .app{max-width:760px;margin:0 auto;padding:14px}
+    .hero,.section{background:#08182a;border:1px solid rgba(35,215,255,.12);border-radius:22px;padding:16px;margin-bottom:16px;box-shadow:0 8px 24px rgba(0,0,0,.28)}
+    .hero-top{display:flex;justify-content:space-between;align-items:center;gap:12px}
+    .brand{display:flex;align-items:center;gap:12px}
+    .logo{width:52px;height:52px;border-radius:16px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#7c4dff,#19f0d1);font-size:26px}
+    .title{font-size:28px;font-weight:900;line-height:1}.title span{color:#19f0d1}
     .subtitle{margin-top:6px;font-size:12px;color:#91a4c3;letter-spacing:1.5px}
-    .live{
-      padding:10px 14px;border-radius:999px;
-      background:rgba(20,60,50,.45);
-      border:1px solid rgba(25,240,209,.24);
-      color:#9bffe5;font-weight:bold;font-size:14px;
-    }
-    .metrics{
-      display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px;
-    }
-    .metric,.mini,.stat-card,.history-item,.asset-item{
-      background:#0a1c30;border-radius:14px;padding:12px;
-    }
+    .live{padding:10px 14px;border-radius:999px;background:rgba(20,60,50,.45);border:1px solid rgba(25,240,209,.24);color:#9bffe5;font-weight:bold;font-size:14px}
+    .metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px}
+    .metric,.mini,.stat-card,.history-item,.asset-item{background:#0a1c30;border-radius:14px;padding:12px}
     .label{font-size:11px;color:#7e93b3;text-transform:uppercase;margin-bottom:6px}
     .value{font-size:18px;font-weight:bold}
-    .tabs{
-      display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px;
-    }
-    .tab-btn{
-      padding:12px 8px;border:none;border-radius:14px;
-      background:#0a1c30;color:#91a4c3;font-weight:bold;font-size:13px;
-      cursor:pointer;
-    }
-    .tab-btn.active{
-      color:#19f0d1;
-      outline:1px solid rgba(25,240,209,.25);
-    }
-    .panel{display:none}
-    .panel.active{display:block}
-    .section-title{
-      display:flex;justify-content:space-between;align-items:center;
-      margin-bottom:12px;font-size:18px;font-weight:bold;
-    }
+    .tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px}
+    .tab-btn{padding:12px 8px;border:none;border-radius:14px;background:#0a1c30;color:#91a4c3;font-weight:bold;font-size:13px;cursor:pointer}
+    .tab-btn.active{color:#19f0d1;outline:1px solid rgba(25,240,209,.25)}
+    .panel{display:none}.panel.active{display:block}
+    .section-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;font-size:18px;font-weight:bold}
     .muted{color:#91a4c3;font-size:13px}
-    .bar{
-      width:100%;height:12px;background:#0b1930;border-radius:999px;overflow:hidden;
-    }
-    .bar-fill{
-      height:100%;
-      background:linear-gradient(90deg,#22d3ee,#8b5cf6,#19f0d1);
-    }
-    .credits-row{
-      display:flex;justify-content:space-between;align-items:center;gap:10px;
-      margin-bottom:12px;
-    }
+    .bar{width:100%;height:12px;background:#0b1930;border-radius:999px;overflow:hidden}
+    .bar-fill{height:100%;background:linear-gradient(90deg,#22d3ee,#8b5cf6,#19f0d1)}
+    .credits-row{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px}
     .credits-value{font-size:24px;font-weight:bold;color:#19f0d1}
-    .meta{margin-top:12px;color:#91a4c3;font-size:14px}
-    .signal-card{
-      background:#0a1c30;border-radius:18px;padding:14px;margin-bottom:12px;
-    }
-    .signal-head{
-      display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;
-    }
+    .meta{margin-top:12px;color:#91a4c3;font-size:14px;line-height:1.5}
+    .signal-card{background:#0a1c30;border-radius:18px;padding:14px;margin-bottom:12px}
+    .signal-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px}
     .asset{font-size:21px;font-weight:bold}
-    .badge{
-      padding:8px 12px;border-radius:999px;font-size:13px;font-weight:bold;
-    }
+    .badge{padding:8px 12px;border-radius:999px;font-size:13px;font-weight:bold}
     .call{background:linear-gradient(135deg,#19f0a0,#7dffc8);color:#062218}
     .put{background:linear-gradient(135deg,#ff7b8c,#ffc0c8);color:#311016}
     .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
-    .reason{
-      margin-top:12px;background:#061321;border-radius:14px;padding:12px;
-      white-space:pre-wrap;line-height:1.45;font-size:14px;
-    }
+    .reason{margin-top:12px;background:#061321;border-radius:14px;padding:12px;white-space:pre-wrap;line-height:1.45;font-size:14px}
     .stats-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
     .history-list,.assets-list{display:flex;flex-direction:column;gap:10px}
-    .history-top,.asset-top{
-      display:flex;justify-content:space-between;align-items:center;gap:10px;
-    }
-    .rank{
-      width:30px;height:30px;border-radius:10px;
-      display:flex;align-items:center;justify-content:center;
-      background:linear-gradient(135deg,#8b5cf6,#22d3ee);
-      font-weight:bold;
-    }
+    .history-top,.asset-top{display:flex;justify-content:space-between;align-items:center;gap:10px}
+    .rank{width:30px;height:30px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#8b5cf6,#22d3ee);font-weight:bold}
     .empty{text-align:center;padding:26px 12px;color:#91a4c3}
     .footer{text-align:center;color:#7e93b3;font-size:13px;margin-top:8px}
-    @media(max-width:560px){
-      .metrics{grid-template-columns:repeat(2,1fr)}
-      .tabs{grid-template-columns:repeat(2,1fr)}
-      .grid3{grid-template-columns:repeat(2,1fr)}
-      .stats-grid{grid-template-columns:1fr}
-      .title{font-size:24px}
-      .asset{font-size:18px}
-    }
+    @media(max-width:560px){.metrics{grid-template-columns:repeat(2,1fr)}.tabs{grid-template-columns:repeat(2,1fr)}.grid3{grid-template-columns:repeat(2,1fr)}.stats-grid{grid-template-columns:1fr}.title{font-size:24px}.asset{font-size:18px}}
   </style>
 </head>
 <body>
@@ -151,25 +78,17 @@ HTML_PAGE = '''
           <div class="logo">⚡</div>
           <div>
             <div class="title">NEXUS-<span>AI</span></div>
-            <div class="subtitle">M1 + M5 · {{ asset_count }} ativos · dados reais</div>
+            <div class="subtitle">ULTRA SAFE · {{ asset_count }} ativos · Binance + Twelve</div>
           </div>
         </div>
         <div class="live">● LIVE</div>
       </div>
 
       <div class="metrics">
-        <div class="metric">
-          <div class="label">Último scan</div>
-          <div class="value">{{ last_scan }}</div>
-        </div>
-        <div class="metric">
-          <div class="label">Scans</div>
-          <div class="value">{{ scan_count }}</div>
-        </div>
-        <div class="metric">
-          <div class="label">Sinais</div>
-          <div class="value">{{ signal_count }}</div>
-        </div>
+        <div class="metric"><div class="label">Último scan</div><div class="value">{{ last_scan }}</div></div>
+        <div class="metric"><div class="label">Scans</div><div class="value">{{ scan_count }}</div></div>
+        <div class="metric"><div class="label">Sinais</div><div class="value">{{ signal_count }}</div></div>
+        <div class="metric"><div class="label">Créditos</div><div class="value">{{ credits_today }}</div></div>
       </div>
 
       <div class="tabs">
@@ -182,12 +101,12 @@ HTML_PAGE = '''
 
     <div class="section">
       <div class="section-title">
-        <div>Créditos da Twelve Data</div>
-        <div class="muted">Proteção ativa</div>
+        <div>Proteção da Twelve Data</div>
+        <div class="muted">Modo ultraconservador</div>
       </div>
 
       <div class="credits-row">
-        <div class="muted">Uso de créditos hoje</div>
+        <div class="muted">Uso protegido por trava dura</div>
         <div class="credits-value">{{ credits_today }} / {{ max_credits }}</div>
       </div>
 
@@ -196,14 +115,19 @@ HTML_PAGE = '''
       </div>
 
       <div class="meta">
-        Próximo scan: <strong>{{ next_scan }}</strong> · Scan a cada <strong>{{ scan_interval }} min</strong>
+        Próximo scan: <strong>{{ next_scan }}</strong><br>
+        Scan geral: <strong>{{ scan_interval }} min</strong><br>
+        Economia: <strong>{{ "SIM" if usage.economy_mode else "NÃO" }}</strong><br>
+        Twelve congelada: <strong>{{ "SIM" if usage.frozen_twelve else "NÃO" }}</strong><br>
+        Chave 1 hoje: <strong>{{ usage.key1_daily }}</strong> · minuto: <strong>{{ usage.key1_minute }}</strong><br>
+        Chave 2 hoje: <strong>{{ usage.key2_daily }}</strong> · minuto: <strong>{{ usage.key2_minute }}</strong>
       </div>
     </div>
 
     <div id="signals" class="section panel active">
       <div class="section-title">
         <div>Sinais em tempo real</div>
-        <div class="muted">Precisão acima de quantidade</div>
+        <div class="muted">Crypto via Binance · Forex reduzido</div>
       </div>
 
       {% if signals %}
@@ -215,30 +139,12 @@ HTML_PAGE = '''
             </div>
 
             <div class="grid3">
-              <div class="mini">
-                <div class="label">Score</div>
-                <div class="value">{{ s.score }}</div>
-              </div>
-              <div class="mini">
-                <div class="label">Confiança</div>
-                <div class="value">{{ s.confidence }}%</div>
-              </div>
-              <div class="mini">
-                <div class="label">Timeframe</div>
-                <div class="value">{{ s.timeframe }}</div>
-              </div>
-              <div class="mini">
-                <div class="label">Entrada</div>
-                <div class="value">{{ s.entry_time }}</div>
-              </div>
-              <div class="mini">
-                <div class="label">Expiração</div>
-                <div class="value">{{ s.expiration }}</div>
-              </div>
-              <div class="mini">
-                <div class="label">Status</div>
-                <div class="value">Ativo</div>
-              </div>
+              <div class="mini"><div class="label">Score</div><div class="value">{{ s.score }}</div></div>
+              <div class="mini"><div class="label">Confiança</div><div class="value">{{ s.confidence }}%</div></div>
+              <div class="mini"><div class="label">Fonte</div><div class="value">{{ s.provider }}</div></div>
+              <div class="mini"><div class="label">Timeframe</div><div class="value">{{ s.timeframe }}</div></div>
+              <div class="mini"><div class="label">Entrada</div><div class="value">{{ s.entry_time }}</div></div>
+              <div class="mini"><div class="label">Expiração</div><div class="value">{{ s.expiration }}</div></div>
             </div>
 
             <div class="reason">{{ s.reason_text }}</div>
@@ -246,9 +152,9 @@ HTML_PAGE = '''
         {% endfor %}
       {% else %}
         <div class="empty">
-          <div style="font-size:60px;">🔎</div>
+          <div style="font-size:60px;">🛡️</div>
           <div><strong>Nenhum sinal agora</strong></div>
-          <div style="margin-top:8px;">Próximo scan em {{ next_scan }}</div>
+          <div style="margin-top:8px;">Sistema preservando estabilidade e créditos</div>
         </div>
       {% endif %}
     </div>
@@ -271,7 +177,7 @@ HTML_PAGE = '''
                 Gerado: {{ h.generated_at }}<br>
                 Entrada: {{ h.entry_time }}<br>
                 Expiração: {{ h.expiration }}<br>
-                Score: {{ h.score }} · Confiança: {{ h.confidence }}%
+                Score: {{ h.score }} · Confiança: {{ h.confidence }}% · Fonte: {{ h.provider }}
               </div>
             </div>
           {% endfor %}
@@ -284,33 +190,21 @@ HTML_PAGE = '''
     <div id="stats" class="section panel">
       <div class="section-title">
         <div>Estatísticas</div>
-        <div class="muted">Visão geral</div>
+        <div class="muted">Visão segura do motor</div>
       </div>
 
       <div class="stats-grid">
-        <div class="stat-card">
-          <div class="label">Win Rate estimado</div>
-          <div class="value" style="color:#1df2a4">{{ estimated_win_rate }}%</div>
-        </div>
-        <div class="stat-card">
-          <div class="label">Ativos monitorados</div>
-          <div class="value" style="color:#23d7ff">{{ asset_count }}</div>
-        </div>
-        <div class="stat-card">
-          <div class="label">Scans executados</div>
-          <div class="value" style="color:#915cff">{{ scan_count }}</div>
-        </div>
-        <div class="stat-card">
-          <div class="label">Sinais atuais</div>
-          <div class="value" style="color:#ffd84d">{{ signal_count }}</div>
-        </div>
+        <div class="stat-card"><div class="label">Win Rate estimado</div><div class="value" style="color:#1df2a4">{{ estimated_win_rate }}%</div></div>
+        <div class="stat-card"><div class="label">Ativos monitorados</div><div class="value" style="color:#23d7ff">{{ asset_count }}</div></div>
+        <div class="stat-card"><div class="label">Scans executados</div><div class="value" style="color:#915cff">{{ scan_count }}</div></div>
+        <div class="stat-card"><div class="label">Sinais atuais</div><div class="value" style="color:#ffd84d">{{ signal_count }}</div></div>
       </div>
     </div>
 
     <div id="assets" class="section panel">
       <div class="section-title">
-        <div>Top ativos</div>
-        <div class="muted">Liquidez e relevância</div>
+        <div>Ativos ativos</div>
+        <div class="muted">Lista reduzida e segura</div>
       </div>
 
       <div class="assets-list">
@@ -321,24 +215,20 @@ HTML_PAGE = '''
                 <div class="rank">{{ loop.index }}</div>
                 <div><strong>{{ item }}</strong></div>
               </div>
-              <div style="color:#1df2a4;font-weight:bold;">Monitorando</div>
+              <div style="color:#1df2a4;font-weight:bold;">{{ providers_map.get(item, 'Auto') }}</div>
             </div>
           </div>
         {% endfor %}
       </div>
     </div>
 
-    <div class="footer">Rotas: /health · /signals</div>
+    <div class="footer">Rotas: /health · /signals · /usage</div>
   </div>
 
   <script>
     function showTab(tabId, btn){
-      document.querySelectorAll('.panel').forEach(function(p){
-        p.classList.remove('active');
-      });
-      document.querySelectorAll('.tab-btn').forEach(function(b){
-        b.classList.remove('active');
-      });
+      document.querySelectorAll('.panel').forEach(function(p){ p.classList.remove('active'); });
+      document.querySelectorAll('.tab-btn').forEach(function(b){ b.classList.remove('active'); });
       document.getElementById(tabId).classList.add('active');
       btn.classList.add('active');
     }
@@ -349,37 +239,25 @@ HTML_PAGE = '''
 
 def normalize_signals(signals):
     normalized = []
-
     for s in signals:
-        asset = str(s.get("asset", "N/A"))
-        signal = str(s.get("signal", "CALL"))
-        score = s.get("score", 0)
-        confidence = int(s.get("confidence", 50))
-        timeframe = str(s.get("timeframe", "M1"))
-        entry_time = str(s.get("entry_time", "--:--"))
-        expiration = str(s.get("expiration", "Próximo candle"))
-        generated_at = str(s.get("generated_at", datetime.now().strftime("%H:%M:%S")))
-
         reason = s.get("reason", [])
         if isinstance(reason, list):
             reason_text = "\\n".join(["• " + str(item) for item in reason]) if reason else "Sem detalhes"
-        elif isinstance(reason, dict):
-            reason_text = "\\n".join(["• " + str(k) + ": " + str(v) for k, v in reason.items()]) if reason else "Sem detalhes"
         else:
             reason_text = str(reason)
 
         normalized.append({
-            "asset": asset,
-            "signal": signal,
-            "score": score,
-            "confidence": confidence,
-            "timeframe": timeframe,
-            "entry_time": entry_time,
-            "expiration": expiration,
-            "generated_at": generated_at,
-            "reason_text": reason_text,
+            "asset": str(s.get("asset", "N/A")),
+            "signal": str(s.get("signal", "CALL")),
+            "score": s.get("score", 0),
+            "confidence": int(s.get("confidence", 50)),
+            "timeframe": str(s.get("timeframe", "M1")),
+            "entry_time": str(s.get("entry_time", "--:--")),
+            "expiration": str(s.get("expiration", "Próximo candle")),
+            "generated_at": str(s.get("generated_at", datetime.now().strftime("%H:%M:%S"))),
+            "provider": str(s.get("provider", "auto")),
+            "reason_text": reason_text
         })
-
     return normalized
 
 def scanner_loop():
@@ -409,8 +287,9 @@ def scanner_loop():
 
 @app.route("/")
 def home():
-    credits_today = int(getattr(data_manager, "credits_today", 0))
-    max_credits = 780
+    usage = data_manager.get_usage_snapshot()
+    credits_today = int(usage["credits_today_total"])
+    max_credits = usage["global_hard_stop"]
     credits_percent = int(min((credits_today / max_credits) * 100, 100)) if max_credits else 0
 
     if last_scan_time:
@@ -421,6 +300,19 @@ def home():
     else:
         next_scan = "60s"
         last_scan = "--"
+
+    providers_map = {}
+    for symbol in ASSETS[:8]:
+        providers_map[symbol] = data_manager.last_provider_used.get(symbol, "Auto")
+
+    template_usage = {
+        "economy_mode": usage["economy_mode"],
+        "frozen_twelve": usage["frozen_twelve"],
+        "key1_daily": usage["keys"][0]["daily_used"] if len(usage["keys"]) > 0 else 0,
+        "key1_minute": usage["keys"][0]["minute_used"] if len(usage["keys"]) > 0 else 0,
+        "key2_daily": usage["keys"][1]["daily_used"] if len(usage["keys"]) > 1 else 0,
+        "key2_minute": usage["keys"][1]["minute_used"] if len(usage["keys"]) > 1 else 0,
+    }
 
     return render_template_string(
         HTML_PAGE,
@@ -436,16 +328,22 @@ def home():
         asset_count=len(ASSETS),
         estimated_win_rate=78,
         signal_count=len(latest_signals),
-        top_assets=ASSETS[:8]
+        top_assets=ASSETS[:8],
+        providers_map=providers_map,
+        usage=template_usage
     )
 
 @app.route("/health")
 def health():
-    return {"status": "NEXUS v8 running"}
+    return {"status": "NEXUS SAFE running"}
 
 @app.route("/signals")
 def signals():
     return jsonify(latest_signals)
+
+@app.route("/usage")
+def usage():
+    return jsonify(data_manager.get_usage_snapshot())
 
 thread = threading.Thread(target=scanner_loop, daemon=True)
 thread.start()
