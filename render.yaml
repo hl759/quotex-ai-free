@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: nexus-v10-1-auto-learning-lite
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --workers 1 --threads 1 --bind 0.0.0.0:$PORT app:app
+    plan: free
