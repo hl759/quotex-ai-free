@@ -63,19 +63,6 @@ def now_brazil():
     return datetime.utcnow() - timedelta(hours=3)
 
 
-def get_signal_hour_bucket(signal_dict):
-    analysis_time = str(signal_dict.get("analysis_time", "")).strip()
-    if ":" not in analysis_time:
-        return None
-    try:
-        hour = int(analysis_time.split(":")[0])
-        if 0 <= hour <= 23:
-            return f"{hour:02d}:00"
-    except Exception:
-        return None
-    return None
-
-
 def normalize_signals(signals):
     normalized = []
 
@@ -121,6 +108,22 @@ def load_state():
     return signals, history, meta
 
 
+def get_snapshot():
+    signals, history, meta = load_state()
+    return {
+        "signals": signals,
+        "history": history[:20],
+        "meta": {
+            "last_scan": meta.get("last_scan", "--"),
+            "scan_count": meta.get("scan_count", 0),
+            "signal_count": len(signals),
+            "asset_count": len(ASSETS),
+        },
+        "learning_stats": journal.stats(),
+        "best_assets": journal.best_assets(),
+    }
+
+
 # =========================
 # LOOP ESTÁVEL
 # =========================
@@ -130,7 +133,6 @@ def scanner_loop():
     while True:
         try:
             market = scanner.scan_assets()
-
             raw_signals = signal_engine.generate_signals(market)
             signals = normalize_signals(raw_signals if raw_signals else [])
 
@@ -148,8 +150,8 @@ def scanner_loop():
                     if matched_asset:
                         result_data = result_evaluator.evaluate(signal, matched_asset.get("candles", []))
                         if result_data:
-                            # Injeta horários normalizados antes de registrar no journal
                             safe_signal = dict(signal)
+
                             if idx < len(signals):
                                 safe_signal["analysis_time"] = signals[idx].get("analysis_time", "--:--")
                                 safe_signal["entry_time"] = signals[idx].get("entry_time", "--:--")
@@ -194,7 +196,7 @@ def ensure_scanner_started():
 
 
 # =========================
-# LAYOUT PREMIUM
+# LAYOUT PREMIUM + BOTÃO
 # =========================
 HTML_PAGE = """
 <!DOCTYPE html>
@@ -261,6 +263,12 @@ HTML_PAGE = """
         font-size:13px;
         letter-spacing:1.8px;
     }
+    .right-box{
+        display:flex;
+        flex-direction:column;
+        gap:10px;
+        align-items:stretch;
+    }
     .live{
         min-width:110px;
         text-align:center;
@@ -272,6 +280,21 @@ HTML_PAGE = """
         font-size:18px;
         font-weight:800;
         box-shadow:0 0 20px rgba(37,230,196,.08) inset;
+    }
+    .refresh-btn{
+        border:none;
+        border-radius:999px;
+        padding:12px 16px;
+        background:linear-gradient(180deg,#103153 0%, #153d66 100%);
+        color:#25e6c4;
+        font-size:14px;
+        font-weight:800;
+        cursor:pointer;
+        box-shadow:0 0 0 1px rgba(37,230,196,.18) inset;
+    }
+    .refresh-btn:disabled{
+        opacity:.65;
+        cursor:wait;
     }
     .metrics{
         display:grid;
@@ -426,6 +449,12 @@ HTML_PAGE = """
         .tabs{
             grid-template-columns:repeat(2,1fr);
         }
+        .hero-top{
+            align-items:flex-start;
+        }
+        .right-box{
+            min-width:120px;
+        }
     }
 </style>
 </head>
@@ -441,25 +470,28 @@ HTML_PAGE = """
                     <div class="subtitle">ULTRA ROBUSTA • AUTO LEARNING</div>
                 </div>
             </div>
-            <div class="live">● LIVE</div>
+            <div class="right-box">
+                <div class="live">● LIVE</div>
+                <button id="refreshBtn" class="refresh-btn" onclick="refreshSnapshot()">↻ Atualizar agora</button>
+            </div>
         </div>
 
         <div class="metrics">
             <div class="metric">
                 <div class="metric-label">Último scan</div>
-                <div class="metric-value">{{ last_scan }}</div>
+                <div class="metric-value" id="last_scan">{{ last_scan }}</div>
             </div>
             <div class="metric">
                 <div class="metric-label">Scans</div>
-                <div class="metric-value">{{ scan_count }}</div>
+                <div class="metric-value" id="scan_count">{{ scan_count }}</div>
             </div>
             <div class="metric">
                 <div class="metric-label">Sinais</div>
-                <div class="metric-value">{{ signal_count }}</div>
+                <div class="metric-value" id="signal_count">{{ signal_count }}</div>
             </div>
             <div class="metric">
                 <div class="metric-label">Ativos</div>
-                <div class="metric-value">{{ asset_count }}</div>
+                <div class="metric-value" id="asset_count">{{ asset_count }}</div>
             </div>
         </div>
 
@@ -475,52 +507,53 @@ HTML_PAGE = """
         <div class="card">
             <div class="section-title">Sinais atuais</div>
             <div class="section-sub">Entrada 1 minuto após a análise</div>
+            <div id="signals_container">
+                {% if signals %}
+                    {% for s in signals %}
+                    <div class="signal-card">
+                        <div class="signal-head">
+                            <div class="asset">{{ s.asset }}</div>
+                            {% if s.signal == "CALL" %}
+                                <div class="badge call">CALL</div>
+                            {% else %}
+                                <div class="badge put">PUT</div>
+                            {% endif %}
+                        </div>
 
-            {% if signals %}
-                {% for s in signals %}
-                <div class="signal-card">
-                    <div class="signal-head">
-                        <div class="asset">{{ s.asset }}</div>
-                        {% if s.signal == "CALL" %}
-                            <div class="badge call">CALL</div>
-                        {% else %}
-                            <div class="badge put">PUT</div>
-                        {% endif %}
+                        <div class="signal-grid">
+                            <div class="mini">
+                                <div class="mini-label">Score</div>
+                                <div class="mini-value">{{ s.score }}</div>
+                            </div>
+                            <div class="mini">
+                                <div class="mini-label">Confiança</div>
+                                <div class="mini-value">{{ s.confidence }}%</div>
+                            </div>
+                            <div class="mini">
+                                <div class="mini-label">Análise</div>
+                                <div class="mini-value">{{ s.analysis_time }}</div>
+                            </div>
+                            <div class="mini">
+                                <div class="mini-label">Entrada</div>
+                                <div class="mini-value">{{ s.entry_time }}</div>
+                            </div>
+                            <div class="mini">
+                                <div class="mini-label">Expiração</div>
+                                <div class="mini-value">{{ s.expiration }}</div>
+                            </div>
+                            <div class="mini">
+                                <div class="mini-label">Fonte</div>
+                                <div class="mini-value">{{ s.provider }}</div>
+                            </div>
+                        </div>
+
+                        <div class="reason">{{ s.reason_text }}</div>
                     </div>
-
-                    <div class="signal-grid">
-                        <div class="mini">
-                            <div class="mini-label">Score</div>
-                            <div class="mini-value">{{ s.score }}</div>
-                        </div>
-                        <div class="mini">
-                            <div class="mini-label">Confiança</div>
-                            <div class="mini-value">{{ s.confidence }}%</div>
-                        </div>
-                        <div class="mini">
-                            <div class="mini-label">Análise</div>
-                            <div class="mini-value">{{ s.analysis_time }}</div>
-                        </div>
-                        <div class="mini">
-                            <div class="mini-label">Entrada</div>
-                            <div class="mini-value">{{ s.entry_time }}</div>
-                        </div>
-                        <div class="mini">
-                            <div class="mini-label">Expiração</div>
-                            <div class="mini-value">{{ s.expiration }}</div>
-                        </div>
-                        <div class="mini">
-                            <div class="mini-label">Fonte</div>
-                            <div class="mini-value">{{ s.provider }}</div>
-                        </div>
-                    </div>
-
-                    <div class="reason">{{ s.reason_text }}</div>
-                </div>
-                {% endfor %}
-            {% else %}
-                <div class="empty">Nenhum sinal disponível agora.</div>
-            {% endif %}
+                    {% endfor %}
+                {% else %}
+                    <div class="empty">Nenhum sinal disponível agora.</div>
+                {% endif %}
+            </div>
         </div>
     </div>
 
@@ -528,22 +561,23 @@ HTML_PAGE = """
         <div class="card">
             <div class="section-title">Histórico recente</div>
             <div class="section-sub">Últimos sinais salvos</div>
-
-            {% if history %}
-                {% for h in history %}
-                <div class="list-card">
-                    <div class="list-title">{{ h.asset }} • {{ h.signal }}</div>
-                    <div class="muted">
-                        Análise: {{ h.analysis_time }}<br>
-                        Entrada: {{ h.entry_time }}<br>
-                        Expiração: {{ h.expiration }}<br>
-                        Score: {{ h.score }} • Confiança: {{ h.confidence }}% • Fonte: {{ h.provider }}
+            <div id="history_container">
+                {% if history %}
+                    {% for h in history %}
+                    <div class="list-card">
+                        <div class="list-title">{{ h.asset }} • {{ h.signal }}</div>
+                        <div class="muted">
+                            Análise: {{ h.analysis_time }}<br>
+                            Entrada: {{ h.entry_time }}<br>
+                            Expiração: {{ h.expiration }}<br>
+                            Score: {{ h.score }} • Confiança: {{ h.confidence }}% • Fonte: {{ h.provider }}
+                        </div>
                     </div>
-                </div>
-                {% endfor %}
-            {% else %}
-                <div class="empty">Ainda não há histórico salvo.</div>
-            {% endif %}
+                    {% endfor %}
+                {% else %}
+                    <div class="empty">Ainda não há histórico salvo.</div>
+                {% endif %}
+            </div>
         </div>
     </div>
 
@@ -553,10 +587,10 @@ HTML_PAGE = """
             <div class="section-sub">Acompanhamento do motor adaptativo</div>
 
             <div class="status-grid">
-                <div class="status-item">Total avaliadas<br><b>{{ learning_stats.total }}</b></div>
-                <div class="status-item">Win rate<br><b>{{ learning_stats.winrate }}%</b></div>
-                <div class="status-item">Wins<br><b>{{ learning_stats.wins }}</b></div>
-                <div class="status-item">Loss<br><b>{{ learning_stats.loss }}</b></div>
+                <div class="status-item">Total avaliadas<br><b id="stats_total">{{ learning_stats.total }}</b></div>
+                <div class="status-item">Win rate<br><b id="stats_winrate">{{ learning_stats.winrate }}%</b></div>
+                <div class="status-item">Wins<br><b id="stats_wins">{{ learning_stats.wins }}</b></div>
+                <div class="status-item">Loss<br><b id="stats_loss">{{ learning_stats.loss }}</b></div>
             </div>
         </div>
     </div>
@@ -565,21 +599,22 @@ HTML_PAGE = """
         <div class="card">
             <div class="section-title">Melhores ativos</div>
             <div class="section-sub">Ranking baseado no histórico avaliado</div>
-
-            {% if best_assets %}
-                {% for item in best_assets %}
-                <div class="list-card">
-                    <div class="list-title">{{ item.asset }}</div>
-                    <div class="muted">
-                        Win rate: <b>{{ item.winrate }}%</b><br>
-                        Trades: <b>{{ item.total }}</b><br>
-                        Wins: <b>{{ item.wins }}</b>
+            <div id="assets_container">
+                {% if best_assets %}
+                    {% for item in best_assets %}
+                    <div class="list-card">
+                        <div class="list-title">{{ item.asset }}</div>
+                        <div class="muted">
+                            Win rate: <b>{{ item.winrate }}%</b><br>
+                            Trades: <b>{{ item.total }}</b><br>
+                            Wins: <b>{{ item.wins }}</b>
+                        </div>
                     </div>
-                </div>
-                {% endfor %}
-            {% else %}
-                <div class="empty">Ainda sem dados suficientes.</div>
-            {% endif %}
+                    {% endfor %}
+                {% else %}
+                    <div class="empty">Ainda sem dados suficientes.</div>
+                {% endif %}
+            </div>
         </div>
     </div>
 
@@ -598,71 +633,25 @@ function showTab(tabId, btn){
     document.getElementById(tabId).classList.add('active');
     btn.classList.add('active');
 }
-</script>
-</body>
-</html>
-"""
 
+function escapeHtml(text){
+    if(text === null || text === undefined) return "";
+    return String(text)
+        .replaceAll("&","&amp;")
+        .replaceAll("<","&lt;")
+        .replaceAll(">","&gt;")
+        .replaceAll('"',"&quot;")
+        .replaceAll("'","&#039;");
+}
 
-@app.before_request
-def _boot():
-    ensure_scanner_started()
+function renderSignals(signals){
+    const container = document.getElementById("signals_container");
 
+    if(!signals || signals.length === 0){
+        container.innerHTML = '<div class="empty">Nenhum sinal disponível agora.</div>';
+        return;
+    }
 
-@app.route("/")
-def home():
-    ensure_scanner_started()
-
-    signals, history, meta = load_state()
-    learning_stats = journal.stats()
-    best_assets = journal.best_assets()
-
-    return render_template_string(
-        HTML_PAGE,
-        signals=signals,
-        history=history[:20],
-        last_scan=meta.get("last_scan", "--"),
-        scan_count=meta.get("scan_count", 0),
-        signal_count=len(signals),
-        asset_count=len(ASSETS),
-        learning_stats=learning_stats,
-        best_assets=best_assets
-    )
-
-
-@app.route("/health")
-def health():
-    ensure_scanner_started()
-    return {"status": "running"}
-
-
-@app.route("/signals")
-def signals():
-    ensure_scanner_started()
-    signals, _, _ = load_state()
-    return jsonify(signals)
-
-
-@app.route("/history")
-def history():
-    ensure_scanner_started()
-    _, history, _ = load_state()
-    return jsonify(history)
-
-
-@app.route("/learning-stats")
-def learning_stats():
-    ensure_scanner_started()
-    return jsonify(journal.stats())
-
-
-@app.route("/best-assets")
-def best_assets():
-    ensure_scanner_started()
-    return jsonify(journal.best_assets())
-
-
-if __name__ == "__main__":
-    ensure_scanner_started()
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    let html = "";
+    signals.forEach(function(s){
+        const b
