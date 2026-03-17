@@ -1,18 +1,12 @@
+from journal_manager import JournalManager
+
+
 class LearningEngine:
     def __init__(self):
-        self.asset_stats = {}
-        self.total_trades = 0
-        self.total_wins = 0
+        self.journal = JournalManager()
 
-    # Compatível com chamadas como:
-    # bonus, reason = get_adaptive_bonus(asset)
-    # bonus, reason = get_adaptive_bonus(asset, score)
-    # bonus, reason = get_adaptive_bonus(asset, score, anything)
     def get_adaptive_bonus(self, asset, *args, **kwargs):
-        stats = self.asset_stats.get(asset)
-
-        if not stats:
-            return 0, "Sem histórico suficiente"
+        stats = self.journal.asset_stats(asset)
 
         total = stats.get("total", 0)
         wins = stats.get("wins", 0)
@@ -31,42 +25,25 @@ class LearningEngine:
 
         return 0, "Neutro"
 
-    # Mantido por compatibilidade
     def update_stats(self, signals):
         return
 
     def register_result(self, signal, result_data):
-        asset = signal.get("asset")
-        if not asset:
-            return
+        trade = {
+            "asset": signal.get("asset"),
+            "signal": signal.get("signal"),
+            "score": signal.get("score", 0),
+            "confidence": signal.get("confidence", 0),
+            "provider": signal.get("provider", "auto"),
+            "analysis_time": signal.get("analysis_time", "--:--"),
+            "entry_time": signal.get("entry_time", "--:--"),
+            "expiration": signal.get("expiration", "--:--"),
+            "entry_price": result_data.get("entry_price"),
+            "exit_price": result_data.get("exit_price"),
+            "result": result_data.get("result", "UNKNOWN"),
+        }
 
-        if asset not in self.asset_stats:
-            self.asset_stats[asset] = {
-                "wins": 0,
-                "total": 0
-            }
-
-        self.asset_stats[asset]["total"] += 1
-        self.total_trades += 1
-
-        if result_data.get("result") == "WIN":
-            self.asset_stats[asset]["wins"] += 1
-            self.total_wins += 1
+        self.journal.add_trade(trade)
 
     def get_stats(self):
-        if self.total_trades == 0:
-            return {
-                "total": 0,
-                "wins": 0,
-                "loss": 0,
-                "winrate": 0
-            }
-
-        winrate = (self.total_wins / self.total_trades) * 100
-
-        return {
-            "total": self.total_trades,
-            "wins": self.total_wins,
-            "loss": self.total_trades - self.total_wins,
-            "winrate": round(winrate, 2)
-        }
+        return self.journal.stats()
