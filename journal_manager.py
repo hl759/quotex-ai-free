@@ -38,15 +38,17 @@ class JournalManager:
 
     def _extract_hour_bucket(self, trade):
         try:
-            time_value = trade.get("analysis_time", "")
-            if not time_value or ":" not in time_value:
+            analysis_time = str(trade.get("analysis_time", "")).strip()
+
+            if ":" not in analysis_time:
                 return None
 
-            hour = int(str(time_value).split(":")[0])
-            if hour < 0 or hour > 23:
-                return None
+            hour = int(analysis_time.split(":")[0])
 
-            return f"{hour:02d}:00"
+            if 0 <= hour <= 23:
+                return f"{hour:02d}:00"
+
+            return None
         except Exception:
             return None
 
@@ -60,8 +62,8 @@ class JournalManager:
 
         data.insert(0, trade)
 
-        if len(data) > 1000:
-            data = data[:1000]
+        if len(data) > 500:
+            data = data[:500]
 
         self._save(data)
 
@@ -212,6 +214,3 @@ class JournalManager:
         result.sort(key=lambda x: (x["winrate"], x["total"]), reverse=True)
 
         return result[:10]
-
-    def recent_trades(self, limit=20):
-        return self._valid_trades()[:limit]
