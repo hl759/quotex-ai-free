@@ -233,6 +233,27 @@ HTML_PAGE = """
         font-size:24px;
         font-weight:800;
     }
+    .tabs{
+        display:grid;
+        grid-template-columns:repeat(4,1fr);
+        gap:12px;
+        margin-top:18px;
+    }
+    .tab-btn{
+        border:none;
+        border-radius:18px;
+        padding:16px 10px;
+        background:#132b49;
+        color:#a8bdd8;
+        font-size:14px;
+        font-weight:800;
+        cursor:pointer;
+    }
+    .tab-btn.active{
+        background:linear-gradient(180deg,#103153 0%, #153d66 100%);
+        color:#25e6c4;
+        box-shadow:0 0 0 1px rgba(37,230,196,.18) inset;
+    }
     .section-title{
         font-size:17px;
         font-weight:800;
@@ -320,6 +341,32 @@ HTML_PAGE = """
         color:#9bb2cf;
         padding:26px 10px;
     }
+    .panel{
+        display:none;
+    }
+    .panel.active{
+        display:block;
+    }
+    .list-card{
+        background:#132b49;
+        border-radius:18px;
+        padding:14px;
+        margin-top:12px;
+    }
+    .list-title{
+        font-size:18px;
+        font-weight:800;
+        margin-bottom:6px;
+    }
+    .muted{
+        color:#9bb2cf;
+        line-height:1.5;
+    }
+    @media(max-width:640px){
+        .tabs{
+            grid-template-columns:repeat(2,1fr);
+        }
+    }
 </style>
 </head>
 <body>
@@ -355,89 +402,143 @@ HTML_PAGE = """
                 <div class="metric-value">{{ asset_count }}</div>
             </div>
         </div>
-    </div>
 
-    <div class="card">
-        <div class="section-title">Aprendizado</div>
-        <div class="section-sub">Acompanhamento do motor adaptativo</div>
-        <div class="status-grid">
-            <div class="status-item">Total avaliadas<br><b>{{ learning_stats.total }}</b></div>
-            <div class="status-item">Win rate<br><b>{{ learning_stats.winrate }}%</b></div>
-            <div class="status-item">Wins<br><b>{{ learning_stats.wins }}</b></div>
-            <div class="status-item">Loss<br><b>{{ learning_stats.loss }}</b></div>
+        <div class="tabs">
+            <button class="tab-btn active" onclick="showTab('signals', this)">⚡ Sinais</button>
+            <button class="tab-btn" onclick="showTab('history', this)">📋 Histórico</button>
+            <button class="tab-btn" onclick="showTab('stats', this)">📊 Stats</button>
+            <button class="tab-btn" onclick="showTab('assets', this)">🏆 Ativos</button>
         </div>
     </div>
 
-    <div class="card">
-        <div class="section-title">Sinais atuais</div>
-        <div class="section-sub">Entrada 1 minuto após a análise</div>
+    <div id="signals" class="panel active">
+        <div class="card">
+            <div class="section-title">Sinais atuais</div>
+            <div class="section-sub">Entrada 1 minuto após a análise</div>
 
-        {% if signals %}
-            {% for s in signals %}
-            <div class="signal-card">
-                <div class="signal-head">
-                    <div class="asset">{{ s.asset }}</div>
-                    {% if s.signal == "CALL" %}
-                        <div class="badge call">CALL</div>
-                    {% else %}
-                        <div class="badge put">PUT</div>
-                    {% endif %}
+            {% if signals %}
+                {% for s in signals %}
+                <div class="signal-card">
+                    <div class="signal-head">
+                        <div class="asset">{{ s.asset }}</div>
+                        {% if s.signal == "CALL" %}
+                            <div class="badge call">CALL</div>
+                        {% else %}
+                            <div class="badge put">PUT</div>
+                        {% endif %}
+                    </div>
+
+                    <div class="signal-grid">
+                        <div class="mini">
+                            <div class="mini-label">Score</div>
+                            <div class="mini-value">{{ s.score }}</div>
+                        </div>
+                        <div class="mini">
+                            <div class="mini-label">Confiança</div>
+                            <div class="mini-value">{{ s.confidence }}%</div>
+                        </div>
+                        <div class="mini">
+                            <div class="mini-label">Análise</div>
+                            <div class="mini-value">{{ s.analysis_time }}</div>
+                        </div>
+                        <div class="mini">
+                            <div class="mini-label">Entrada</div>
+                            <div class="mini-value">{{ s.entry_time }}</div>
+                        </div>
+                        <div class="mini">
+                            <div class="mini-label">Expiração</div>
+                            <div class="mini-value">{{ s.expiration }}</div>
+                        </div>
+                        <div class="mini">
+                            <div class="mini-label">Fonte</div>
+                            <div class="mini-value">{{ s.provider }}</div>
+                        </div>
+                    </div>
+
+                    <div class="reason">{{ s.reason_text }}</div>
                 </div>
-
-                <div class="signal-grid">
-                    <div class="mini">
-                        <div class="mini-label">Score</div>
-                        <div class="mini-value">{{ s.score }}</div>
-                    </div>
-                    <div class="mini">
-                        <div class="mini-label">Confiança</div>
-                        <div class="mini-value">{{ s.confidence }}%</div>
-                    </div>
-                    <div class="mini">
-                        <div class="mini-label">Análise</div>
-                        <div class="mini-value">{{ s.analysis_time }}</div>
-                    </div>
-                    <div class="mini">
-                        <div class="mini-label">Entrada</div>
-                        <div class="mini-value">{{ s.entry_time }}</div>
-                    </div>
-                    <div class="mini">
-                        <div class="mini-label">Expiração</div>
-                        <div class="mini-value">{{ s.expiration }}</div>
-                    </div>
-                    <div class="mini">
-                        <div class="mini-label">Fonte</div>
-                        <div class="mini-value">{{ s.provider }}</div>
-                    </div>
-                </div>
-
-                <div class="reason">{{ s.reason_text }}</div>
-            </div>
-            {% endfor %}
-        {% else %}
-            <div class="empty">Nenhum sinal disponível agora.</div>
-        {% endif %}
+                {% endfor %}
+            {% else %}
+                <div class="empty">Nenhum sinal disponível agora.</div>
+            {% endif %}
+        </div>
     </div>
 
-    <div class="card">
-        <div class="section-title">Melhores ativos</div>
-        <div class="section-sub">Ranking baseado no histórico avaliado</div>
+    <div id="history" class="panel">
+        <div class="card">
+            <div class="section-title">Histórico recente</div>
+            <div class="section-sub">Últimos sinais salvos</div>
 
-        {% if best_assets %}
-            {% for item in best_assets %}
-            <div class="signal-card" style="padding:14px;">
-                <div style="font-weight:800;font-size:18px;">{{ item.asset }}</div>
-                <div class="section-sub" style="margin:8px 0 0 0;">
-                    Win rate: <b>{{ item.winrate }}%</b> · Trades: <b>{{ item.total }}</b>
+            {% if history %}
+                {% for h in history %}
+                <div class="list-card">
+                    <div class="list-title">{{ h.asset }} • {{ h.signal }}</div>
+                    <div class="muted">
+                        Análise: {{ h.analysis_time }}<br>
+                        Entrada: {{ h.entry_time }}<br>
+                        Expiração: {{ h.expiration }}<br>
+                        Score: {{ h.score }} • Confiança: {{ h.confidence }}% • Fonte: {{ h.provider }}
+                    </div>
                 </div>
+                {% endfor %}
+            {% else %}
+                <div class="empty">Ainda não há histórico salvo.</div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div id="stats" class="panel">
+        <div class="card">
+            <div class="section-title">Aprendizado</div>
+            <div class="section-sub">Acompanhamento do motor adaptativo</div>
+
+            <div class="status-grid">
+                <div class="status-item">Total avaliadas<br><b>{{ learning_stats.total }}</b></div>
+                <div class="status-item">Win rate<br><b>{{ learning_stats.winrate }}%</b></div>
+                <div class="status-item">Wins<br><b>{{ learning_stats.wins }}</b></div>
+                <div class="status-item">Loss<br><b>{{ learning_stats.loss }}</b></div>
             </div>
-            {% endfor %}
-        {% else %}
-            <div class="empty">Ainda sem dados suficientes.</div>
-        {% endif %}
+        </div>
+    </div>
+
+    <div id="assets" class="panel">
+        <div class="card">
+            <div class="section-title">Melhores ativos</div>
+            <div class="section-sub">Ranking baseado no histórico avaliado</div>
+
+            {% if best_assets %}
+                {% for item in best_assets %}
+                <div class="list-card">
+                    <div class="list-title">{{ item.asset }}</div>
+                    <div class="muted">
+                        Win rate: <b>{{ item.winrate }}%</b><br>
+                        Trades: <b>{{ item.total }}</b><br>
+                        Wins: <b>{{ item.wins }}</b>
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="empty">Ainda sem dados suficientes.</div>
+            {% endif %}
+        </div>
     </div>
 
 </div>
+
+<script>
+function showTab(tabId, btn){
+    document.querySelectorAll('.panel').forEach(function(panel){
+        panel.classList.remove('active');
+    });
+
+    document.querySelectorAll('.tab-btn').forEach(function(button){
+        button.classList.remove('active');
+    });
+
+    document.getElementById(tabId).classList.add('active');
+    btn.classList.add('active');
+}
+</script>
 </body>
 </html>
 """
@@ -445,13 +546,14 @@ HTML_PAGE = """
 
 @app.route("/")
 def home():
-    signals, _, meta = load_state()
+    signals, history, meta = load_state()
     learning_stats = journal.stats()
     best_assets = journal.best_assets()
 
     return render_template_string(
         HTML_PAGE,
         signals=signals,
+        history=history[:20],
         last_scan=meta.get("last_scan", "--"),
         scan_count=meta.get("scan_count", 0),
         signal_count=len(signals),
@@ -470,6 +572,12 @@ def health():
 def signals():
     signals, _, _ = load_state()
     return jsonify(signals)
+
+
+@app.route("/history")
+def history():
+    _, history, _ = load_state()
+    return jsonify(history)
 
 
 @app.route("/learning-stats")
