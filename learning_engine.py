@@ -4,35 +4,34 @@ class LearningEngine:
         self.total_trades = 0
         self.total_wins = 0
 
-    # Compatível com chamadas antigas e novas
-    # Pode receber:
-    # get_adaptive_bonus(asset)
-    # get_adaptive_bonus(asset, score)
-    # get_adaptive_bonus(asset, score, ...)
+    # Compatível com chamadas como:
+    # bonus, reason = get_adaptive_bonus(asset)
+    # bonus, reason = get_adaptive_bonus(asset, score)
+    # bonus, reason = get_adaptive_bonus(asset, score, anything)
     def get_adaptive_bonus(self, asset, *args, **kwargs):
         stats = self.asset_stats.get(asset)
 
         if not stats:
-            return 0
+            return 0, "Sem histórico suficiente"
 
         total = stats.get("total", 0)
         wins = stats.get("wins", 0)
 
         if total < 5:
-            return 0
+            return 0, "Histórico insuficiente"
 
         winrate = wins / total
 
         if winrate >= 0.65:
-            return 2
+            return 2, "Bônus adaptativo forte"
         if winrate >= 0.55:
-            return 1
+            return 1, "Bônus adaptativo leve"
         if winrate <= 0.40:
-            return -1
+            return -1, "Penalidade adaptativa"
 
-        return 0
+        return 0, "Neutro"
 
-    # Mantido por compatibilidade com o app atual
+    # Mantido por compatibilidade
     def update_stats(self, signals):
         return
 
