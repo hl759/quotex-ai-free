@@ -5,50 +5,37 @@ class LearningEngine:
     def __init__(self):
         self.journal = JournalManager()
 
-    def _normalize_hour_bucket(self, raw_hour):
-        try:
-            if raw_hour is None:
-                return None
+    def _extract_hour_bucket(self, *args, **kwargs):
+        candidates = list(args)
 
-            if isinstance(raw_hour, int):
-                hour = raw_hour
-            else:
-                text = str(raw_hour).strip()
+        if "hour" in kwargs:
+            candidates.append(kwargs.get("hour"))
+
+        for value in candidates:
+            try:
+                if value is None:
+                    continue
+
+                text = str(value).strip()
 
                 if ":" in text:
                     hour = int(text.split(":")[0])
                 else:
                     hour = int(text)
 
-            if hour < 0 or hour > 23:
-                return None
+                if 0 <= hour <= 23:
+                    return f"{hour:02d}:00"
+            except Exception:
+                continue
 
-            return f"{hour:02d}:00"
-        except Exception:
-            return None
+        return None
 
     def get_adaptive_bonus(self, asset, *args, **kwargs):
         asset_bonus = 0
         hour_bonus = 0
         reasons = []
 
-        # compatível com chamadas antigas e novas
-        # exemplos:
-        # get_adaptive_bonus(asset)
-        # get_adaptive_bonus(asset, "14:00")
-        # get_adaptive_bonus(asset, 14)
-        # get_adaptive_bonus(asset, score, "14:00")
-        hour_candidate = None
-
-        for arg in args:
-            normalized = self._normalize_hour_bucket(arg)
-            if normalized is not None:
-                hour_candidate = normalized
-                break
-
-        if hour_candidate is None:
-            hour_candidate = self._normalize_hour_bucket(kwargs.get("hour"))
-
+        # bônus por ativo
         asset_stats = self.journal.asset_stats(asset)
         asset_total = asset_stats.get("total", 0)
         asset_winrate = asset_stats.get("winrate", 0.0)
@@ -56,16 +43,19 @@ class LearningEngine:
         if asset_total >= 5:
             if asset_winrate >= 65:
                 asset_bonus = 2
-                reasons.append("Ativo com win rate forte")
+                reasons.append("Ativo forte")
             elif asset_winrate >= 55:
                 asset_bonus = 1
-                reasons.append("Ativo com win rate favorável")
+                reasons.append("Ativo favorável")
             elif asset_winrate <= 40:
                 asset_bonus = -1
-                reasons.append("Ativo com win rate fraco")
+                reasons.append("Ativo fraco")
 
-        if hour_candidate:
-            hour_stats = self.journal.hour_stats(hour_candidate)
+        # bônus por horário
+        hour_bucket = self._extract_hour_bucket(*args, **kwargs)
+
+        if hour_bucket:
+            hour_stats = self.journal.hour_stats(hour_bucket)
             hour_total = hour_stats.get("total", 0)
             hour_winrate = hour_stats.get("winrate", 0.0)
 
@@ -89,14 +79,12 @@ class LearningEngine:
         total = stats.get("total", 0)
         winrate = stats.get("winrate", 0.0)
 
-        # filtro conservador: só corta quando já há histórico suficiente
         if total >= 12 and winrate <= 35:
             return True
 
         return False
 
     def update_stats(self, signals):
-        # Mantido por compatibilidade com o restante da Nexus
         return
 
     def register_result(self, signal, result_data):
