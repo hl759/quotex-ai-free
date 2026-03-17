@@ -1,265 +1,104 @@
-import time
-import requests
+import time, requests
 from datetime import datetime
-from config import (
-    TWELVE_API_KEYS, FINNHUB_API_KEY, ALPHA_VANTAGE_API_KEY,
-    TWELVE_DAILY_SOFT_LIMIT_PER_KEY, TWELVE_MINUTE_LIMIT_PER_KEY, TWELVE_GLOBAL_DAILY_HARD_STOP,
-    CACHE_TTL_1MIN, CACHE_TTL_5MIN, ECONOMY_MODE_AFTER_TOTAL, FREEZE_TWELVE_AFTER_TOTAL,
-    FINNHUB_PAUSE_SECONDS, ALPHA_PAUSE_SECONDS,
-)
-
+from config import TWELVE_API_KEYS, FINNHUB_API_KEY, ALPHA_VANTAGE_API_KEY, TWELVE_DAILY_SOFT_LIMIT_PER_KEY, TWELVE_MINUTE_LIMIT_PER_KEY, TWELVE_GLOBAL_DAILY_HARD_STOP, CACHE_TTL_1MIN, CACHE_TTL_5MIN, ECONOMY_MODE_AFTER_TOTAL, FREEZE_TWELVE_AFTER_TOTAL, FINNHUB_PAUSE_SECONDS, ALPHA_PAUSE_SECONDS
 class DataManager:
     def __init__(self):
-        self.cache = {}
-        self.day_marker = datetime.utcnow().strftime("%Y-%m-%d")
-        self.credits_today = 0
-        self.last_provider_used = {}
-        self.twelve_frozen_for_day = False
-        self.twelve_pause_until_ts = 0
-        self.finnhub_frozen_for_day = False
-        self.finnhub_pause_until_ts = 0
-        self.alpha_frozen_for_day = False
-        self.alpha_pause_until_ts = 0
-        self.key_usage = [{"key": k, "daily": 0, "minute": 0, "minute_window_start": time.time()} for k in TWELVE_API_KEYS]
-
+        self.cache={}; self.day_marker=datetime.utcnow().strftime("%Y-%m-%d"); self.credits_today=0; self.last_provider_used={}; self.twelve_frozen_for_day=False; self.twelve_pause_until_ts=0; self.finnhub_pause_until_ts=0; self.alpha_pause_until_ts=0; self.key_usage=[{"key":k,"daily":0,"minute":0,"minute_window_start":time.time()} for k in TWELVE_API_KEYS]
     def _reset_daily_if_needed(self):
-        current_day = datetime.utcnow().strftime("%Y-%m-%d")
-        if current_day != self.day_marker:
-            self.day_marker = current_day
-            self.credits_today = 0
-            self.twelve_frozen_for_day = False
-            self.twelve_pause_until_ts = 0
-            self.finnhub_frozen_for_day = False
-            self.finnhub_pause_until_ts = 0
-            self.alpha_frozen_for_day = False
-            self.alpha_pause_until_ts = 0
-            for item in self.key_usage:
-                item["daily"] = 0
-                item["minute"] = 0
-                item["minute_window_start"] = time.time()
-
+        d=datetime.utcnow().strftime("%Y-%m-%d")
+        if d!=self.day_marker:
+            self.day_marker=d; self.credits_today=0; self.twelve_frozen_for_day=False; self.twelve_pause_until_ts=0; self.finnhub_pause_until_ts=0; self.alpha_pause_until_ts=0
+            for i in self.key_usage: i["daily"]=0; i["minute"]=0; i["minute_window_start"]=time.time()
     def _reset_minute_windows_if_needed(self):
-        now = time.time()
-        for item in self.key_usage:
-            if now - item["minute_window_start"] >= 60:
-                item["minute"] = 0
-                item["minute_window_start"] = now
-
-    def _is_crypto(self, symbol):
-        return symbol.endswith(("USDT", "BUSD", "BTC", "ETH", "BNB"))
-
-    def _get_cache_ttl(self, interval):
-        return CACHE_TTL_5MIN if interval == "5min" else CACHE_TTL_1MIN
-
-    def _cache_key(self, provider, symbol, interval):
-        return f"{provider}:{symbol}:{interval}"
-
-    def _get_from_cache(self, provider, symbol, interval):
-        item = self.cache.get(self._cache_key(provider, symbol, interval))
-        if not item or time.time() > item["expires_at"]:
-            return None
+        n=time.time()
+        for i in self.key_usage:
+            if n-i["minute_window_start"]>=60: i["minute"]=0; i["minute_window_start"]=n
+    def _is_crypto(self,s): return s.endswith(("USDT","BUSD","BTC","ETH","BNB"))
+    def _ttl(self,interval): return CACHE_TTL_5MIN if interval=="5min" else CACHE_TTL_1MIN
+    def _ck(self,p,s,i): return f"{p}:{s}:{i}"
+    def _get(self,p,s,i):
+        item=self.cache.get(self._ck(p,s,i))
+        if not item or time.time()>item["expires_at"]: return None
         return item["data"]
-
-    def _set_cache(self, provider, symbol, interval, data):
-        self.cache[self._cache_key(provider, symbol, interval)] = {
-            "data": data,
-            "expires_at": time.time() + self._get_cache_ttl(interval)
-        }
-
-    def _to_twelve_symbol(self, symbol):
-        return {
-            "EURUSD":"EUR/USD","GBPUSD":"GBP/USD","USDJPY":"USD/JPY","AUDUSD":"AUD/USD","USDCAD":"USD/CAD",
-            "USDCHF":"USD/CHF","NZDUSD":"NZD/USD","EURJPY":"EUR/JPY","GBPJPY":"GBP/JPY","EURGBP":"EUR/GBP",
-            "GOLD":"XAU/USD","SILVER":"XAG/USD",
-        }.get(symbol, symbol)
-
-    def _to_finnhub_symbol(self, symbol):
-        return {
-            "EURUSD":"OANDA:EUR_USD","GBPUSD":"OANDA:GBP_USD","USDJPY":"OANDA:USD_JPY","AUDUSD":"OANDA:AUD_USD",
-            "USDCAD":"OANDA:USD_CAD","USDCHF":"OANDA:USD_CHF","NZDUSD":"OANDA:NZD_USD",
-            "EURJPY":"OANDA:EUR_JPY","GBPJPY":"OANDA:GBP_JPY","EURGBP":"OANDA:EUR_GBP",
-        }.get(symbol)
-
-    def _choose_twelve_key_index(self):
+    def _set(self,p,s,i,d): self.cache[self._ck(p,s,i)]={"data":d,"expires_at":time.time()+self._ttl(i)}
+    def _to_twelve(self,s): return {"EURUSD":"EUR/USD","GBPUSD":"GBP/USD","USDJPY":"USD/JPY","AUDUSD":"AUD/USD","USDCAD":"USD/CAD","USDCHF":"USD/CHF","NZDUSD":"NZD/USD","EURJPY":"EUR/JPY","GBPJPY":"GBP/JPY","EURGBP":"EUR/GBP","GOLD":"XAU/USD","SILVER":"XAG/USD"}.get(s,s)
+    def _to_finnhub(self,s): return {"EURUSD":"OANDA:EUR_USD","GBPUSD":"OANDA:GBP_USD","USDJPY":"OANDA:USD_JPY","AUDUSD":"OANDA:AUD_USD","USDCAD":"OANDA:USD_CAD","USDCHF":"OANDA:USD_CHF","NZDUSD":"OANDA:NZD_USD","EURJPY":"OANDA:EUR_JPY","GBPJPY":"OANDA:GBP_JPY","EURGBP":"OANDA:EUR_GBP"}.get(s)
+    def _choose_twelve(self):
+        self._reset_daily_if_needed(); self._reset_minute_windows_if_needed()
+        if self.twelve_frozen_for_day or time.time()<self.twelve_pause_until_ts or self.credits_today>=FREEZE_TWELVE_AFTER_TOTAL:
+            self.twelve_frozen_for_day=self.credits_today>=FREEZE_TWELVE_AFTER_TOTAL; return None
+        a=[i for i,x in enumerate(self.key_usage) if x["daily"]<TWELVE_DAILY_SOFT_LIMIT_PER_KEY and x["minute"]<TWELVE_MINUTE_LIMIT_PER_KEY]
+        if not a: return None
+        a.sort(key=lambda idx:self.key_usage[idx]["daily"]); return a[0]
+    def _consume(self,idx): self.key_usage[idx]["daily"]+=1; self.key_usage[idx]["minute"]+=1; self.credits_today+=1
+    def _norm_twelve(self,vals): return [{"datetime":r.get("datetime"),"open":r.get("open"),"high":r.get("high"),"low":r.get("low"),"close":r.get("close"),"volume":r.get("volume","0")} for r in vals]
+    def _norm_binance(self,rows):
+        out=[]
+        for it in rows: out.append({"datetime":datetime.utcfromtimestamp(it[0]/1000).strftime("%Y-%m-%d %H:%M:%S"),"open":str(it[1]),"high":str(it[2]),"low":str(it[3]),"close":str(it[4]),"volume":str(it[5])})
+        out.reverse(); return out
+    def _norm_finnhub(self,d):
+        if d.get("s")!="ok" or not d.get("c"): return None
+        out=[]
+        for i in range(len(d["c"])): out.append({"datetime":datetime.utcfromtimestamp(d["t"][i]).strftime("%Y-%m-%d %H:%M:%S"),"open":str(d["o"][i]),"high":str(d["h"][i]),"low":str(d["l"][i]),"close":str(d["c"][i]),"volume":str(d["v"][i] if i<len(d["v"]) else 0)})
+        out.reverse(); return out
+    def _norm_alpha(self,d):
+        ts=d.get("Time Series FX (1min)",{})
+        if not ts: return None
+        return [{"datetime":k,"open":v.get("1. open"),"high":v.get("2. high"),"low":v.get("3. low"),"close":v.get("4. close"),"volume":"0"} for k,v in list(ts.items())[:50]]
+    def _fetch_binance(self,s,interval="1min",limit=50):
+        c=self._get("binance",s,interval)
+        if c: self.last_provider_used[s]="binance-cache"; return c
+        try:
+            r=requests.get("https://data-api.binance.vision/api/v3/klines",params={"symbol":s,"interval":"5m" if interval=="5min" else "1m","limit":limit},timeout=10); d=r.json()
+            if not isinstance(d,list): return None
+            c=self._norm_binance(d); self._set("binance",s,interval,c); self.last_provider_used[s]="binance"; return c
+        except Exception: return None
+    def _fetch_finnhub(self,s,interval="1min"):
+        c=self._get("finnhub",s,interval)
+        if c: self.last_provider_used[s]="finnhub-cache"; return c
+        if not FINNHUB_API_KEY or time.time()<self.finnhub_pause_until_ts: return None
+        sym=self._to_finnhub(s)
+        if not sym: return None
+        try:
+            to_ts=int(time.time()); from_ts=to_ts-60*50
+            r=requests.get("https://finnhub.io/api/v1/forex/candle",params={"symbol":sym,"resolution":"1","from":from_ts,"to":to_ts,"token":FINNHUB_API_KEY},timeout=10); d=r.json()
+            if d.get("error"): self.finnhub_pause_until_ts=time.time()+FINNHUB_PAUSE_SECONDS; return None
+            c=self._norm_finnhub(d)
+            if not c: return None
+            self._set("finnhub",s,interval,c); self.last_provider_used[s]="finnhub"; return c
+        except Exception: self.finnhub_pause_until_ts=time.time()+FINNHUB_PAUSE_SECONDS; return None
+    def _fetch_twelve(self,s,interval="1min",outputsize=50):
+        c=self._get("twelve",s,interval)
+        if c: self.last_provider_used[s]="twelve-cache"; return c
+        self._reset_daily_if_needed(); self._reset_minute_windows_if_needed()
+        if self.twelve_frozen_for_day or time.time()<self.twelve_pause_until_ts or self.credits_today>=TWELVE_GLOBAL_DAILY_HARD_STOP: self.twelve_frozen_for_day=self.credits_today>=TWELVE_GLOBAL_DAILY_HARD_STOP; return None
+        idx=self._choose_twelve()
+        if idx is None: return None
+        try:
+            r=requests.get("https://api.twelvedata.com/time_series",params={"symbol":self._to_twelve(s),"interval":interval,"outputsize":outputsize,"apikey":self.key_usage[idx]["key"]},timeout=10); d=r.json()
+            if "values" not in d:
+                msg=str(d.get("message","")).lower()
+                if d.get("code")==429 and "for the day" in msg: self.twelve_frozen_for_day=True
+                elif d.get("code")==429: self.twelve_pause_until_ts=time.time()+65
+                return None
+            c=self._norm_twelve(d["values"]); self._set("twelve",s,interval,c); self._consume(idx); self.last_provider_used[s]=f"twelve-key-{idx+1}"; return c
+        except Exception: self.twelve_pause_until_ts=time.time()+30; return None
+    def _fetch_alpha(self,s,interval="1min"):
+        c=self._get("alpha",s,interval)
+        if c: self.last_provider_used[s]="alpha-cache"; return c
+        if not ALPHA_VANTAGE_API_KEY or time.time()<self.alpha_pause_until_ts or len(s)!=6: return None
+        try:
+            r=requests.get("https://www.alphavantage.co/query",params={"function":"FX_INTRADAY","from_symbol":s[:3],"to_symbol":s[3:],"interval":"1min","outputsize":"compact","apikey":ALPHA_VANTAGE_API_KEY},timeout=12); d=r.json()
+            if "Note" in d or "Information" in d: self.alpha_pause_until_ts=time.time()+ALPHA_PAUSE_SECONDS; return None
+            c=self._norm_alpha(d)
+            if not c: return None
+            self._set("alpha",s,interval,c); self.last_provider_used[s]="alpha"; return c
+        except Exception: self.alpha_pause_until_ts=time.time()+ALPHA_PAUSE_SECONDS; return None
+    def get_candles(self,s,interval="1min",outputsize=50):
         self._reset_daily_if_needed()
-        self._reset_minute_windows_if_needed()
-        if self.twelve_frozen_for_day or time.time() < self.twelve_pause_until_ts or self.credits_today >= FREEZE_TWELVE_AFTER_TOTAL:
-            self.twelve_frozen_for_day = self.credits_today >= FREEZE_TWELVE_AFTER_TOTAL or self.twelve_frozen_for_day
-            return None
-        available = [i for i, item in enumerate(self.key_usage) if item["daily"] < TWELVE_DAILY_SOFT_LIMIT_PER_KEY and item["minute"] < TWELVE_MINUTE_LIMIT_PER_KEY]
-        if not available:
-            return None
-        available.sort(key=lambda idx: self.key_usage[idx]["daily"])
-        return available[0]
-
-    def _consume_twelve_credit(self, key_index):
-        self.key_usage[key_index]["daily"] += 1
-        self.key_usage[key_index]["minute"] += 1
-        self.credits_today += 1
-
-    def _normalize_twelve_values(self, values):
-        return [{"datetime": r.get("datetime"), "open": r.get("open"), "high": r.get("high"), "low": r.get("low"), "close": r.get("close"), "volume": r.get("volume", "0")} for r in values]
-
-    def _normalize_binance_klines(self, klines):
-        out = []
-        for item in klines:
-            out.append({"datetime": datetime.utcfromtimestamp(item[0] / 1000).strftime("%Y-%m-%d %H:%M:%S"), "open": str(item[1]), "high": str(item[2]), "low": str(item[3]), "close": str(item[4]), "volume": str(item[5])})
-        out.reverse()
-        return out
-
-    def _normalize_finnhub(self, data):
-        if not data.get("c") or data.get("s") != "ok":
-            return None
-        out = []
-        for i in range(len(data["c"])):
-            out.append({
-                "datetime": datetime.utcfromtimestamp(data["t"][i]).strftime("%Y-%m-%d %H:%M:%S"),
-                "open": str(data["o"][i]), "high": str(data["h"][i]), "low": str(data["l"][i]),
-                "close": str(data["c"][i]), "volume": str(data["v"][i] if i < len(data["v"]) else 0)
-            })
-        out.reverse()
-        return out
-
-    def _normalize_alpha_fx(self, data):
-        ts = data.get("Time Series FX (1min)", {})
-        if not ts:
-            return None
-        out = []
-        for dt_str, row in ts.items():
-            out.append({"datetime": dt_str, "open": row.get("1. open"), "high": row.get("2. high"), "low": row.get("3. low"), "close": row.get("4. close"), "volume": "0"})
-        return out[:50]
-
-    def _fetch_binance(self, symbol, interval="1min", limit=50):
-        cached = self._get_from_cache("binance", symbol, interval)
-        if cached:
-            self.last_provider_used[symbol] = "binance-cache"
-            return cached
-        url = "https://data-api.binance.vision/api/v3/klines"
-        params = {"symbol": symbol, "interval": "5m" if interval == "5min" else "1m", "limit": limit}
-        try:
-            data = requests.get(url, params=params, timeout=10).json()
-            if not isinstance(data, list):
-                return None
-            candles = self._normalize_binance_klines(data)
-            self._set_cache("binance", symbol, interval, candles)
-            self.last_provider_used[symbol] = "binance"
-            return candles
-        except Exception as e:
-            print(f"Binance error for {symbol}: {e}", flush=True)
-            return None
-
-    def _handle_twelve_error_response(self, symbol, data):
-        code = data.get("code")
-        message = str(data.get("message", "")).lower()
-        print(f"Twelve invalid response for {symbol}: {data}", flush=True)
-        if code == 429 and ("for the day" in message or "run out of api credits for the day" in message):
-            self.twelve_frozen_for_day = True
-        elif code == 429:
-            self.twelve_pause_until_ts = time.time() + 65
-        return None
-
-    def _fetch_twelve(self, symbol, interval="1min", outputsize=50):
-        cached = self._get_from_cache("twelve", symbol, interval)
-        if cached:
-            self.last_provider_used[symbol] = "twelve-cache"
-            return cached
-        self._reset_daily_if_needed()
-        self._reset_minute_windows_if_needed()
-        if self.twelve_frozen_for_day or time.time() < self.twelve_pause_until_ts or self.credits_today >= TWELVE_GLOBAL_DAILY_HARD_STOP:
-            self.twelve_frozen_for_day = self.credits_today >= TWELVE_GLOBAL_DAILY_HARD_STOP or self.twelve_frozen_for_day
-            return None
-        idx = self._choose_twelve_key_index()
-        if idx is None:
-            return None
-        try:
-            params = {"symbol": self._to_twelve_symbol(symbol), "interval": interval, "outputsize": outputsize, "apikey": self.key_usage[idx]["key"]}
-            data = requests.get("https://api.twelvedata.com/time_series", params=params, timeout=10).json()
-            if "values" not in data:
-                return self._handle_twelve_error_response(symbol, data)
-            candles = self._normalize_twelve_values(data["values"])
-            self._set_cache("twelve", symbol, interval, candles)
-            self._consume_twelve_credit(idx)
-            self.last_provider_used[symbol] = f"twelve-key-{idx + 1}"
-            return candles
-        except Exception as e:
-            print(f"Twelve error for {symbol}: {e}", flush=True)
-            self.twelve_pause_until_ts = time.time() + 30
-            return None
-
-    def _fetch_finnhub(self, symbol, interval="1min"):
-        cached = self._get_from_cache("finnhub", symbol, interval)
-        if cached:
-            self.last_provider_used[symbol] = "finnhub-cache"
-            return cached
-        if not FINNHUB_API_KEY or self.finnhub_frozen_for_day or time.time() < self.finnhub_pause_until_ts:
-            return None
-        finnhub_symbol = self._to_finnhub_symbol(symbol)
-        if not finnhub_symbol:
-            return None
-        try:
-            to_ts = int(time.time())
-            params = {"symbol": finnhub_symbol, "resolution": "1", "from": to_ts - 60 * 50, "to": to_ts, "token": FINNHUB_API_KEY}
-            data = requests.get("https://finnhub.io/api/v1/forex/candle", params=params, timeout=10).json()
-            if data.get("error"):
-                msg = str(data.get("error", "")).lower()
-                if "limit" in msg or "rate" in msg:
-                    self.finnhub_pause_until_ts = time.time() + FINNHUB_PAUSE_SECONDS
-                return None
-            candles = self._normalize_finnhub(data)
-            if not candles:
-                return None
-            self._set_cache("finnhub", symbol, interval, candles)
-            self.last_provider_used[symbol] = "finnhub"
-            return candles
-        except Exception as e:
-            print(f"Finnhub error for {symbol}: {e}", flush=True)
-            self.finnhub_pause_until_ts = time.time() + FINNHUB_PAUSE_SECONDS
-            return None
-
-    def _fetch_alpha(self, symbol, interval="1min"):
-        cached = self._get_from_cache("alpha", symbol, interval)
-        if cached:
-            self.last_provider_used[symbol] = "alpha-cache"
-            return cached
-        if not ALPHA_VANTAGE_API_KEY or self.alpha_frozen_for_day or time.time() < self.alpha_pause_until_ts or len(symbol) != 6:
-            return None
-        try:
-            params = {"function": "FX_INTRADAY", "from_symbol": symbol[:3], "to_symbol": symbol[3:], "interval": "1min", "outputsize": "compact", "apikey": ALPHA_VANTAGE_API_KEY}
-            data = requests.get("https://www.alphavantage.co/query", params=params, timeout=12).json()
-            if "Note" in data or "Information" in data:
-                self.alpha_pause_until_ts = time.time() + ALPHA_PAUSE_SECONDS
-                return None
-            candles = self._normalize_alpha_fx(data)
-            if not candles:
-                return None
-            self._set_cache("alpha", symbol, interval, candles)
-            self.last_provider_used[symbol] = "alpha"
-            return candles
-        except Exception as e:
-            print(f"Alpha error for {symbol}: {e}", flush=True)
-            self.alpha_pause_until_ts = time.time() + ALPHA_PAUSE_SECONDS
-            return None
-
-    def get_candles(self, symbol, interval="1min", outputsize=50):
-        self._reset_daily_if_needed()
-        if self._is_crypto(symbol):
-            return self._fetch_binance(symbol, interval=interval, limit=outputsize)
-        candles = self._fetch_finnhub(symbol, interval=interval)
-        if candles:
-            return candles
-        candles = self._fetch_twelve(symbol, interval=interval, outputsize=30 if self.credits_today >= ECONOMY_MODE_AFTER_TOTAL else outputsize)
-        if candles:
-            return candles
-        return self._fetch_alpha(symbol, interval=interval)
-
-    def get_usage_snapshot(self):
-        return {
-            "credits_today_total": self.credits_today,
-            "economy_mode": self.credits_today >= ECONOMY_MODE_AFTER_TOTAL,
-            "twelve_frozen": self.twelve_frozen_for_day,
-            "twelve_minute_paused": time.time() < self.twelve_pause_until_ts,
-            "finnhub_frozen": self.finnhub_frozen_for_day,
-            "alpha_frozen": self.alpha_frozen_for_day,
-            "global_hard_stop": TWELVE_GLOBAL_DAILY_HARD_STOP,
-            "keys": [{"key_number": i + 1, "daily_used": item["daily"], "minute_used": item["minute"]} for i, item in enumerate(self.key_usage)]
-        }
+        if self._is_crypto(s): return self._fetch_binance(s,interval=interval,limit=outputsize)
+        c=self._fetch_finnhub(s,interval=interval)
+        if c: return c
+        c=self._fetch_twelve(s,interval=interval,outputsize=30 if self.credits_today>=ECONOMY_MODE_AFTER_TOTAL else outputsize)
+        if c: return c
+        return self._fetch_alpha(s,interval=interval)
