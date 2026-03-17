@@ -15,6 +15,9 @@ from config import ASSETS, SCAN_INTERVAL_SECONDS
 
 app = Flask(__name__)
 
+# =========================
+# MOTORES
+# =========================
 data_manager = DataManager()
 learning = LearningEngine()
 scanner = MarketScanner(data_manager)
@@ -22,6 +25,9 @@ signal_engine = SignalEngine(learning)
 result_evaluator = ResultEvaluator()
 journal = JournalManager()
 
+# =========================
+# ESTADO
+# =========================
 STATE_DIR = "/tmp/nexus_state"
 LATEST_SIGNALS_FILE = os.path.join(STATE_DIR, "latest_signals.json")
 SIGNAL_HISTORY_FILE = os.path.join(STATE_DIR, "history.json")
@@ -31,8 +37,13 @@ os.makedirs(STATE_DIR, exist_ok=True)
 
 scan_count = 0
 last_scan_time = None
+scanner_started = False
+scanner_lock = threading.Lock()
 
 
+# =========================
+# UTIL
+# =========================
 def read_json(path, default):
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -48,11 +59,15 @@ def write_json(path, data):
     os.replace(tmp, path)
 
 
+def now_brazil():
+    return datetime.utcnow() - timedelta(hours=3)
+
+
 def normalize_signals(signals):
     normalized = []
 
     for s in signals:
-        analysis = datetime.utcnow() - timedelta(hours=3)
+        analysis = now_brazil()
         entry = analysis + timedelta(minutes=1)
         expiration = entry + timedelta(minutes=1)
 
@@ -63,8 +78,8 @@ def normalize_signals(signals):
             reason_text = str(reason)
 
         normalized.append({
-            "asset": s.get("asset"),
-            "signal": s.get("signal"),
+            "asset": s.get("asset", "N/A"),
+            "signal": s.get("signal", "CALL"),
             "score": s.get("score", 0),
             "confidence": s.get("confidence", 50),
             "provider": s.get("provider", "auto"),
@@ -93,12 +108,16 @@ def load_state():
     return signals, history, meta
 
 
+# =========================
+# LOOP ESTÁVEL
+# =========================
 def scanner_loop():
     global scan_count, last_scan_time
 
     while True:
         try:
             market = scanner.scan_assets()
+
             raw_signals = signal_engine.generate_signals(market)
             signals = normalize_signals(raw_signals if raw_signals else [])
 
@@ -119,23 +138,40 @@ def scanner_loop():
                             learning.register_result(signal, result_data)
 
             history = read_json(SIGNAL_HISTORY_FILE, [])
-
             if signals:
                 history = signals + history
 
             scan_count += 1
-            last_scan_time = datetime.utcnow()
+            last_scan_time = now_brazil()
 
             save_state(signals, history, last_scan_time, scan_count)
 
             print("Scan #%s | Signals: %s" % (scan_count, len(signals)), flush=True)
 
+            time.sleep(SCAN_INTERVAL_SECONDS)
+
         except Exception as e:
             print("Scanner error:", e, flush=True)
+            time.sleep(2)
 
-        time.sleep(SCAN_INTERVAL_SECONDS)
+
+def ensure_scanner_started():
+    global scanner_started
+
+    if scanner_started:
+        return
+
+    with scanner_lock:
+        if scanner_started:
+            return
+
+        threading.Thread(target=scanner_loop, daemon=True).start()
+        scanner_started = True
 
 
+# =========================
+# LAYOUT PREMIUM
+# =========================
 HTML_PAGE = """
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -544,8 +580,15 @@ function showTab(tabId, btn){
 """
 
 
+@app.before_request
+def _boot():
+    ensure_scanner_started()
+
+
 @app.route("/")
 def home():
+    ensure_scanner_started()
+
     signals, history, meta = load_state()
     learning_stats = journal.stats()
     best_assets = journal.best_assets()
@@ -565,35 +608,37 @@ def home():
 
 @app.route("/health")
 def health():
+    ensure_scanner_started()
     return {"status": "running"}
 
 
 @app.route("/signals")
 def signals():
+    ensure_scanner_started()
     signals, _, _ = load_state()
     return jsonify(signals)
 
 
 @app.route("/history")
 def history():
+    ensure_scanner_started()
     _, history, _ = load_state()
     return jsonify(history)
 
 
 @app.route("/learning-stats")
 def learning_stats():
+    ensure_scanner_started()
     return jsonify(journal.stats())
 
 
 @app.route("/best-assets")
 def best_assets():
+    ensure_scanner_started()
     return jsonify(journal.best_assets())
 
 
-thread = threading.Thread(target=scanner_loop, daemon=True)
-thread.start()
-
-
 if __name__ == "__main__":
+    ensure_scanner_started()
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
