@@ -63,6 +63,19 @@ def now_brazil():
     return datetime.utcnow() - timedelta(hours=3)
 
 
+def get_signal_hour_bucket(signal_dict):
+    analysis_time = str(signal_dict.get("analysis_time", "")).strip()
+    if ":" not in analysis_time:
+        return None
+    try:
+        hour = int(analysis_time.split(":")[0])
+        if 0 <= hour <= 23:
+            return f"{hour:02d}:00"
+    except Exception:
+        return None
+    return None
+
+
 def normalize_signals(signals):
     normalized = []
 
@@ -124,7 +137,7 @@ def scanner_loop():
             if raw_signals:
                 learning.update_stats(raw_signals)
 
-                for signal in raw_signals:
+                for idx, signal in enumerate(raw_signals):
                     matched_asset = None
 
                     for item in market:
@@ -135,7 +148,19 @@ def scanner_loop():
                     if matched_asset:
                         result_data = result_evaluator.evaluate(signal, matched_asset.get("candles", []))
                         if result_data:
-                            learning.register_result(signal, result_data)
+                            # Injeta horários normalizados antes de registrar no journal
+                            safe_signal = dict(signal)
+                            if idx < len(signals):
+                                safe_signal["analysis_time"] = signals[idx].get("analysis_time", "--:--")
+                                safe_signal["entry_time"] = signals[idx].get("entry_time", "--:--")
+                                safe_signal["expiration"] = signals[idx].get("expiration", "--:--")
+                            else:
+                                current_time = now_brazil()
+                                safe_signal["analysis_time"] = current_time.strftime("%H:%M")
+                                safe_signal["entry_time"] = (current_time + timedelta(minutes=1)).strftime("%H:%M")
+                                safe_signal["expiration"] = (current_time + timedelta(minutes=2)).strftime("%H:%M")
+
+                            learning.register_result(safe_signal, result_data)
 
             history = read_json(SIGNAL_HISTORY_FILE, [])
             if signals:
@@ -147,7 +172,6 @@ def scanner_loop():
             save_state(signals, history, last_scan_time, scan_count)
 
             print("Scan #%s | Signals: %s" % (scan_count, len(signals)), flush=True)
-
             time.sleep(SCAN_INTERVAL_SECONDS)
 
         except Exception as e:
