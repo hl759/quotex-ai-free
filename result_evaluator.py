@@ -19,5 +19,6 @@ class ResultEvaluator:
                 "exit_price": exit_price,
                 "result": result
             }
+
         except Exception:
             return None
