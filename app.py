@@ -202,7 +202,7 @@ HTML_PAGE = """
 <head>
 <meta charset='UTF-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-<title>NEXUS AI v10.3 • Etapa 3 Balanceada</title>
+<title>NEXUS AI v10.4 • Consistente</title>
 <style>
 *{box-sizing:border-box}
 body{margin:0;font-family:Arial,sans-serif;background:linear-gradient(180deg,#04101d 0%,#07192e 100%);color:#eef6ff}
@@ -227,7 +227,7 @@ body{margin:0;font-family:Arial,sans-serif;background:linear-gradient(180deg,#04
 <div class='app'>
 <div class='hero'>
 <div class='hero-top'>
-<div class='brand'><div class='logo'>⚡</div><div><div class='title'>NEXUS <span class='ai'>AI</span> v10.3</div><div class='subtitle'>ETAPA 3 • BALANCEADA</div></div></div>
+<div class='brand'><div class='logo'>⚡</div><div><div class='title'>NEXUS <span class='ai'>AI</span> v10.4</div><div class='subtitle'>CONSISTENTE • SEMI-AGRESSIVO LEVE</div></div></div>
 <div class='right-box'><div class='live'>● LIVE</div><button id='refreshBtn' class='refresh-btn' onclick='refreshSnapshot()'>↻ Atualizar agora</button></div>
 </div>
 <div class='metrics'>
@@ -245,8 +245,8 @@ body{margin:0;font-family:Arial,sans-serif;background:linear-gradient(180deg,#04
 <button class='tab-btn' onclick="showTab('hours', this)">⏰ Horários</button>
 </div>
 </div>
-<div id='signals' class='panel active'><div class='card'><div class='section-title'>Sinais atuais</div><div class='section-sub'>Base original preservada</div><div id='signals_container'></div></div></div>
-<div id='decision' class='panel'><div class='card'><div class='section-title'>Decisão do momento</div><div class='section-sub'>Etapa 3: equilíbrio entre inteligência e operabilidade</div><div id='decision_container'></div></div></div>
+<div id='signals' class='panel active'><div class='card'><div class='section-title'>Sinais atuais</div><div class='section-sub'>Fluxo original preservado</div><div id='signals_container'></div></div></div>
+<div id='decision' class='panel'><div class='card'><div class='section-title'>Decisão do momento</div><div class='section-sub'>v10.4: consistência operacional com inteligência adaptativa</div><div id='decision_container'></div></div></div>
 <div id='history' class='panel'><div class='card'><div class='section-title'>Histórico recente</div><div class='section-sub'>Últimos sinais salvos</div><div id='history_container'></div></div></div>
 <div id='stats' class='panel'><div class='card'><div class='section-title'>Aprendizado</div><div class='section-sub'>Acompanhamento do motor adaptativo</div><div class='status-grid'><div class='status-item'>Total avaliadas<br><b id='stats_total'></b></div><div class='status-item'>Win rate<br><b id='stats_winrate'></b></div><div class='status-item'>Wins<br><b id='stats_wins'></b></div><div class='status-item'>Loss<br><b id='stats_loss'></b></div></div></div></div>
 <div id='assets' class='panel'><div class='card'><div class='section-title'>Melhores ativos</div><div class='section-sub'>Ranking baseado no histórico avaliado</div><div id='assets_container'></div></div></div>
