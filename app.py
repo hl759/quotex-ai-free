@@ -32,6 +32,7 @@ scan_count = 0
 scanner_started = False
 scanner_lock = threading.Lock()
 
+
 def read_json(path, default):
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -39,14 +40,17 @@ def read_json(path, default):
     except Exception:
         return default
 
+
 def write_json(path, data):
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False)
     os.replace(tmp, path)
 
+
 def now_brazil():
     return datetime.utcnow() - timedelta(hours=3)
+
 
 def normalize_signals(signals):
     out = []
@@ -54,11 +58,13 @@ def normalize_signals(signals):
         analysis = now_brazil()
         entry = analysis + timedelta(minutes=1)
         expiration = entry + timedelta(minutes=1)
+
         reason = s.get("reason", [])
         if isinstance(reason, list):
             reason_text = "\n".join(["• " + str(r) for r in reason]) if reason else "Sem detalhes"
         else:
             reason_text = str(reason)
+
         out.append({
             "asset": s.get("asset", "N/A"),
             "signal": s.get("signal", "CALL"),
@@ -74,16 +80,22 @@ def normalize_signals(signals):
         })
     return out
 
+
 def save_state(signals, history, scans):
     write_json(LATEST_SIGNALS_FILE, signals)
     write_json(SIGNAL_HISTORY_FILE, history[:50])
-    write_json(META_FILE, {"last_scan": now_brazil().strftime("%H:%M:%S"), "scan_count": scans})
+    write_json(META_FILE, {
+        "last_scan": now_brazil().strftime("%H:%M:%S"),
+        "scan_count": scans
+    })
+
 
 def load_state():
     signals = read_json(LATEST_SIGNALS_FILE, [])
     history = read_json(SIGNAL_HISTORY_FILE, [])
     meta = read_json(META_FILE, {"last_scan": "--", "scan_count": 0})
     return signals, history, meta
+
 
 def get_snapshot():
     signals, history, meta = load_state()
@@ -101,8 +113,10 @@ def get_snapshot():
         "best_hours": journal.best_hours(),
     }
 
+
 def scanner_loop():
     global scan_count
+
     while True:
         try:
             market = scanner.scan_assets()
@@ -112,15 +126,19 @@ def scanner_loop():
             if raw_signals:
                 for idx, signal in enumerate(raw_signals):
                     matched = next((item for item in market if item.get("asset") == signal.get("asset")), None)
-                    if matched:
-                        result_data = result_evaluator.evaluate(signal, matched.get("candles", []))
-                        if result_data:
-                            safe_signal = dict(signal)
-                            if idx < len(signals):
-                                safe_signal["analysis_time"] = signals[idx]["analysis_time"]
-                                safe_signal["entry_time"] = signals[idx]["entry_time"]
-                                safe_signal["expiration"] = signals[idx]["expiration"]
-                            learning.register_result(safe_signal, result_data)
+                    if not matched:
+                        continue
+
+                    result_data = result_evaluator.evaluate(signal, matched.get("candles", []))
+                    if not result_data:
+                        continue
+
+                    safe_signal = dict(signal)
+                    if idx < len(signals):
+                        safe_signal["analysis_time"] = signals[idx]["analysis_time"]
+                        safe_signal["entry_time"] = signals[idx]["entry_time"]
+                        safe_signal["expiration"] = signals[idx]["expiration"]
+                    learning.register_result(safe_signal, result_data)
 
             history = read_json(SIGNAL_HISTORY_FILE, [])
             if signals:
@@ -130,19 +148,23 @@ def scanner_loop():
             save_state(signals, history, scan_count)
             print(f"Scan #{scan_count} | Signals: {len(signals)}", flush=True)
             time.sleep(SCAN_INTERVAL_SECONDS)
+
         except Exception as e:
             print("Scanner error:", e, flush=True)
             time.sleep(2)
+
 
 def ensure_scanner_started():
     global scanner_started
     if scanner_started:
         return
+
     with scanner_lock:
         if scanner_started:
             return
         threading.Thread(target=scanner_loop, daemon=True).start()
         scanner_started = True
+
 
 HTML_PAGE = """
 <!DOCTYPE html>
@@ -214,24 +236,29 @@ applySnapshot(initialSnapshot);
 </html>
 """
 
+
 @app.before_request
 def _boot():
     ensure_scanner_started()
+
 
 @app.route("/")
 def home():
     ensure_scanner_started()
     return render_template_string(HTML_PAGE, snapshot_json=json.dumps(get_snapshot(), ensure_ascii=False))
 
+
 @app.route("/health")
 def health():
     ensure_scanner_started()
     return {"status": "running"}
 
+
 @app.route("/snapshot")
 def snapshot():
     ensure_scanner_started()
     return jsonify(get_snapshot())
+
 
 @app.route("/signals")
 def signals():
@@ -239,26 +266,31 @@ def signals():
     signals, _, _ = load_state()
     return jsonify(signals)
 
+
 @app.route("/history")
 def history():
     ensure_scanner_started()
     _, history, _ = load_state()
     return jsonify(history)
 
+
 @app.route("/learning-stats")
 def learning_stats():
     ensure_scanner_started()
     return jsonify(journal.stats())
+
 
 @app.route("/best-assets")
 def best_assets():
     ensure_scanner_started()
     return jsonify(journal.best_assets())
 
+
 @app.route("/best-hours")
 def best_hours():
     ensure_scanner_started()
     return jsonify(journal.best_hours())
+
 
 if __name__ == "__main__":
     ensure_scanner_started()
