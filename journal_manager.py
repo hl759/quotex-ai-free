@@ -3,7 +3,6 @@ import os
 
 JOURNAL_FILE = "/tmp/nexus_journal.json"
 
-
 class JournalManager:
     def __init__(self):
         if not os.path.exists(JOURNAL_FILE):
@@ -46,8 +45,8 @@ class JournalManager:
             if self._trade_id(item) == incoming:
                 return
         data.insert(0, trade)
-        if len(data) > 500:
-            data = data[:500]
+        if len(data) > 700:
+            data = data[:700]
         self._save(data)
 
     def stats(self):
@@ -74,18 +73,11 @@ class JournalManager:
             grouped[asset]["total"] += 1
             if t.get("result") == "WIN":
                 grouped[asset]["wins"] += 1
-
         result = []
         for info in grouped.values():
             if info["total"] == 0:
                 continue
-            result.append({
-                "asset": info["asset"],
-                "total": info["total"],
-                "wins": info["wins"],
-                "winrate": round((info["wins"] / info["total"]) * 100, 2)
-            })
-
+            result.append({"asset": info["asset"], "total": info["total"], "wins": info["wins"], "winrate": round((info["wins"] / info["total"]) * 100, 2)})
         result = [r for r in result if r["total"] >= 3]
         result.sort(key=lambda x: (x["winrate"], x["total"]), reverse=True)
         return result[:10]
@@ -108,22 +100,19 @@ class JournalManager:
             grouped[hb]["total"] += 1
             if t.get("result") == "WIN":
                 grouped[hb]["wins"] += 1
-
         result = []
         for info in grouped.values():
             if info["total"] == 0:
                 continue
-            result.append({
-                "hour": info["hour"],
-                "total": info["total"],
-                "wins": info["wins"],
-                "winrate": round((info["wins"] / info["total"]) * 100, 2)
-            })
-
+            result.append({"hour": info["hour"], "total": info["total"], "wins": info["wins"], "winrate": round((info["wins"] / info["total"]) * 100, 2)})
         result = [r for r in result if r["total"] >= 3]
         result.sort(key=lambda x: (x["winrate"], x["total"]), reverse=True)
         return result[:10]
 
-    def recent_asset_results(self, asset, limit=5):
+    def recent_asset_results(self, asset, limit=6):
         valid = [t.get("result") for t in self._valid_trades() if t.get("asset") == asset]
+        return valid[:limit]
+
+    def recent_global_results(self, limit=10):
+        valid = [t.get("result") for t in self._valid_trades()]
         return valid[:limit]

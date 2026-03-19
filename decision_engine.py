@@ -18,13 +18,11 @@ class DecisionEngine:
         rejection = indicators.get("rejection", False)
         volatility = indicators.get("volatility", False)
 
-        # Direção base
         if trend_m1 in ("bull", "bear"):
             direction = "CALL" if trend_m1 == "bull" else "PUT"
             score += 1.7
             reasons.append("Tendência M1 definida")
 
-        # Estrutura
         if trend_m5 in ("bull", "bear"):
             if trend_m5 == trend_m1:
                 score += 2.4
@@ -33,7 +31,6 @@ class DecisionEngine:
                 score -= 1.0
                 reasons.append("Conflito entre M1 e M5")
 
-        # RSI mais solto, mas ainda inteligente
         if direction == "CALL" and rsi <= 40:
             score += 1.1
             reasons.append("RSI favorece alta")
@@ -44,7 +41,6 @@ class DecisionEngine:
             score -= 0.15
             reasons.append("RSI neutro")
 
-        # Price action
         if pattern == "bullish" and direction == "CALL":
             score += 0.8
             reasons.append("Padrão bullish")
@@ -60,7 +56,6 @@ class DecisionEngine:
             score += 0.6
             reasons.append("Rejeição relevante")
 
-        # Contexto de mercado em modo consistente / semi-agressivo leve
         if regime == "trend":
             score += 1.4
             reasons.append("Mercado em tendência")
@@ -78,7 +73,6 @@ class DecisionEngine:
             score += 0.45
             reasons.append("Volatilidade saudável")
 
-        # Timing: penaliza, mas não trava demais
         if moved_fast:
             score -= 0.55
             reasons.append("Preço já andou um pouco")
@@ -87,16 +81,22 @@ class DecisionEngine:
             score -= 0.5
             reasons.append("Zona de ruído")
 
-        # Aprendizado adaptativo
         try:
-            bonus, learning_reason = self.learning.get_adaptive_bonus(asset)
+            bonus, learning_reason = self.learning.get_adaptive_bonus(asset, None)
             score += bonus
             if learning_reason:
                 reasons.append(learning_reason)
         except Exception:
             pass
 
-        # Ativo em fase ruim: reduz, mas sem matar totalmente
+        try:
+            global_bias, bias_reason = self.learning.get_global_bias()
+            score += global_bias
+            if bias_reason:
+                reasons.append(bias_reason)
+        except Exception:
+            pass
+
         try:
             if self.learning.should_pause_asset_temporarily(asset):
                 score -= 1.2
@@ -104,22 +104,20 @@ class DecisionEngine:
         except Exception:
             pass
 
-        # Rigor leve
         try:
             rigor_penalty = self.learning.get_rigor_penalty()
             if rigor_penalty:
-                score -= min(rigor_penalty, 0.45)
-                reasons.append("Modo de cautela ativo")
+                score -= rigor_penalty
+                reasons.append("Modo de cautela ativo" if rigor_penalty > 0 else "Fase de confiança controlada")
         except Exception:
             pass
 
         if score < 0:
             score = 0
 
-        # Semi-agressivo leve: facilita cautela, mantém forte exigente
-        if score >= 5.1:
+        if score >= 5.0:
             decision = "ENTRADA_FORTE"
-        elif score >= 3.1:
+        elif score >= 3.0:
             decision = "ENTRADA_CAUTELA"
         else:
             decision = "NAO_OPERAR"
