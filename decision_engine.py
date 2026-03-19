@@ -3,134 +3,86 @@ class DecisionEngine:
         self.learning = learning_engine
 
     def decide(self, asset, indicators):
-        score = 0.0
-        reasons = []
-        direction = None
-
-        trend_m1 = indicators.get("trend_m1") or indicators.get("trend") or "neutral"
-        trend_m5 = indicators.get("trend_m5") or "neutral"
-        rsi = indicators.get("rsi", 50)
         regime = indicators.get("regime", "unknown")
-        moved_fast = indicators.get("moved_too_fast", False)
-        sideways = indicators.get("is_sideways", False)
-        pattern = indicators.get("pattern")
-        breakout = indicators.get("breakout", False)
-        rejection = indicators.get("rejection", False)
-        volatility = indicators.get("volatility", False)
-
-        if trend_m1 in ("bull", "bear"):
-            direction = "CALL" if trend_m1 == "bull" else "PUT"
-            score += 1.7
-            reasons.append("Tendência M1 definida")
-
-        if trend_m5 in ("bull", "bear"):
-            if trend_m5 == trend_m1:
-                score += 2.4
-                reasons.append("M1 e M5 alinhados")
-            else:
-                score -= 1.0
-                reasons.append("Conflito entre M1 e M5")
-
-        if direction == "CALL" and rsi <= 40:
-            score += 1.1
-            reasons.append("RSI favorece alta")
-        elif direction == "PUT" and rsi >= 60:
-            score += 1.1
-            reasons.append("RSI favorece queda")
-        elif 46 <= rsi <= 54:
-            score -= 0.15
-            reasons.append("RSI neutro")
-
-        if pattern == "bullish" and direction == "CALL":
-            score += 0.8
-            reasons.append("Padrão bullish")
-        elif pattern == "bearish" and direction == "PUT":
-            score += 0.8
-            reasons.append("Padrão bearish")
-
-        if breakout:
-            score += 0.9
-            reasons.append("Breakout confirmado")
-
-        if rejection:
-            score += 0.6
-            reasons.append("Rejeição relevante")
 
         if regime == "trend":
-            score += 1.4
-            reasons.append("Mercado em tendência")
+            return self._trend_logic(asset, indicators)
         elif regime == "sideways":
-            score -= 0.8
-            reasons.append("Mercado lateral")
+            return self._sideways_logic(asset, indicators)
         elif regime == "chaotic":
-            score -= 1.8
-            reasons.append("Mercado caótico")
-        elif regime == "mixed":
-            score += 0.35
-            reasons.append("Mercado misto operável")
-
-        if volatility:
-            score += 0.45
-            reasons.append("Volatilidade saudável")
-
-        if moved_fast:
-            score -= 0.55
-            reasons.append("Preço já andou um pouco")
-
-        if sideways:
-            score -= 0.5
-            reasons.append("Zona de ruído")
-
-        try:
-            bonus, learning_reason = self.learning.get_adaptive_bonus(asset, None)
-            score += bonus
-            if learning_reason:
-                reasons.append(learning_reason)
-        except Exception:
-            pass
-
-        try:
-            global_bias, bias_reason = self.learning.get_global_bias()
-            score += global_bias
-            if bias_reason:
-                reasons.append(bias_reason)
-        except Exception:
-            pass
-
-        try:
-            if self.learning.should_pause_asset_temporarily(asset):
-                score -= 1.2
-                reasons.append("Ativo em fase ruim recente")
-        except Exception:
-            pass
-
-        try:
-            rigor_penalty = self.learning.get_rigor_penalty()
-            if rigor_penalty:
-                score -= rigor_penalty
-                reasons.append("Modo de cautela ativo" if rigor_penalty > 0 else "Fase de confiança controlada")
-        except Exception:
-            pass
-
-        if score < 0:
-            score = 0
-
-        if score >= 5.0:
-            decision = "ENTRADA_FORTE"
-        elif score >= 3.0:
-            decision = "ENTRADA_CAUTELA"
+            return self._chaotic_logic(asset, indicators)
         else:
-            decision = "NAO_OPERAR"
-            direction = None
+            return self._mixed_logic(asset, indicators)
 
-        confidence = int(min(96, max(55, 51 + score * 7)))
+    def _trend_logic(self, asset, ind):
+        score = 0
+        reasons = []
+
+        trend = ind.get("trend_m1")
+        rsi = ind.get("rsi", 50)
+
+        if trend in ("bull","bear"):
+            score += 2.5
+            reasons.append("Seguindo tendência forte")
+
+        if trend == "bull" and rsi < 45:
+            score += 1.2
+            reasons.append("Pullback em tendência de alta")
+
+        if trend == "bear" and rsi > 55:
+            score += 1.2
+            reasons.append("Pullback em tendência de baixa")
+
+        return self._final(asset, score, reasons, trend)
+
+    def _sideways_logic(self, asset, ind):
+        score = 0
+        reasons = []
+
+        rsi = ind.get("rsi", 50)
+        rejection = ind.get("rejection", False)
+
+        if rejection:
+            score += 1.5
+            reasons.append("Rejeição em lateral")
+
+        if rsi > 65:
+            score += 1
+            reasons.append("Sobrecompra")
+
+        if rsi < 35:
+            score += 1
+            reasons.append("Sobrevenda")
+
+        return self._final(asset, score, reasons, None)
+
+    def _chaotic_logic(self, asset, ind):
+        return {
+            "asset": asset,
+            "decision": "NAO_OPERAR",
+            "direction": None,
+            "score": 0,
+            "confidence": 55,
+            "reasons": ["Mercado caótico"],
+            "regime": "chaotic"
+        }
+
+    def _mixed_logic(self, asset, ind):
+        score = 1.5
+        reasons = ["Mercado misto"]
+
+        return self._final(asset, score, reasons, None)
+
+    def _final(self, asset, score, reasons, trend):
+        decision = "ENTRADA_CAUTELA" if score >= 3 else "NAO_OPERAR"
+        direction = "CALL" if trend == "bull" else "PUT" if trend == "bear" else None
 
         return {
             "asset": asset,
             "decision": decision,
             "direction": direction,
-            "score": round(score, 2),
-            "confidence": confidence,
+            "score": round(score,2),
+            "confidence": int(55 + score*10),
             "reasons": reasons,
-            "regime": regime
+            "regime": "auto"
         }
