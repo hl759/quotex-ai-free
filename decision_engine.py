@@ -18,66 +18,76 @@ class DecisionEngine:
         rejection = indicators.get("rejection", False)
         volatility = indicators.get("volatility", False)
 
+        # Direção base
         if trend_m1 in ("bull", "bear"):
             direction = "CALL" if trend_m1 == "bull" else "PUT"
-            score += 1.8
+            score += 1.6
             reasons.append("Tendência M1 definida")
 
+        # Alinhamento estrutural
         if trend_m5 in ("bull", "bear"):
             if trend_m5 == trend_m1:
-                score += 2.0
+                score += 2.2
                 reasons.append("M1 e M5 alinhados")
             else:
-                score -= 1.8
+                score -= 1.2
                 reasons.append("Conflito entre M1 e M5")
 
-        if direction == "CALL" and rsi <= 35:
+        # RSI balanceado
+        if direction == "CALL" and rsi <= 38:
             score += 1.0
             reasons.append("RSI favorece alta")
-        elif direction == "PUT" and rsi >= 65:
+        elif direction == "PUT" and rsi >= 62:
             score += 1.0
             reasons.append("RSI favorece queda")
-        elif 45 <= rsi <= 55:
-            score -= 0.5
+        elif 46 <= rsi <= 54:
+            score -= 0.2
             reasons.append("RSI neutro")
 
+        # Price action
         if pattern == "bullish" and direction == "CALL":
-            score += 0.8
+            score += 0.7
             reasons.append("Padrão bullish")
         elif pattern == "bearish" and direction == "PUT":
-            score += 0.8
+            score += 0.7
             reasons.append("Padrão bearish")
 
         if breakout:
-            score += 0.7
+            score += 0.8
             reasons.append("Breakout confirmado")
 
         if rejection:
-            score += 0.6
+            score += 0.5
             reasons.append("Rejeição relevante")
 
+        # Contexto de mercado balanceado
         if regime == "trend":
-            score += 1.1
+            score += 1.3
             reasons.append("Mercado em tendência")
         elif regime == "sideways":
-            score -= 1.8
+            score -= 1.0
             reasons.append("Mercado lateral")
         elif regime == "chaotic":
-            score -= 1.4
+            score -= 1.6
             reasons.append("Mercado caótico")
+        elif regime == "mixed":
+            score += 0.2
+            reasons.append("Mercado misto operável")
 
         if volatility:
             score += 0.4
             reasons.append("Volatilidade saudável")
 
+        # Evita entrar tarde, mas sem travar demais
         if moved_fast:
-            score -= 1.1
-            reasons.append("Preço já andou demais")
+            score -= 0.8
+            reasons.append("Preço já andou um pouco")
 
         if sideways:
-            score -= 1.0
+            score -= 0.7
             reasons.append("Zona de ruído")
 
+        # Aprendizado adaptativo
         try:
             bonus, learning_reason = self.learning.get_adaptive_bonus(asset)
             score += bonus
@@ -86,17 +96,19 @@ class DecisionEngine:
         except Exception:
             pass
 
+        # Fase ruim recente do ativo
         try:
             if self.learning.should_pause_asset_temporarily(asset):
-                score -= 2.5
+                score -= 1.5
                 reasons.append("Ativo em fase ruim recente")
         except Exception:
             pass
 
+        # Rigor dinâmico leve
         try:
             rigor_penalty = self.learning.get_rigor_penalty()
             if rigor_penalty:
-                score -= rigor_penalty
+                score -= min(rigor_penalty, 0.6)
                 reasons.append("Modo de cautela ativo")
         except Exception:
             pass
@@ -104,15 +116,16 @@ class DecisionEngine:
         if score < 0:
             score = 0
 
-        if score >= 6:
+        # Mais equilibrado
+        if score >= 5.4:
             decision = "ENTRADA_FORTE"
-        elif score >= 4:
+        elif score >= 3.6:
             decision = "ENTRADA_CAUTELA"
         else:
             decision = "NAO_OPERAR"
             direction = None
 
-        confidence = int(min(95, max(52, 48 + score * 8)))
+        confidence = int(min(95, max(54, 50 + score * 7)))
 
         return {
             "asset": asset,

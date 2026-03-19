@@ -84,7 +84,7 @@ def decorate_decision(decision):
     expiration = entry + timedelta(minutes=1)
     reasons = decision.get("reasons", [])
     if isinstance(reasons, list):
-        reason_text = "\\n".join(["• " + str(r) for r in reasons]) if reasons else "Sem detalhes"
+        reason_text = "\n".join(["• " + str(r) for r in reasons]) if reasons else "Sem detalhes"
     else:
         reason_text = str(reasons)
     return {
@@ -202,7 +202,7 @@ HTML_PAGE = """
 <head>
 <meta charset='UTF-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-<title>NEXUS AI v10.3 • Etapa 2</title>
+<title>NEXUS AI v10.3 • Etapa 3 Balanceada</title>
 <style>
 *{box-sizing:border-box}
 body{margin:0;font-family:Arial,sans-serif;background:linear-gradient(180deg,#04101d 0%,#07192e 100%);color:#eef6ff}
@@ -218,7 +218,7 @@ body{margin:0;font-family:Arial,sans-serif;background:linear-gradient(180deg,#04
 .section-title{font-size:17px;font-weight:800;margin-bottom:8px}.status-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.status-item,.signal-card,.list-card,.decision-card{background:#132b49;border-radius:18px;padding:14px;margin-top:12px}
 .signal-head,.decision-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}.asset{font-size:22px;font-weight:900}
 .badge{padding:9px 14px;border-radius:999px;font-size:13px;font-weight:900}.call{background:linear-gradient(135deg,#25e6a0,#8affcc);color:#053324}.put{background:linear-gradient(135deg,#ff7a8a,#ffc0c8);color:#3f1119}.hold{background:linear-gradient(135deg,#8c95a6,#d2d7df);color:#20242b}
-.signal-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.mini{background:#0f223a;border-radius:14px;padding:12px}.mini-value{font-size:18px;font-weight:800}.reason{margin-top:14px;background:#0d1c31;border-radius:14px;padding:14px;color:#bdd0e8;line-height:1.5;white-space:pre-wrap}
+.signal-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.mini{background:#0f223a;border-radius:14px;padding:12px}.mini-value{font-size:18px;font-weight:800}.reason{margin-top:14px;background:#0d1c31;border-radius:14px;padding:14px;color:#bdd0e8;line-height:1.6;white-space:pre-wrap}
 .empty{text-align:center;color:#9bb2cf;padding:26px 10px}.panel{display:none}.panel.active{display:block}.list-title{font-size:18px;font-weight:800;margin-bottom:6px}
 @media(max-width:640px){.tabs{grid-template-columns:repeat(2,1fr)}.hero-top{align-items:flex-start}.right-box{min-width:120px}}
 </style>
@@ -227,7 +227,7 @@ body{margin:0;font-family:Arial,sans-serif;background:linear-gradient(180deg,#04
 <div class='app'>
 <div class='hero'>
 <div class='hero-top'>
-<div class='brand'><div class='logo'>⚡</div><div><div class='title'>NEXUS <span class='ai'>AI</span> v10.3</div><div class='subtitle'>ETAPA 2 • NÚCLEO DE DECISÃO</div></div></div>
+<div class='brand'><div class='logo'>⚡</div><div><div class='title'>NEXUS <span class='ai'>AI</span> v10.3</div><div class='subtitle'>ETAPA 3 • BALANCEADA</div></div></div>
 <div class='right-box'><div class='live'>● LIVE</div><button id='refreshBtn' class='refresh-btn' onclick='refreshSnapshot()'>↻ Atualizar agora</button></div>
 </div>
 <div class='metrics'>
@@ -246,7 +246,7 @@ body{margin:0;font-family:Arial,sans-serif;background:linear-gradient(180deg,#04
 </div>
 </div>
 <div id='signals' class='panel active'><div class='card'><div class='section-title'>Sinais atuais</div><div class='section-sub'>Base original preservada</div><div id='signals_container'></div></div></div>
-<div id='decision' class='panel'><div class='card'><div class='section-title'>Decisão do momento</div><div class='section-sub'>Etapa 2: a IA já escolhe a melhor leitura do ciclo</div><div id='decision_container'></div></div></div>
+<div id='decision' class='panel'><div class='card'><div class='section-title'>Decisão do momento</div><div class='section-sub'>Etapa 3: equilíbrio entre inteligência e operabilidade</div><div id='decision_container'></div></div></div>
 <div id='history' class='panel'><div class='card'><div class='section-title'>Histórico recente</div><div class='section-sub'>Últimos sinais salvos</div><div id='history_container'></div></div></div>
 <div id='stats' class='panel'><div class='card'><div class='section-title'>Aprendizado</div><div class='section-sub'>Acompanhamento do motor adaptativo</div><div class='status-grid'><div class='status-item'>Total avaliadas<br><b id='stats_total'></b></div><div class='status-item'>Win rate<br><b id='stats_winrate'></b></div><div class='status-item'>Wins<br><b id='stats_wins'></b></div><div class='status-item'>Loss<br><b id='stats_loss'></b></div></div></div></div>
 <div id='assets' class='panel'><div class='card'><div class='section-title'>Melhores ativos</div><div class='section-sub'>Ranking baseado no histórico avaliado</div><div id='assets_container'></div></div></div>
