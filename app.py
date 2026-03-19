@@ -3,7 +3,7 @@ import os
 import threading
 import time
 from datetime import datetime, timedelta
-from flask import Flask, jsonify, render_template_string, request
+from flask import Flask, jsonify, render_template_string
 
 from scanner import MarketScanner
 from signal_engine import SignalEngine
@@ -64,11 +64,13 @@ def normalize_signals(signals):
             "signal": s.get("signal", "CALL"),
             "score": s.get("score", 0),
             "confidence": s.get("confidence", 50),
+            "confidence_label": s.get("confidence_label", "MÉDIO"),
             "provider": s.get("provider", "auto"),
             "analysis_time": analysis.strftime("%H:%M"),
             "entry_time": entry.strftime("%H:%M"),
             "expiration": expiration.strftime("%H:%M"),
             "reason_text": reason_text,
+            "regime": s.get("regime", "unknown")
         })
     return out
 
@@ -92,7 +94,7 @@ def get_snapshot():
             "last_scan": meta.get("last_scan", "--"),
             "scan_count": meta.get("scan_count", 0),
             "signal_count": len(signals),
-            "asset_count": len(ASSETS),
+            "asset_count": len(ASSETS)
         },
         "learning_stats": journal.stats(),
         "best_assets": journal.best_assets(),
@@ -106,6 +108,7 @@ def scanner_loop():
             market = scanner.scan_assets()
             raw_signals = signal_engine.generate_signals(market)
             signals = normalize_signals(raw_signals if raw_signals else [])
+
             if raw_signals:
                 for idx, signal in enumerate(raw_signals):
                     matched = next((item for item in market if item.get("asset") == signal.get("asset")), None)
@@ -118,9 +121,11 @@ def scanner_loop():
                                 safe_signal["entry_time"] = signals[idx]["entry_time"]
                                 safe_signal["expiration"] = signals[idx]["expiration"]
                             learning.register_result(safe_signal, result_data)
+
             history = read_json(SIGNAL_HISTORY_FILE, [])
             if signals:
                 history = signals + history
+
             scan_count += 1
             save_state(signals, history, scan_count)
             print(f"Scan #{scan_count} | Signals: {len(signals)}", flush=True)
@@ -139,19 +144,24 @@ def ensure_scanner_started():
         threading.Thread(target=scanner_loop, daemon=True).start()
         scanner_started = True
 
-HTML_PAGE = r"""
+HTML_PAGE = """
 <!DOCTYPE html>
 <html lang='pt-BR'>
 <head>
 <meta charset='UTF-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-<title>NEXUS AI v10.2</title>
+<title>NEXUS AI v10.3</title>
 <style>
 *{box-sizing:border-box}
 body{margin:0;font-family:Arial,sans-serif;background:linear-gradient(180deg,#04101d 0%,#07192e 100%);color:#eef6ff}
-.app{max-width:780px;margin:0 auto;padding:18px}.hero,.card{background:linear-gradient(180deg,#0a1d33 0%,#0b2340 100%);border:1px solid rgba(80,220,255,.10);border-radius:28px;padding:18px;margin-bottom:18px;box-shadow:0 12px 40px rgba(0,0,0,.28)}
-.hero-top{display:flex;justify-content:space-between;align-items:center;gap:12px}.brand{display:flex;align-items:center;gap:14px}.logo{width:62px;height:62px;border-radius:18px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#6c63ff,#24e5c2);font-size:34px}.title{font-size:30px;font-weight:900}.title .ai{color:#25e6c4}.subtitle{color:#8fa7c4;margin-top:8px;font-size:13px;letter-spacing:1.8px}
-.right-box{display:flex;flex-direction:column;gap:10px}.live{min-width:110px;text-align:center;padding:16px 14px;border-radius:999px;border:1px solid rgba(37,230,196,.24);background:rgba(14,54,55,.45);color:#86ffe8;font-size:18px;font-weight:800}.refresh-btn{border:none;border-radius:999px;padding:12px 16px;background:linear-gradient(180deg,#103153 0%,#153d66 100%);color:#25e6c4;font-size:14px;font-weight:800;cursor:pointer}
+.app{max-width:780px;margin:0 auto;padding:18px}
+.hero,.card{background:linear-gradient(180deg,#0a1d33 0%,#0b2340 100%);border:1px solid rgba(80,220,255,.10);border-radius:28px;padding:18px;margin-bottom:18px;box-shadow:0 12px 40px rgba(0,0,0,.28)}
+.hero-top{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.brand{display:flex;align-items:center;gap:14px}
+.logo{width:62px;height:62px;border-radius:18px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#6c63ff,#24e5c2);font-size:34px}
+.title{font-size:30px;font-weight:900}.title .ai{color:#25e6c4}.subtitle{color:#8fa7c4;margin-top:8px;font-size:13px;letter-spacing:1.8px}
+.right-box{display:flex;flex-direction:column;gap:10px}.live{min-width:110px;text-align:center;padding:16px 14px;border-radius:999px;border:1px solid rgba(37,230,196,.24);background:rgba(14,54,55,.45);color:#86ffe8;font-size:18px;font-weight:800}
+.refresh-btn{border:none;border-radius:999px;padding:12px 16px;background:linear-gradient(180deg,#103153 0%,#153d66 100%);color:#25e6c4;font-size:14px;font-weight:800;cursor:pointer}
 .metrics{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-top:18px}.metric{background:#132b49;border-radius:18px;padding:18px}.metric-label,.section-sub,.mini-label,.muted{color:#8fa7c4}.metric-value{font-size:24px;font-weight:800}
 .tabs{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-top:18px}.tab-btn{border:none;border-radius:18px;padding:16px 10px;background:#132b49;color:#a8bdd8;font-size:14px;font-weight:800;cursor:pointer}.tab-btn.active{background:linear-gradient(180deg,#103153 0%,#153d66 100%);color:#25e6c4}
 .section-title{font-size:17px;font-weight:800;margin-bottom:8px}.status-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.status-item,.signal-card,.list-card{background:#132b49;border-radius:18px;padding:14px;margin-top:12px}
@@ -165,7 +175,7 @@ body{margin:0;font-family:Arial,sans-serif;background:linear-gradient(180deg,#04
 <div class='app'>
 <div class='hero'>
 <div class='hero-top'>
-<div class='brand'><div class='logo'>⚡</div><div><div class='title'>NEXUS <span class='ai'>AI</span> v10.2</div><div class='subtitle'>ULTRA ROBUSTA • AUTO LEARNING</div></div></div>
+<div class='brand'><div class='logo'>⚡</div><div><div class='title'>NEXUS <span class='ai'>AI</span> v10.3</div><div class='subtitle'>MAX FREE • MULTI-CAMADA</div></div></div>
 <div class='right-box'><div class='live'>● LIVE</div><button id='refreshBtn' class='refresh-btn' onclick='refreshSnapshot()'>↻ Atualizar agora</button></div>
 </div>
 <div class='metrics'>
@@ -182,7 +192,7 @@ body{margin:0;font-family:Arial,sans-serif;background:linear-gradient(180deg,#04
 <button class='tab-btn' onclick="showTab('hours', this)">⏰ Horários</button>
 </div>
 </div>
-<div id='signals' class='panel active'><div class='card'><div class='section-title'>Sinais atuais</div><div class='section-sub'>Entrada 1 minuto após a análise</div><div id='signals_container'></div></div></div>
+<div id='signals' class='panel active'><div class='card'><div class='section-title'>Sinais atuais</div><div class='section-sub'>Consenso M1 + M5, filtro anti-lateral e rigor dinâmico</div><div id='signals_container'></div></div></div>
 <div id='history' class='panel'><div class='card'><div class='section-title'>Histórico recente</div><div class='section-sub'>Últimos sinais salvos</div><div id='history_container'></div></div></div>
 <div id='stats' class='panel'><div class='card'><div class='section-title'>Aprendizado</div><div class='section-sub'>Acompanhamento do motor adaptativo</div><div class='status-grid'><div class='status-item'>Total avaliadas<br><b id='stats_total'></b></div><div class='status-item'>Win rate<br><b id='stats_winrate'></b></div><div class='status-item'>Wins<br><b id='stats_wins'></b></div><div class='status-item'>Loss<br><b id='stats_loss'></b></div></div></div></div>
 <div id='assets' class='panel'><div class='card'><div class='section-title'>Melhores ativos</div><div class='section-sub'>Ranking baseado no histórico avaliado</div><div id='assets_container'></div></div></div>
@@ -191,13 +201,13 @@ body{margin:0;font-family:Arial,sans-serif;background:linear-gradient(180deg,#04
 <script>
 const initialSnapshot = {{ snapshot_json|safe }};
 function showTab(tabId, btn){document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));document.getElementById(tabId).classList.add('active');btn.classList.add('active');}
-function escapeHtml(text){if(text===null||text===undefined)return '';return String(text).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');}
-function renderSignals(signals){const c=document.getElementById('signals_container');if(!signals||signals.length===0){c.innerHTML='<div class="empty">Nenhum sinal disponível agora.</div>';return;}let h='';signals.forEach(s=>{const bc=s.signal==='CALL'?'call':'put';h+=`<div class="signal-card"><div class="signal-head"><div class="asset">${escapeHtml(s.asset)}</div><div class="badge ${bc}">${escapeHtml(s.signal)}</div></div><div class="signal-grid"><div class="mini"><div class="mini-label">Score</div><div class="mini-value">${escapeHtml(s.score)}</div></div><div class="mini"><div class="mini-label">Confiança</div><div class="mini-value">${escapeHtml(s.confidence)}%</div></div><div class="mini"><div class="mini-label">Análise</div><div class="mini-value">${escapeHtml(s.analysis_time)}</div></div><div class="mini"><div class="mini-label">Entrada</div><div class="mini-value">${escapeHtml(s.entry_time)}</div></div><div class="mini"><div class="mini-label">Expiração</div><div class="mini-value">${escapeHtml(s.expiration)}</div></div><div class="mini"><div class="mini-label">Fonte</div><div class="mini-value">${escapeHtml(s.provider)}</div></div></div><div class="reason">${escapeHtml(s.reason_text)}</div></div>`});c.innerHTML=h;}
-function renderHistory(history){const c=document.getElementById('history_container');if(!history||history.length===0){c.innerHTML='<div class="empty">Ainda não há histórico salvo.</div>';return;}let h='';history.forEach(x=>{h+=`<div class="list-card"><div class="list-title">${escapeHtml(x.asset)} • ${escapeHtml(x.signal)}</div><div class="muted">Análise: ${escapeHtml(x.analysis_time)}<br>Entrada: ${escapeHtml(x.entry_time)}<br>Expiração: ${escapeHtml(x.expiration)}<br>Score: ${escapeHtml(x.score)} • Confiança: ${escapeHtml(x.confidence)}% • Fonte: ${escapeHtml(x.provider)}</div></div>`});c.innerHTML=h;}
-function renderBestAssets(bestAssets){const c=document.getElementById('assets_container');if(!bestAssets||bestAssets.length===0){c.innerHTML='<div class="empty">Ainda sem dados suficientes.</div>';return;}let h='';bestAssets.forEach(x=>{h+=`<div class="list-card"><div class="list-title">${escapeHtml(x.asset)}</div><div class="muted">Win rate: <b>${escapeHtml(x.winrate)}%</b><br>Trades: <b>${escapeHtml(x.total)}</b><br>Wins: <b>${escapeHtml(x.wins)}</b></div></div>`});c.innerHTML=h;}
-function renderBestHours(bestHours){const c=document.getElementById('hours_container');if(!bestHours||bestHours.length===0){c.innerHTML='<div class="empty">Ainda sem dados suficientes.</div>';return;}let h='';bestHours.forEach(x=>{h+=`<div class="list-card"><div class="list-title">${escapeHtml(x.hour)}</div><div class="muted">Win rate: <b>${escapeHtml(x.winrate)}%</b><br>Trades: <b>${escapeHtml(x.total)}</b><br>Wins: <b>${escapeHtml(x.wins)}</b></div></div>`});c.innerHTML=h;}
-function applySnapshot(d){document.getElementById('last_scan').textContent=d.meta.last_scan;document.getElementById('scan_count').textContent=d.meta.scan_count;document.getElementById('signal_count').textContent=d.meta.signal_count;document.getElementById('asset_count').textContent=d.meta.asset_count;document.getElementById('stats_total').textContent=d.learning_stats.total;document.getElementById('stats_winrate').textContent=d.learning_stats.winrate + '%';document.getElementById('stats_wins').textContent=d.learning_stats.wins;document.getElementById('stats_loss').textContent=d.learning_stats.loss;renderSignals(d.signals);renderHistory(d.history);renderBestAssets(d.best_assets);renderBestHours(d.best_hours);}
-async function refreshSnapshot(){const btn=document.getElementById('refreshBtn');btn.disabled=true;btn.textContent='Atualizando...';try{const r=await fetch('/snapshot',{cache:'no-store'});const d=await r.json();applySnapshot(d);btn.textContent='✓ Atualizado';}catch(e){btn.textContent='Erro ao atualizar';}setTimeout(()=>{btn.disabled=false;btn.textContent='↻ Atualizar agora';},1200);}
+function escapeHtml(text){if(text===null||text===undefined)return "";return String(text).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;");}
+function renderSignals(signals){const c=document.getElementById("signals_container");if(!signals||signals.length===0){c.innerHTML='<div class="empty">Nenhum sinal disponível agora.</div>';return;}let h="";signals.forEach(s=>{const bc=s.signal==="CALL"?"call":"put";h+=`<div class="signal-card"><div class="signal-head"><div class="asset">${escapeHtml(s.asset)}</div><div class="badge ${bc}">${escapeHtml(s.signal)} • ${escapeHtml(s.confidence_label || "")}</div></div><div class="signal-grid"><div class="mini"><div class="mini-label">Score</div><div class="mini-value">${escapeHtml(s.score)}</div></div><div class="mini"><div class="mini-label">Confiança</div><div class="mini-value">${escapeHtml(s.confidence)}%</div></div><div class="mini"><div class="mini-label">Análise</div><div class="mini-value">${escapeHtml(s.analysis_time)}</div></div><div class="mini"><div class="mini-label">Entrada</div><div class="mini-value">${escapeHtml(s.entry_time)}</div></div><div class="mini"><div class="mini-label">Expiração</div><div class="mini-value">${escapeHtml(s.expiration)}</div></div><div class="mini"><div class="mini-label">Regime</div><div class="mini-value">${escapeHtml(s.regime)}</div></div></div><div class="reason">${escapeHtml(s.reason_text)}</div></div>`});c.innerHTML=h;}
+function renderHistory(history){const c=document.getElementById("history_container");if(!history||history.length===0){c.innerHTML='<div class="empty">Ainda não há histórico salvo.</div>';return;}let h="";history.forEach(x=>{h+=`<div class="list-card"><div class="list-title">${escapeHtml(x.asset)} • ${escapeHtml(x.signal)}</div><div class="muted">Análise: ${escapeHtml(x.analysis_time)}<br>Entrada: ${escapeHtml(x.entry_time)}<br>Expiração: ${escapeHtml(x.expiration)}<br>Score: ${escapeHtml(x.score)} • Confiança: ${escapeHtml(x.confidence)}% • Fonte: ${escapeHtml(x.provider)}</div></div>`});c.innerHTML=h;}
+function renderBestAssets(bestAssets){const c=document.getElementById("assets_container");if(!bestAssets||bestAssets.length===0){c.innerHTML='<div class="empty">Ainda sem dados suficientes.</div>';return;}let h="";bestAssets.forEach(x=>{h+=`<div class="list-card"><div class="list-title">${escapeHtml(x.asset)}</div><div class="muted">Win rate: <b>${escapeHtml(x.winrate)}%</b><br>Trades: <b>${escapeHtml(x.total)}</b><br>Wins: <b>${escapeHtml(x.wins)}</b></div></div>`});c.innerHTML=h;}
+function renderBestHours(bestHours){const c=document.getElementById("hours_container");if(!bestHours||bestHours.length===0){c.innerHTML='<div class="empty">Ainda sem dados suficientes.</div>';return;}let h="";bestHours.forEach(x=>{h+=`<div class="list-card"><div class="list-title">${escapeHtml(x.hour)}</div><div class="muted">Win rate: <b>${escapeHtml(x.winrate)}%</b><br>Trades: <b>${escapeHtml(x.total)}</b><br>Wins: <b>${escapeHtml(x.wins)}</b></div></div>`});c.innerHTML=h;}
+function applySnapshot(d){document.getElementById("last_scan").textContent=d.meta.last_scan;document.getElementById("scan_count").textContent=d.meta.scan_count;document.getElementById("signal_count").textContent=d.meta.signal_count;document.getElementById("asset_count").textContent=d.meta.asset_count;document.getElementById("stats_total").textContent=d.learning_stats.total;document.getElementById("stats_winrate").textContent=d.learning_stats.winrate + "%";document.getElementById("stats_wins").textContent=d.learning_stats.wins;document.getElementById("stats_loss").textContent=d.learning_stats.loss;renderSignals(d.signals);renderHistory(d.history);renderBestAssets(d.best_assets);renderBestHours(d.best_hours);}
+async function refreshSnapshot(){const btn=document.getElementById("refreshBtn");btn.disabled=true;btn.textContent="Atualizando...";try{const r=await fetch("/snapshot",{cache:"no-store"});const d=await r.json();applySnapshot(d);btn.textContent="✓ Atualizado";}catch(e){btn.textContent="Erro ao atualizar";}setTimeout(()=>{btn.disabled=false;btn.textContent="↻ Atualizar agora";},1200);}
 applySnapshot(initialSnapshot);
 </script>
 </body>
@@ -206,8 +216,7 @@ applySnapshot(initialSnapshot);
 
 @app.before_request
 def _boot():
-    if request.path not in ("/health", "/ping", "/favicon.ico"):
-        ensure_scanner_started()
+    ensure_scanner_started()
 
 @app.route("/")
 def home():
@@ -216,11 +225,8 @@ def home():
 
 @app.route("/health")
 def health():
-    return jsonify({"status": "ok"}), 200
-
-@app.route("/ping")
-def ping():
-    return jsonify({"status": "alive", "time": now_brazil().strftime("%H:%M:%S")}), 200
+    ensure_scanner_started()
+    return {"status": "running"}
 
 @app.route("/snapshot")
 def snapshot():
