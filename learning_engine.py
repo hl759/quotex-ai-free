@@ -117,3 +117,28 @@ class LearningEngine:
             "result": result,
         }
         self.journal.add_trade(trade)
+        
+def dynamic_minimum_score(self):
+        """
+        Mantém compatibilidade com versões anteriores.
+        Define score mínimo adaptativo de forma estável.
+        """
+
+        recent = self.journal.recent_global_results(limit=12)
+
+        if len(recent) < 6:
+            return 3.0  # padrão
+
+        losses = sum(1 for r in recent if r == "LOSS")
+        wins = sum(1 for r in recent if r == "WIN")
+
+        # modo cautela leve
+        if losses >= wins + 3:
+            return 3.4
+
+        # modo confiança leve
+        if wins >= losses + 3:
+            return 2.8
+
+        # neutro
+        return 3.0
