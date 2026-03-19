@@ -113,6 +113,6 @@ class JournalManager:
         valid = [t.get("result") for t in self._valid_trades() if t.get("asset") == asset]
         return valid[:limit]
 
-    def recent_global_results(self, limit=10):
+    def recent_global_results(self, limit=12):
         valid = [t.get("result") for t in self._valid_trades()]
         return valid[:limit]

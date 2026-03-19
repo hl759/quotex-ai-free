@@ -1,21 +1,17 @@
-NEXUS v10.5 AUTO-ADAPTATIVO SÓLIDO
+NEXUS v10.6 AUTO-CALIBRADA
 
 Substitua estes arquivos no projeto:
 - learning_engine.py
 - journal_manager.py
+- signal_engine.py
 - decision_engine.py
 
-O app.py atual pode permanecer.
+O app.py pode permanecer igual ao atual.
 
-O que esta etapa adiciona:
-- adaptação sólida por ativo
-- adaptação sólida por horário
-- memória global recente
-- viés global positivo/negativo
-- cautela dinâmica mais estável
-- auto-ajuste sem comportamento nervoso
-
-Objetivo:
-- aprender devagar e com mais confiabilidade
-- evitar mudanças bruscas de comportamento
-- melhorar decisões ao longo do tempo
+O que resolve:
+- remove dependência funcional de métodos antigos
+- auto calibração sólida e gradual
+- ajuste por ativo
+- ajuste por horário
+- ajuste global recente
+- fluxo mais estável e menos quebradiço
