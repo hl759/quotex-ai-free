@@ -132,3 +132,7 @@ class LearningEngine:
             "result": result,
         }
         self.journal.add_trade(trade)
+
+def dynamic_minimum_score(self):
+        profile = self.get_calibration_profile()
+        return profile["min_score"]
