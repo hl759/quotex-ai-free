@@ -3,6 +3,7 @@ import os
 
 STATE_FILE = "/tmp/nexus_learning.json"
 
+
 class LearningEngine:
     def __init__(self):
         self.memory = self._load()
@@ -32,7 +33,6 @@ class LearningEngine:
         if not asset:
             return
 
-        # Compatível com vários formatos de resultado
         win = result.get("win")
         if win is None:
             outcome = str(result.get("result", "")).upper()
@@ -62,15 +62,55 @@ class LearningEngine:
             return 0.0
 
         winrate = data["wins"] / total
-        return round((winrate - 0.5) * 2, 2)  # -1.0 até +1.0
+        return round((winrate - 0.5) * 2, 2)
 
     def get_calibration_profile(self, asset=None):
-    # Compatível com chamadas antigas e novas
-    if asset:
-        asset = self._ensure_asset(asset)
-        data = self.memory.get(asset, {"wins": 0, "loss": 0})
-        total = data["wins"] + data["loss"]
+        if asset:
+            asset = self._ensure_asset(asset)
+            data = self.memory.get(asset, {"wins": 0, "loss": 0})
+            total = data["wins"] + data["loss"]
 
+            if total < 5:
+                return {
+                    "confidence_factor": 1.0,
+                    "aggressiveness": 1.0,
+                    "min_score": 3.0,
+                    "max_signals": 2,
+                    "mode": "base"
+                }
+
+            winrate = data["wins"] / total
+            confidence_factor = 0.8 + (winrate * 0.4)
+            aggressiveness = 0.9 + (winrate * 0.3)
+
+            if winrate >= 0.65:
+                min_score = 2.8
+                max_signals = 3
+                mode = "confiante"
+            elif winrate <= 0.40:
+                min_score = 3.4
+                max_signals = 1
+                mode = "cautela"
+            else:
+                min_score = 3.0
+                max_signals = 2
+                mode = "equilibrado"
+
+            return {
+                "confidence_factor": round(confidence_factor, 2),
+                "aggressiveness": round(aggressiveness, 2),
+                "min_score": round(min_score, 2),
+                "max_signals": max_signals,
+                "mode": mode
+            }
+
+        total_wins = 0
+        total_loss = 0
+        for data in self.memory.values():
+            total_wins += int(data.get("wins", 0))
+            total_loss += int(data.get("loss", 0))
+
+        total = total_wins + total_loss
         if total < 5:
             return {
                 "confidence_factor": 1.0,
@@ -80,8 +120,7 @@ class LearningEngine:
                 "mode": "base"
             }
 
-        winrate = data["wins"] / total
-
+        winrate = total_wins / total
         confidence_factor = 0.8 + (winrate * 0.4)
         aggressiveness = 0.9 + (winrate * 0.3)
 
@@ -106,55 +145,10 @@ class LearningEngine:
             "mode": mode
         }
 
-    # Perfil global
-    total_wins = 0
-    total_loss = 0
-    for data in self.memory.values():
-        total_wins += int(data.get("wins", 0))
-        total_loss += int(data.get("loss", 0))
-
-    total = total_wins + total_loss
-    if total < 5:
-        return {
-            "confidence_factor": 1.0,
-            "aggressiveness": 1.0,
-            "min_score": 3.0,
-            "max_signals": 2,
-            "mode": "base"
-        }
-
-    winrate = total_wins / total
-
-    confidence_factor = 0.8 + (winrate * 0.4)
-    aggressiveness = 0.9 + (winrate * 0.3)
-
-    if winrate >= 0.65:
-        min_score = 2.8
-        max_signals = 3
-        mode = "confiante"
-    elif winrate <= 0.40:
-        min_score = 3.4
-        max_signals = 1
-        mode = "cautela"
-    else:
-        min_score = 3.0
-        max_signals = 2
-        mode = "equilibrado"
-
-    return {
-        "confidence_factor": round(confidence_factor, 2),
-        "aggressiveness": round(aggressiveness, 2),
-        "min_score": round(min_score, 2),
-        "max_signals": max_signals,
-        "mode": mode
-        }
-
-    # Compatibilidade com versões que ainda usam esse nome
     def dynamic_minimum_score(self):
         profile = self.get_calibration_profile()
         return profile.get("min_score", 3.0)
 
-    # Compatibilidade com motores mais novos
     def get_adaptive_bonus(self, asset, *args, **kwargs):
         boost = self.get_score_boost(asset)
         if boost > 0.2:
