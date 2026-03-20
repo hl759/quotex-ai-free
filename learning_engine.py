@@ -5,7 +5,7 @@ STATE_FILE = "/tmp/nexus_learning.json"
 
 
 class LearningEngine:
-def should_filter_asset(self, asset):
+    def should_filter_asset(self, asset):
         asset = self._ensure_asset(asset)
         if not asset:
             return False
