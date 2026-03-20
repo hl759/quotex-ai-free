@@ -32,10 +32,29 @@ class LearningEngine:
         self._save()
 
     def get_score_boost(self, asset):
-        data = self.memory.get(asset, {"wins":0,"loss":0})
+        data = self.memory.get(asset, {"wins": 0, "loss": 0})
         total = data["wins"] + data["loss"]
+
         if total < 5:
             return 0
 
         winrate = data["wins"] / total
         return (winrate - 0.5) * 2
+
+    # ✅ NOVA FUNÇÃO (corrige o erro)
+    def get_calibration_profile(self, asset):
+        data = self.memory.get(asset, {"wins": 0, "loss": 0})
+        total = data["wins"] + data["loss"]
+
+        if total < 5:
+            return {
+                "confidence_factor": 1.0,
+                "aggressiveness": 1.0
+            }
+
+        winrate = data["wins"] / total
+
+        return {
+            "confidence_factor": 0.8 + (winrate * 0.4),   # 0.8 → 1.2
+            "aggressiveness": 0.9 + (winrate * 0.3)       # 0.9 → 1.2
+        }
