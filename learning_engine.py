@@ -5,6 +5,22 @@ STATE_FILE = "/tmp/nexus_learning.json"
 
 
 class LearningEngine:
+def should_filter_asset(self, asset):
+        asset = self._ensure_asset(asset)
+        if not asset:
+            return False
+
+        data = self.memory.get(asset, {"wins": 0, "loss": 0})
+        wins = int(data.get("wins", 0))
+        loss = int(data.get("loss", 0))
+        total = wins + loss
+
+        if total < 8:
+            return False
+
+        winrate = wins / total if total else 0.0
+        return winrate < 0.35
+    
     def __init__(self):
         self.memory = self._load()
 
