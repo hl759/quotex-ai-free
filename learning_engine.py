@@ -65,78 +65,88 @@ class LearningEngine:
         return round((winrate - 0.5) * 2, 2)  # -1.0 até +1.0
 
     def get_calibration_profile(self, asset=None):
-        # Compatível com chamadas antigas sem argumento
-        if asset:
-            asset = self._ensure_asset(asset)
-            data = self.memory.get(asset, {"wins": 0, "loss": 0})
-            total = data["wins"] + data["loss"]
+    # Compatível com chamadas antigas e novas
+    if asset:
+        asset = self._ensure_asset(asset)
+        data = self.memory.get(asset, {"wins": 0, "loss": 0})
+        total = data["wins"] + data["loss"]
 
-            if total < 5:
-                return {
-                    "confidence_factor": 1.0,
-                    "aggressiveness": 1.0,
-                    "min_score": 3.0,
-                    "mode": "base"
-                }
-
-            winrate = data["wins"] / total
-
-            confidence_factor = 0.8 + (winrate * 0.4)   # 0.8 → 1.2
-            aggressiveness = 0.9 + (winrate * 0.3)      # 0.9 → 1.2
-
-            if winrate >= 0.65:
-                min_score = 2.8
-                mode = "confiante"
-            elif winrate <= 0.40:
-                min_score = 3.4
-                mode = "cautela"
-            else:
-                min_score = 3.0
-                mode = "equilibrado"
-
-            return {
-                "confidence_factor": round(confidence_factor, 2),
-                "aggressiveness": round(aggressiveness, 2),
-                "min_score": round(min_score, 2),
-                "mode": mode
-            }
-
-        # Modo global/compatível quando o código antigo chama sem asset
-        total_wins = 0
-        total_loss = 0
-        for data in self.memory.values():
-            total_wins += int(data.get("wins", 0))
-            total_loss += int(data.get("loss", 0))
-
-        total = total_wins + total_loss
         if total < 5:
             return {
                 "confidence_factor": 1.0,
                 "aggressiveness": 1.0,
                 "min_score": 3.0,
+                "max_signals": 2,
                 "mode": "base"
             }
 
-        winrate = total_wins / total
+        winrate = data["wins"] / total
 
         confidence_factor = 0.8 + (winrate * 0.4)
         aggressiveness = 0.9 + (winrate * 0.3)
 
         if winrate >= 0.65:
             min_score = 2.8
+            max_signals = 3
             mode = "confiante"
         elif winrate <= 0.40:
             min_score = 3.4
+            max_signals = 1
             mode = "cautela"
         else:
             min_score = 3.0
+            max_signals = 2
             mode = "equilibrado"
 
         return {
             "confidence_factor": round(confidence_factor, 2),
             "aggressiveness": round(aggressiveness, 2),
             "min_score": round(min_score, 2),
+            "max_signals": max_signals,
             "mode": mode
+        }
+
+    # Perfil global
+    total_wins = 0
+    total_loss = 0
+    for data in self.memory.values():
+        total_wins += int(data.get("wins", 0))
+        total_loss += int(data.get("loss", 0))
+
+    total = total_wins + total_loss
+    if total < 5:
+        return {
+            "confidence_factor": 1.0,
+            "aggressiveness": 1.0,
+            "min_score": 3.0,
+            "max_signals": 2,
+            "mode": "base"
+        }
+
+    winrate = total_wins / total
+
+    confidence_factor = 0.8 + (winrate * 0.4)
+    aggressiveness = 0.9 + (winrate * 0.3)
+
+    if winrate >= 0.65:
+        min_score = 2.8
+        max_signals = 3
+        mode = "confiante"
+    elif winrate <= 0.40:
+        min_score = 3.4
+        max_signals = 1
+        mode = "cautela"
+    else:
+        min_score = 3.0
+        max_signals = 2
+        mode = "equilibrado"
+
+    return {
+        "confidence_factor": round(confidence_factor, 2),
+        "aggressiveness": round(aggressiveness, 2),
+        "min_score": round(min_score, 2),
+        "max_signals": max_signals,
+        "mode": mode
         }
 
     # Compatibilidade com versões que ainda usam esse nome
