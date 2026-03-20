@@ -1,12 +1,11 @@
-V11 ETAPA 4 - REFINADO
+ALPHA HIVE AI - FIX DE STATS / ATIVOS / HORÁRIOS
 
 Substitua estes arquivos:
-- strategy_engine.py
-- decision_engine.py
+- journal_manager.py
+- result_evaluator.py
 
-O que entra:
-- base_score real por contexto
-- pesos dinâmicos por regime
-- consenso forte vs consenso leve
-- score final menos dependente de uma única estratégia
-- decisão mais coerente com uma mesa profissional
+O que isso corrige:
+- registra WIN/LOSS de forma compatível
+- passa a alimentar Stats, Ativos e Horários
+- salva o journal em /opt/render/project/src/data
+- evita perder tudo por depender só de /tmp

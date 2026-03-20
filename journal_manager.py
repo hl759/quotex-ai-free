@@ -1,7 +1,11 @@
 import json
 import os
 
-JOURNAL_FILE = "/tmp/nexus_journal.json"
+DATA_DIR = os.environ.get("ALPHA_HIVE_DATA_DIR", "/opt/render/project/src/data")
+os.makedirs(DATA_DIR, exist_ok=True)
+
+JOURNAL_FILE = os.path.join(DATA_DIR, "alpha_hive_journal.json")
+
 
 class JournalManager:
     def __init__(self):
@@ -12,7 +16,8 @@ class JournalManager:
     def _load(self):
         try:
             with open(JOURNAL_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+                return data if isinstance(data, list) else []
         except Exception:
             return []
 
@@ -26,7 +31,7 @@ class JournalManager:
         return f"{trade.get('asset')}-{trade.get('signal')}-{trade.get('analysis_time')}-{trade.get('entry_time')}-{trade.get('expiration')}"
 
     def _valid_trades(self):
-        return [t for t in self._load() if t.get("result") in ("WIN", "LOSS")]
+        return [t for t in self._load() if str(t.get("result", "")).upper() in ("WIN", "LOSS")]
 
     def _extract_hour_bucket(self, trade):
         try:
@@ -45,25 +50,36 @@ class JournalManager:
             if self._trade_id(item) == incoming:
                 return
         data.insert(0, trade)
-        if len(data) > 700:
-            data = data[:700]
+        if len(data) > 2000:
+            data = data[:2000]
         self._save(data)
 
     def stats(self):
         valid = self._valid_trades()
         if not valid:
             return {"total": 0, "wins": 0, "loss": 0, "winrate": 0.0}
-        wins = sum(1 for t in valid if t.get("result") == "WIN")
+        wins = sum(1 for t in valid if str(t.get("result", "")).upper() == "WIN")
         total = len(valid)
-        return {"total": total, "wins": wins, "loss": total - wins, "winrate": round((wins / total) * 100, 2)}
+        return {
+            "total": total,
+            "wins": wins,
+            "loss": total - wins,
+            "winrate": round((wins / total) * 100, 2)
+        }
 
     def asset_stats(self, asset):
         valid = [t for t in self._valid_trades() if t.get("asset") == asset]
         if not valid:
             return {"asset": asset, "total": 0, "wins": 0, "loss": 0, "winrate": 0.0}
-        wins = sum(1 for t in valid if t.get("result") == "WIN")
+        wins = sum(1 for t in valid if str(t.get("result", "")).upper() == "WIN")
         total = len(valid)
-        return {"asset": asset, "total": total, "wins": wins, "loss": total - wins, "winrate": round((wins / total) * 100, 2)}
+        return {
+            "asset": asset,
+            "total": total,
+            "wins": wins,
+            "loss": total - wins,
+            "winrate": round((wins / total) * 100, 2)
+        }
 
     def best_assets(self):
         grouped = {}
@@ -71,14 +87,21 @@ class JournalManager:
             asset = t.get("asset", "N/A")
             grouped.setdefault(asset, {"asset": asset, "total": 0, "wins": 0})
             grouped[asset]["total"] += 1
-            if t.get("result") == "WIN":
+            if str(t.get("result", "")).upper() == "WIN":
                 grouped[asset]["wins"] += 1
+
         result = []
         for info in grouped.values():
             if info["total"] == 0:
                 continue
-            result.append({"asset": info["asset"], "total": info["total"], "wins": info["wins"], "winrate": round((info["wins"] / info["total"]) * 100, 2)})
-        result = [r for r in result if r["total"] >= 3]
+            result.append({
+                "asset": info["asset"],
+                "total": info["total"],
+                "wins": info["wins"],
+                "winrate": round((info["wins"] / info["total"]) * 100, 2)
+            })
+
+        result = [r for r in result if r["total"] >= 1]
         result.sort(key=lambda x: (x["winrate"], x["total"]), reverse=True)
         return result[:10]
 
@@ -86,9 +109,15 @@ class JournalManager:
         valid = [t for t in self._valid_trades() if self._extract_hour_bucket(t) == hour_bucket]
         if not valid:
             return {"hour": hour_bucket, "total": 0, "wins": 0, "loss": 0, "winrate": 0.0}
-        wins = sum(1 for t in valid if t.get("result") == "WIN")
+        wins = sum(1 for t in valid if str(t.get("result", "")).upper() == "WIN")
         total = len(valid)
-        return {"hour": hour_bucket, "total": total, "wins": wins, "loss": total - wins, "winrate": round((wins / total) * 100, 2)}
+        return {
+            "hour": hour_bucket,
+            "total": total,
+            "wins": wins,
+            "loss": total - wins,
+            "winrate": round((wins / total) * 100, 2)
+        }
 
     def best_hours(self):
         grouped = {}
@@ -98,21 +127,28 @@ class JournalManager:
                 continue
             grouped.setdefault(hb, {"hour": hb, "total": 0, "wins": 0})
             grouped[hb]["total"] += 1
-            if t.get("result") == "WIN":
+            if str(t.get("result", "")).upper() == "WIN":
                 grouped[hb]["wins"] += 1
+
         result = []
         for info in grouped.values():
             if info["total"] == 0:
                 continue
-            result.append({"hour": info["hour"], "total": info["total"], "wins": info["wins"], "winrate": round((info["wins"] / info["total"]) * 100, 2)})
-        result = [r for r in result if r["total"] >= 3]
+            result.append({
+                "hour": info["hour"],
+                "total": info["total"],
+                "wins": info["wins"],
+                "winrate": round((info["wins"] / info["total"]) * 100, 2)
+            })
+
+        result = [r for r in result if r["total"] >= 1]
         result.sort(key=lambda x: (x["winrate"], x["total"]), reverse=True)
         return result[:10]
 
     def recent_asset_results(self, asset, limit=6):
-        valid = [t.get("result") for t in self._valid_trades() if t.get("asset") == asset]
+        valid = [str(t.get("result", "")).upper() for t in self._valid_trades() if t.get("asset") == asset]
         return valid[:limit]
 
     def recent_global_results(self, limit=12):
-        valid = [t.get("result") for t in self._valid_trades()]
+        valid = [str(t.get("result", "")).upper() for t in self._valid_trades()]
         return valid[:limit]
