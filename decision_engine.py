@@ -32,7 +32,7 @@ class DecisionEngine:
         reasons.append(f"Score base: {base_score}")
 
         if strategy_result.get("valid", False):
-            adjusted_score += strategy_score * 0.55
+            adjusted_score += strategy_score * 0.60
             reasons.append(f"Estratégia ativa: {strategy_name}")
             reasons.extend(strategy_result.get("reasons", []))
             if strategy_direction:
@@ -47,79 +47,133 @@ class DecisionEngine:
             boost = 0.0
 
         adjusted_score += (boost * 0.7)
+        reasons.append(f"Boost aprendizado: {round(boost, 2)}")
 
         try:
             profile = self.learning.get_calibration_profile(asset)
         except Exception:
-            profile = {"confidence_factor": 1.0}
+            profile = {
+                "confidence_factor": 1.0,
+                "aggressiveness": 1.0,
+                "min_score": 3.0,
+                "max_signals": 2,
+                "mode": "base"
+            }
 
         confidence_factor = profile.get("confidence_factor", 1.0)
 
         if regime == "trend":
             adjusted_score += 0.35
+            reasons.append("Regime trend favorável")
         elif regime == "mixed":
-            adjusted_score += 0.10
+            adjusted_score += 0.12
+            reasons.append("Regime mixed operável")
         elif regime == "sideways":
-            adjusted_score -= 0.15
+            adjusted_score -= 0.05
+            reasons.append("Regime sideways com reversão possível")
         elif regime == "chaotic":
             adjusted_score -= 1.0
+            reasons.append("Regime chaotic bloqueando")
 
-        if trend_m1 == trend_m5:
-            adjusted_score += 0.35
+        if trend_m1 in ("bull", "bear") and trend_m5 in ("bull", "bear"):
+            if trend_m1 == trend_m5:
+                adjusted_score += 0.25
+                reasons.append("M1 e M5 alinhados")
+            else:
+                adjusted_score -= 0.15
+                reasons.append("Conflito entre M1 e M5")
 
         if rejection:
             adjusted_score += 0.20
+            reasons.append("Rejeição relevante")
 
         if breakout:
-            adjusted_score += 0.25
+            adjusted_score += 0.20
+            reasons.append("Breakout limpo")
 
         if pattern in ("bullish", "bearish"):
-            adjusted_score += 0.15
+            adjusted_score += 0.10
+            reasons.append(f"Padrão {pattern}")
 
         if volatility:
-            adjusted_score += 0.12
+            adjusted_score += 0.10
+            reasons.append("Volatilidade saudável")
 
         if moved_fast:
-            adjusted_score -= 0.20
+            adjusted_score -= 0.18
+            reasons.append("Preço já andou um pouco")
 
         if is_sideways:
-            adjusted_score -= 0.10
+            adjusted_score -= 0.05
+            reasons.append("Zona de ruído")
 
         if rsi <= 35 or rsi >= 65:
-            adjusted_score += 0.10
+            adjusted_score += 0.08
+            reasons.append("RSI em zona útil")
+        elif 45 <= rsi <= 55:
+            adjusted_score -= 0.03
+            reasons.append("RSI neutro")
 
-        if regime == "chaotic" and adjusted_score < 2.5:
+        if regime == "chaotic" and adjusted_score < 2.4:
+            decision = "NAO_OPERAR"
+            confidence = max(50, min(95, int((50 + adjusted_score * 10) * confidence_factor)))
+            reasons.append(f"Score ajustado: {round(adjusted_score, 2)}")
+            reasons.append("Modo: proteção em caos")
             return {
                 "asset": asset,
-                "decision": "NAO_OPERAR",
+                "decision": decision,
                 "direction": None,
                 "score": round(adjusted_score, 2),
-                "confidence": 50,
+                "confidence": confidence,
                 "regime": regime,
                 "reasons": reasons
             }
 
-        if adjusted_score >= 3.25:
+        if adjusted_score >= 3.20:
             decision = "ENTRADA_FORTE"
             direction = base_direction
-        elif adjusted_score >= 2.35:
+        elif adjusted_score >= 2.25:
             decision = "ENTRADA_CAUTELA"
             direction = base_direction
-        elif adjusted_score >= 1.75:
-            decision = "OBSERVAR"
-            direction = base_direction
+        elif adjusted_score >= 1.65:
+            promote_to_caution = False
+
+            if regime == "trend":
+                if breakout or rejection or trend_m1 == trend_m5 or strategy_result.get("valid", False):
+                    promote_to_caution = True
+            elif regime == "mixed":
+                if breakout or rejection or pattern in ("bullish", "bearish") or strategy_name == "reversal":
+                    promote_to_caution = True
+            elif regime == "sideways":
+                if strategy_name == "reversal" and rejection:
+                    promote_to_caution = True
+
+            if promote_to_caution:
+                decision = "ENTRADA_CAUTELA"
+                direction = base_direction
+                reasons.append("OBSERVAR promovido para CAUTELA")
+            else:
+                decision = "OBSERVAR"
+                direction = base_direction
         else:
             decision = "NAO_OPERAR"
             direction = None
 
-        confidence = int(max(50, min(95, (50 + adjusted_score * 10) * confidence_factor)))
+        confidence = 50 + (adjusted_score * 10)
+        confidence *= confidence_factor
+        confidence = max(50, min(95, confidence))
+
+        reasons.append(f"Regime final: {regime}")
+        reasons.append(f"Strategy score: {round(strategy_score, 2)}")
+        reasons.append(f"Score ajustado: {round(adjusted_score, 2)}")
+        reasons.append("Modo: v11 etapa 2 integrada")
 
         return {
             "asset": asset,
             "decision": decision,
             "direction": direction,
             "score": round(adjusted_score, 2),
-            "confidence": confidence,
+            "confidence": int(confidence),
             "regime": regime,
             "reasons": reasons
         }

@@ -1,17 +1,12 @@
-NEXUS v10.6 AUTO-CALIBRADA
+V11 ETAPA 2
 
-Substitua estes arquivos no projeto:
-- learning_engine.py
-- journal_manager.py
-- signal_engine.py
+Substitua estes arquivos:
+- strategy_engine.py
 - decision_engine.py
 
-O app.py pode permanecer igual ao atual.
-
-O que resolve:
-- remove dependência funcional de métodos antigos
-- auto calibração sólida e gradual
-- ajuste por ativo
-- ajuste por horário
-- ajuste global recente
-- fluxo mais estável e menos quebradiço
+O que entra:
+- Trend Strategy
+- Reversal Strategy
+- Seleção da melhor estratégia
+- Integração com o decision_engine
+- Mercado lateral passa a poder usar reversão com muito mais coerência

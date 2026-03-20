@@ -16,7 +16,6 @@ class StrategyEngine:
         regime = indicators.get("regime", "unknown")
         moved_fast = indicators.get("moved_too_fast", False)
 
-        # Estratégia só faz sentido em trend ou mixed
         if regime not in ("trend", "mixed"):
             return {
                 "strategy": "trend",
@@ -27,7 +26,6 @@ class StrategyEngine:
                 "reasons": ["Trend strategy ignorada fora de trend/mixed"]
             }
 
-        # Direção principal
         if trend_m1 == "bull":
             direction = "CALL"
             score += 1.6
@@ -37,7 +35,6 @@ class StrategyEngine:
             score += 1.6
             reasons.append("Tendência M1 bearish")
 
-        # Confirmação estrutural
         if trend_m5 in ("bull", "bear"):
             if trend_m5 == trend_m1:
                 score += 2.0
@@ -46,15 +43,14 @@ class StrategyEngine:
                 score -= 0.9
                 reasons.append("Conflito entre M1 e M5")
 
-        # Pullback saudável em tendência
         if direction == "CALL" and rsi <= 45:
             score += 0.8
             reasons.append("Pullback em tendência de alta")
-        elif direction == "PUT" and rsi >= 55:
+
+        if direction == "PUT" and rsi >= 55:
             score += 0.8
             reasons.append("Pullback em tendência de baixa")
 
-        # Continuação
         if breakout:
             score += 0.8
             reasons.append("Breakout a favor da tendência")
@@ -85,11 +81,93 @@ class StrategyEngine:
             "reasons": reasons
         }
 
+    def reversal_strategy(self, asset, indicators):
+        score = 0.0
+        reasons = []
+        direction = None
+
+        regime = indicators.get("regime", "unknown")
+        rsi = indicators.get("rsi", 50)
+        rejection = indicators.get("rejection", False)
+        pattern = indicators.get("pattern")
+        trend_m1 = indicators.get("trend_m1", indicators.get("trend", "neutral"))
+        trend_m5 = indicators.get("trend_m5", "neutral")
+        volatility = indicators.get("volatility", False)
+        moved_fast = indicators.get("moved_too_fast", False)
+
+        if regime not in ("sideways", "mixed"):
+            return {
+                "strategy": "reversal",
+                "valid": False,
+                "score": 0.0,
+                "direction": None,
+                "confidence": 50,
+                "reasons": ["Reversal strategy ignorada fora de sideways/mixed"]
+            }
+
+        if rejection:
+            score += 1.2
+            reasons.append("Rejeição relevante para reversão")
+
+        if rsi <= 35:
+            direction = "CALL"
+            score += 1.0
+            reasons.append("Sobrevenda favorece reversão de alta")
+        elif rsi >= 65:
+            direction = "PUT"
+            score += 1.0
+            reasons.append("Sobrecompra favorece reversão de baixa")
+
+        if pattern == "bullish" and direction == "CALL":
+            score += 0.8
+            reasons.append("Padrão bullish confirma reversão")
+        elif pattern == "bearish" and direction == "PUT":
+            score += 0.8
+            reasons.append("Padrão bearish confirma reversão")
+
+        if regime == "sideways":
+            score += 0.5
+            reasons.append("Regime sideways favorece reversão")
+        elif regime == "mixed":
+            score += 0.2
+            reasons.append("Regime mixed aceitável para reversão")
+
+        if trend_m1 in ("bull", "bear") and trend_m5 in ("bull", "bear") and trend_m1 == trend_m5:
+            score -= 0.4
+            reasons.append("Tendência alinhada reduz força da reversão")
+
+        if volatility:
+            score += 0.2
+            reasons.append("Volatilidade ajuda execução da reversão")
+
+        if moved_fast:
+            score -= 0.2
+            reasons.append("Preço já andou um pouco")
+
+        if score < 0:
+            score = 0
+
+        confidence = int(min(95, max(50, 50 + score * 9)))
+
+        return {
+            "strategy": "reversal",
+            "valid": score >= 1.7 and direction is not None,
+            "score": round(score, 2),
+            "direction": direction,
+            "confidence": confidence,
+            "reasons": reasons
+        }
+
     def select_best_strategy(self, asset, indicators):
         trend_result = self.trend_strategy(asset, indicators)
+        reversal_result = self.reversal_strategy(asset, indicators)
 
-        if trend_result["valid"]:
-            return trend_result
+        candidates = [trend_result, reversal_result]
+        valid = [c for c in candidates if c.get("valid")]
+
+        if valid:
+            valid.sort(key=lambda x: (x.get("score", 0), x.get("confidence", 0)), reverse=True)
+            return valid[0]
 
         return {
             "strategy": "none",
@@ -98,4 +176,4 @@ class StrategyEngine:
             "direction": None,
             "confidence": 50,
             "reasons": ["Nenhuma estratégia válida no momento"]
-      }
+        }
