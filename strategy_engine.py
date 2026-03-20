@@ -158,11 +158,81 @@ class StrategyEngine:
             "reasons": reasons
         }
 
-    def select_best_strategy(self, asset, indicators):
-        trend_result = self.trend_strategy(asset, indicators)
-        reversal_result = self.reversal_strategy(asset, indicators)
+    def scalp_strategy(self, asset, indicators):
+        score = 0.0
+        reasons = []
+        direction = None
 
-        candidates = [trend_result, reversal_result]
+        regime = indicators.get("regime", "unknown")
+        trend_m1 = indicators.get("trend_m1", indicators.get("trend", "neutral"))
+        rsi = indicators.get("rsi", 50)
+        volatility = indicators.get("volatility", False)
+        breakout = indicators.get("breakout", False)
+        moved_fast = indicators.get("moved_too_fast", False)
+        rejection = indicators.get("rejection", False)
+
+        if regime not in ("mixed", "trend"):
+            return {
+                "strategy": "scalp",
+                "valid": False,
+                "score": 0.0,
+                "direction": None,
+                "confidence": 50,
+                "reasons": ["Scalp strategy ignorada fora de mixed/trend"]
+            }
+
+        if trend_m1 == "bull":
+            direction = "CALL"
+            score += 1.0
+            reasons.append("Micro direção bullish")
+        elif trend_m1 == "bear":
+            direction = "PUT"
+            score += 1.0
+            reasons.append("Micro direção bearish")
+
+        if volatility:
+            score += 0.8
+            reasons.append("Volatilidade favorece scalp")
+
+        if breakout:
+            score += 0.7
+            reasons.append("Breakout curto aproveitável")
+
+        if rejection:
+            score += 0.3
+            reasons.append("Rejeição útil para entrada curta")
+
+        if 42 <= rsi <= 58:
+            score += 0.2
+            reasons.append("RSI neutro operável para scalp")
+
+        if moved_fast:
+            score -= 0.5
+            reasons.append("Preço já andou um pouco")
+
+        if score < 0:
+            score = 0
+
+        confidence = int(min(92, max(50, 50 + score * 8)))
+
+        return {
+            "strategy": "scalp",
+            "valid": score >= 1.6 and direction is not None,
+            "score": round(score, 2),
+            "direction": direction,
+            "confidence": confidence,
+            "reasons": reasons
+        }
+
+    def evaluate_all(self, asset, indicators):
+        return [
+            self.trend_strategy(asset, indicators),
+            self.reversal_strategy(asset, indicators),
+            self.scalp_strategy(asset, indicators),
+        ]
+
+    def select_best_strategy(self, asset, indicators):
+        candidates = self.evaluate_all(asset, indicators)
         valid = [c for c in candidates if c.get("valid")]
 
         if valid:

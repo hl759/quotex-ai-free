@@ -1,4 +1,4 @@
-V11 ETAPA 2
+V11 ETAPA 3 - MULTI-ESTRATÉGIAS
 
 Substitua estes arquivos:
 - strategy_engine.py
@@ -7,6 +7,8 @@ Substitua estes arquivos:
 O que entra:
 - Trend Strategy
 - Reversal Strategy
-- Seleção da melhor estratégia
-- Integração com o decision_engine
-- Mercado lateral passa a poder usar reversão com muito mais coerência
+- Scalp Strategy
+- Avaliação simultânea de estratégias
+- Votação de direção
+- Fusão entre estratégias quando mais de uma estiver válida
+- Decisão muito mais próxima de uma mesa profissional
