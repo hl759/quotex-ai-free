@@ -106,7 +106,6 @@ class DecisionEngine:
                 return 0.30
             if strategy_name == "reversal":
                 return 0.20
-
         if regime == "sideways":
             if strategy_name == "reversal":
                 return 0.58
@@ -114,7 +113,6 @@ class DecisionEngine:
                 return 0.28
             if strategy_name == "trend":
                 return 0.22
-
         if regime == "mixed":
             if strategy_name == "trend":
                 return 0.46
@@ -122,7 +120,6 @@ class DecisionEngine:
                 return 0.38
             if strategy_name == "scalp":
                 return 0.36
-
         return 0.35
 
     def decide(self, asset, indicators):
@@ -142,6 +139,7 @@ class DecisionEngine:
         leader_setup_id = None
         leader_name = "none"
         leader_score = 0.0
+        filtered = []
 
         if valid_strategies:
             fusion_total = 0.0
@@ -149,6 +147,12 @@ class DecisionEngine:
 
             for s in valid_strategies[:3]:
                 strategy_name = s.get("strategy", "none")
+
+                if self.adaptive_engine.should_soft_block(strategy_name, regime):
+                    filtered.append(strategy_name)
+                    reasons.append(f"Estratégia temporariamente enfraquecida: {strategy_name}")
+                    continue
+
                 base_weight = self._weight_by_regime(strategy_name, regime)
                 adaptive_weight = self.adaptive_engine.get_weight(strategy_name, regime)
                 final_weight = base_weight * adaptive_weight
@@ -157,28 +161,42 @@ class DecisionEngine:
 
             adjusted_score += fusion_total
 
-            if len(used) == 1:
-                reasons.append(f"Estratégia líder: {used[0]}")
+            if used:
+                if len(used) == 1:
+                    reasons.append(f"Estratégia líder: {used[0]}")
+                else:
+                    reasons.append(f"Fusão estratégica ativa: {', '.join(used)}")
             else:
-                reasons.append(f"Fusão estratégica ativa: {', '.join(used)}")
+                reasons.append("Estratégias válidas sem força operacional suficiente")
 
-            leader = valid_strategies[0]
-            leader_name = leader.get("strategy", "none")
-            leader_score = float(leader.get("score", 0.0))
-            reasons.extend(leader.get("reasons", []))
+            if valid_strategies:
+                for candidate in valid_strategies:
+                    c_name = candidate.get("strategy", "none")
+                    if c_name not in filtered:
+                        leader = candidate
+                        leader_name = leader.get("strategy", "none")
+                        leader_score = float(leader.get("score", 0.0))
+                        reasons.extend(leader.get("reasons", []))
+                        break
+                else:
+                    leader = valid_strategies[0]
+                    leader_name = leader.get("strategy", "none")
+                    leader_score = float(leader.get("score", 0.0))
+
             reasons.append(f"Estratégias válidas: {len(valid_strategies)}")
 
-            leader_setup_id = self.strategy_lab.register_setup(
-                asset=asset,
-                strategy_name=leader_name,
-                indicators=indicators,
-                signal=leader.get("direction"),
-                analysis_time=analysis_time,
-            )
-            setup_boost, setup_reason = self.strategy_lab.get_setup_boost(leader_setup_id)
-            adjusted_score += setup_boost
-            reasons.append(setup_reason)
-            reasons.append(self.adaptive_engine.get_reason(leader_name, regime))
+            if leader_name != "none":
+                leader_setup_id = self.strategy_lab.register_setup(
+                    asset=asset,
+                    strategy_name=leader_name,
+                    indicators=indicators,
+                    signal=leader.get("direction"),
+                    analysis_time=analysis_time,
+                )
+                setup_boost, setup_reason = self.strategy_lab.get_setup_boost(leader_setup_id)
+                adjusted_score += setup_boost
+                reasons.append(setup_reason)
+                reasons.append(self.adaptive_engine.get_reason(leader_name, regime))
         else:
             reasons.append("Nenhuma estratégia forte ativa")
 
@@ -210,7 +228,7 @@ class DecisionEngine:
             confidence = max(50, min(95, int((50 + adjusted_score * 10) * confidence_factor)))
             reasons.append(f"Regime final: {regime}")
             reasons.append(f"Score ajustado: {round(adjusted_score, 2)}")
-            reasons.append("Modo: v12 etapa 2 integrada")
+            reasons.append("Modo: v12 etapa 3 integrada")
             return {
                 "asset": asset,
                 "decision": "NAO_OPERAR",
@@ -225,33 +243,37 @@ class DecisionEngine:
 
         consensus_bonus = 0.0
         if len(valid_strategies) >= 2:
-            top1 = valid_strategies[0]
-            top2 = valid_strategies[1]
-            same_direction = top1.get("direction") == top2.get("direction")
-            both_strong = float(top1.get("score", 0.0)) >= 2.0 and float(top2.get("score", 0.0)) >= 1.6
+            active = [s for s in valid_strategies if s.get("strategy") not in filtered]
+            if len(active) >= 2:
+                top1 = active[0]
+                top2 = active[1]
+                same_direction = top1.get("direction") == top2.get("direction")
+                both_strong = float(top1.get("score", 0.0)) >= 2.0 and float(top2.get("score", 0.0)) >= 1.6
 
-            if same_direction and both_strong:
-                consensus_bonus = 0.20
-                adjusted_score += consensus_bonus
-                reasons.append("Consenso forte entre estratégias")
-            elif same_direction:
-                consensus_bonus = 0.10
-                adjusted_score += consensus_bonus
-                reasons.append("Consenso leve entre estratégias")
+                if same_direction and both_strong:
+                    consensus_bonus = 0.20
+                    adjusted_score += consensus_bonus
+                    reasons.append("Consenso forte entre estratégias")
+                elif same_direction:
+                    consensus_bonus = 0.10
+                    adjusted_score += consensus_bonus
+                    reasons.append("Consenso leve entre estratégias")
 
         if adjusted_score >= 3.10:
             decision = "ENTRADA_FORTE"
             direction = final_direction
-        elif adjusted_score >= 2.05:
+        elif adjusted_score >= 2.00:
             decision = "ENTRADA_CAUTELA"
             direction = final_direction
-        elif adjusted_score >= 1.45:
+        elif adjusted_score >= 1.40:
             promote_to_caution = False
-            if regime == "trend" and any(s.get("strategy") == "trend" and s.get("valid") for s in valid_strategies):
+            active_names = [s.get("strategy") for s in valid_strategies if s.get("strategy") not in filtered]
+
+            if regime == "trend" and "trend" in active_names:
                 promote_to_caution = True
-            elif regime == "sideways" and any(s.get("strategy") in ("reversal", "scalp") and s.get("valid") for s in valid_strategies):
+            elif regime == "sideways" and any(x in active_names for x in ("reversal", "scalp")):
                 promote_to_caution = True
-            elif regime == "mixed" and len(valid_strategies) >= 1:
+            elif regime == "mixed" and len(active_names) >= 1:
                 promote_to_caution = True
 
             if promote_to_caution:
@@ -275,7 +297,7 @@ class DecisionEngine:
         reasons.append(f"Estratégia líder: {leader_name}")
         reasons.append(f"Strategy score: {round(leader_score, 2)}")
         reasons.append(f"Score ajustado: {round(adjusted_score, 2)}")
-        reasons.append("Modo: v12 etapa 2 integrada")
+        reasons.append("Modo: v12 etapa 3 integrada")
 
         return {
             "asset": asset,

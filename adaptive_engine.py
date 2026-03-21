@@ -39,7 +39,8 @@ class AdaptiveEngine:
                 "weight": 1.0,
                 "total": 0,
                 "wins": 0,
-                "loss": 0
+                "loss": 0,
+                "status": "neutral"
             }
             self._save()
         return self.data[key]
@@ -47,6 +48,7 @@ class AdaptiveEngine:
     def register_result(self, strategy_name, regime, result):
         if not strategy_name or strategy_name == "none":
             return
+
         profile = self.ensure_profile(strategy_name, regime)
         normalized = str(result).upper()
         if normalized not in ("WIN", "LOSS"):
@@ -58,15 +60,25 @@ class AdaptiveEngine:
         else:
             profile["loss"] += 1
 
-        total = profile["total"]
-        wins = profile["wins"]
-        winrate = wins / total if total > 0 else 0.0
+        total = int(profile["total"])
+        wins = int(profile["wins"])
+        winrate = (wins / total) if total > 0 else 0.0
 
         if total >= 10:
-            if winrate >= 0.65:
-                profile["weight"] = min(1.22, profile["weight"] + 0.03)
-            elif winrate <= 0.40:
-                profile["weight"] = max(0.82, profile["weight"] - 0.03)
+            if winrate >= 0.66:
+                profile["weight"] = min(1.28, float(profile["weight"]) + 0.04)
+                profile["status"] = "favored"
+            elif winrate >= 0.58:
+                profile["weight"] = min(1.18, float(profile["weight"]) + 0.02)
+                profile["status"] = "slightly_favored"
+            elif winrate <= 0.38:
+                profile["weight"] = max(0.72, float(profile["weight"]) - 0.05)
+                profile["status"] = "reduced"
+            elif winrate <= 0.45:
+                profile["weight"] = max(0.84, float(profile["weight"]) - 0.02)
+                profile["status"] = "slightly_reduced"
+            else:
+                profile["status"] = "neutral"
 
         self._save()
 
@@ -78,11 +90,29 @@ class AdaptiveEngine:
         profile = self.ensure_profile(strategy_name, regime)
         total = int(profile.get("total", 0))
         wins = int(profile.get("wins", 0))
+        status = profile.get("status", "neutral")
+
         if total < 10:
             return "Peso adaptativo neutro"
-        winrate = (wins / total) * 100 if total else 0.0
-        if winrate >= 65:
-            return "Estratégia adaptativamente favorecida"
-        if winrate <= 40:
-            return "Estratégia adaptativamente reduzida"
-        return "Estratégia adaptativamente neutra"
+
+        winrate = round((wins / total) * 100, 2) if total else 0.0
+
+        if status == "favored":
+            return f"Estratégia favorecida por performance ({winrate}%)"
+        if status == "slightly_favored":
+            return f"Estratégia levemente favorecida ({winrate}%)"
+        if status == "reduced":
+            return f"Estratégia reduzida por performance ({winrate}%)"
+        if status == "slightly_reduced":
+            return f"Estratégia levemente reduzida ({winrate}%)"
+        return f"Estratégia adaptativamente neutra ({winrate}%)"
+
+    def should_soft_block(self, strategy_name, regime):
+        profile = self.ensure_profile(strategy_name, regime)
+        total = int(profile.get("total", 0))
+        loss = int(profile.get("loss", 0))
+        wins = int(profile.get("wins", 0))
+        if total < 14:
+            return False
+        winrate = (wins / total) if total else 0.0
+        return winrate <= 0.30 and loss >= 8
