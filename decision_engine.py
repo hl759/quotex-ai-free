@@ -1,10 +1,12 @@
 from strategy_engine import StrategyEngine
+from strategy_lab import StrategyLab
 
 
 class DecisionEngine:
     def __init__(self, learning):
         self.learning = learning
         self.strategy_engine = StrategyEngine()
+        self.strategy_lab = StrategyLab()
 
     def _build_base_score(self, indicators):
         score = 0.0
@@ -124,6 +126,7 @@ class DecisionEngine:
     def decide(self, asset, indicators):
         regime = indicators.get("regime", "unknown")
         fallback_direction = indicators.get("direction", "CALL")
+        analysis_time = indicators.get("analysis_time")
 
         base_score, base_reasons = self._build_base_score(indicators)
         reasons = [f"Score base: {base_score}"]
@@ -134,10 +137,14 @@ class DecisionEngine:
         valid_strategies.sort(key=lambda x: (x.get("score", 0), x.get("confidence", 0)), reverse=True)
 
         adjusted_score = float(base_score)
+        leader_setup_id = None
+        leader_name = "none"
+        leader_score = 0.0
 
         if valid_strategies:
             fusion_total = 0.0
             used = []
+
             for s in valid_strategies[:3]:
                 weight = self._weight_by_regime(s.get("strategy", "none"), regime)
                 fusion_total += float(s.get("score", 0.0)) * weight
@@ -151,8 +158,21 @@ class DecisionEngine:
                 reasons.append(f"Fusão estratégica ativa: {', '.join(used)}")
 
             leader = valid_strategies[0]
+            leader_name = leader.get("strategy", "none")
+            leader_score = float(leader.get("score", 0.0))
             reasons.extend(leader.get("reasons", []))
             reasons.append(f"Estratégias válidas: {len(valid_strategies)}")
+
+            leader_setup_id = self.strategy_lab.register_setup(
+                asset=asset,
+                strategy_name=leader_name,
+                indicators=indicators,
+                signal=leader.get("direction"),
+                analysis_time=analysis_time,
+            )
+            setup_boost, setup_reason = self.strategy_lab.get_setup_boost(leader_setup_id)
+            adjusted_score += setup_boost
+            reasons.append(setup_reason)
         else:
             reasons.append("Nenhuma estratégia forte ativa")
 
@@ -184,7 +204,7 @@ class DecisionEngine:
             confidence = max(50, min(95, int((50 + adjusted_score * 10) * confidence_factor)))
             reasons.append(f"Regime final: {regime}")
             reasons.append(f"Score ajustado: {round(adjusted_score, 2)}")
-            reasons.append("Modo: v11 etapa 4 refinado")
+            reasons.append("Modo: v12 etapa 1 integrada")
             return {
                 "asset": asset,
                 "decision": "NAO_OPERAR",
@@ -192,7 +212,9 @@ class DecisionEngine:
                 "score": round(adjusted_score, 2),
                 "confidence": confidence,
                 "regime": regime,
-                "reasons": reasons
+                "reasons": reasons,
+                "setup_id": leader_setup_id,
+                "strategy_name": leader_name
             }
 
         consensus_bonus = 0.0
@@ -243,14 +265,11 @@ class DecisionEngine:
             confidence += 2
         confidence = max(50, min(95, confidence))
 
-        leader_name = valid_strategies[0].get("strategy", "none") if valid_strategies else "none"
-        leader_score = float(valid_strategies[0].get("score", 0.0)) if valid_strategies else 0.0
-
         reasons.append(f"Regime final: {regime}")
         reasons.append(f"Estratégia líder: {leader_name}")
         reasons.append(f"Strategy score: {round(leader_score, 2)}")
         reasons.append(f"Score ajustado: {round(adjusted_score, 2)}")
-        reasons.append("Modo: v11 etapa 4 refinado")
+        reasons.append("Modo: v12 etapa 1 integrada")
 
         return {
             "asset": asset,
@@ -259,5 +278,7 @@ class DecisionEngine:
             "score": round(adjusted_score, 2),
             "confidence": int(confidence),
             "regime": regime,
-            "reasons": reasons
+            "reasons": reasons,
+            "setup_id": leader_setup_id,
+            "strategy_name": leader_name
         }

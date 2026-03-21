@@ -11,6 +11,7 @@ from data_manager import DataManager
 from learning_engine import LearningEngine
 from result_evaluator import ResultEvaluator
 from result_engine import ResultEngine
+from strategy_lab import StrategyLab
 from journal_manager import JournalManager
 from decision_engine import DecisionEngine
 from config import ASSETS, SCAN_INTERVAL_SECONDS
@@ -24,6 +25,7 @@ signal_engine = SignalEngine(learning)
 decision_engine = DecisionEngine(learning)
 result_evaluator = ResultEvaluator()
 result_engine = ResultEngine(result_evaluator)
+strategy_lab = StrategyLab()
 journal = JournalManager()
 
 STATE_DIR = "/tmp/nexus_state"
@@ -31,7 +33,7 @@ LATEST_SIGNALS_FILE = os.path.join(STATE_DIR, "latest_signals.json")
 SIGNAL_HISTORY_FILE = os.path.join(STATE_DIR, "history.json")
 META_FILE = os.path.join(STATE_DIR, "meta.json")
 CURRENT_DECISION_FILE = os.path.join(STATE_DIR, "current_decision.json")
-PENDING_SIGNALS_FILE = os.path.join(STATE_DIR, "pending_signals.json")
+PENDING_DECISIONS_FILE = os.path.join(STATE_DIR, "pending_decisions.json")
 
 os.makedirs(STATE_DIR, exist_ok=True)
 
@@ -81,36 +83,63 @@ def normalize_signals(signals):
         })
     return out
 
+def decorate_decision(decision):
+    analysis = now_brazil()
+    entry = analysis + timedelta(minutes=1)
+    expiration = entry + timedelta(minutes=1)
+    reasons = decision.get("reasons", [])
+    if isinstance(reasons, list):
+        reason_text = "\n".join(["• " + str(r) for r in reasons]) if reasons else "Sem detalhes"
+    else:
+        reason_text = str(reasons)
+    return {
+        "asset": decision.get("asset", "MERCADO"),
+        "decision": decision.get("decision", "NAO_OPERAR"),
+        "direction": decision.get("direction"),
+        "score": decision.get("score", 0),
+        "confidence": decision.get("confidence", 50),
+        "regime": decision.get("regime", "unknown"),
+        "analysis_time": analysis.strftime("%H:%M"),
+        "entry_time": entry.strftime("%H:%M"),
+        "expiration": expiration.strftime("%H:%M"),
+        "reason_text": reason_text,
+        "setup_id": decision.get("setup_id"),
+        "strategy_name": decision.get("strategy_name", "none")
+    }
 
-def _signal_uid(signal):
-    return f"{signal.get('asset','N/A')}-{signal.get('signal','N/A')}-{signal.get('analysis_time','--:--')}-{signal.get('entry_time','--:--')}-{signal.get('expiration','--:--')}"
+def _decision_uid(item):
+    return f"{item.get('asset','N/A')}-{item.get('direction','N/A')}-{item.get('analysis_time','--:--')}-{item.get('entry_time','--:--')}-{item.get('expiration','--:--')}"
 
-def enqueue_pending_signals(raw_signals, normalized_signals):
-    if not raw_signals or not normalized_signals:
+def enqueue_pending_decision(current_decision, matched_market):
+    if not current_decision:
+        return
+    if current_decision.get("decision") not in ("ENTRADA_FORTE", "ENTRADA_CAUTELA"):
+        return
+    if not matched_market:
         return
 
-    pending = read_json(PENDING_SIGNALS_FILE, [])
+    pending = read_json(PENDING_DECISIONS_FILE, [])
     existing = {item.get("uid") for item in pending if isinstance(item, dict)}
 
-    for idx, signal in enumerate(raw_signals):
-        if idx >= len(normalized_signals):
-            continue
+    record = {
+        "uid": _decision_uid(current_decision),
+        "asset": current_decision.get("asset"),
+        "signal": current_decision.get("direction"),
+        "score": current_decision.get("score", 0),
+        "confidence": current_decision.get("confidence", 0),
+        "analysis_time": current_decision.get("analysis_time"),
+        "entry_time": current_decision.get("entry_time"),
+        "expiration": current_decision.get("expiration"),
+        "setup_id": current_decision.get("setup_id"),
+        "strategy_name": current_decision.get("strategy_name", "none"),
+    }
 
-        norm = normalized_signals[idx]
-        record = dict(signal)
-        record["analysis_time"] = norm.get("analysis_time", "--:--")
-        record["entry_time"] = norm.get("entry_time", "--:--")
-        record["expiration"] = norm.get("expiration", "--:--")
-        record["uid"] = _signal_uid(record)
+    if record["uid"] not in existing:
+        pending.append(record)
+        write_json(PENDING_DECISIONS_FILE, pending)
 
-        if record["uid"] not in existing:
-            pending.append(record)
-            existing.add(record["uid"])
-
-    write_json(PENDING_SIGNALS_FILE, pending)
-
-def process_pending_results(market):
-    pending = read_json(PENDING_SIGNALS_FILE, [])
+def process_pending_decisions(market):
+    pending = read_json(PENDING_DECISIONS_FILE, [])
     if not pending:
         return
 
@@ -131,32 +160,13 @@ def process_pending_results(market):
         result_data = result_engine.evaluate_expired_signal(signal, matched_asset.get("candles", []))
         if result_data:
             learning.register_result(signal, result_data)
+            setup_id = signal.get("setup_id")
+            if setup_id:
+                strategy_lab.register_result(setup_id, result_data.get("result"))
         else:
             still_pending.append(signal)
 
-    write_json(PENDING_SIGNALS_FILE, still_pending)
-
-def decorate_decision(decision):
-    analysis = now_brazil()
-    entry = analysis + timedelta(minutes=1)
-    expiration = entry + timedelta(minutes=1)
-    reasons = decision.get("reasons", [])
-    if isinstance(reasons, list):
-        reason_text = "\n".join(["• " + str(r) for r in reasons]) if reasons else "Sem detalhes"
-    else:
-        reason_text = str(reasons)
-    return {
-        "asset": decision.get("asset", "MERCADO"),
-        "decision": decision.get("decision", "NAO_OPERAR"),
-        "direction": decision.get("direction"),
-        "score": decision.get("score", 0),
-        "confidence": decision.get("confidence", 50),
-        "regime": decision.get("regime", "unknown"),
-        "analysis_time": analysis.strftime("%H:%M"),
-        "entry_time": entry.strftime("%H:%M"),
-        "expiration": expiration.strftime("%H:%M"),
-        "reason_text": reason_text
-    }
+    write_json(PENDING_DECISIONS_FILE, still_pending)
 
 def save_state(signals, history, current_decision, scans):
     write_json(LATEST_SIGNALS_FILE, signals)
@@ -196,30 +206,35 @@ def scanner_loop():
             raw_signals = signal_engine.generate_signals(market)
             signals = normalize_signals(raw_signals if raw_signals else [])
 
+            process_pending_decisions(market)
+
             decision_candidates = []
+            analysis_time = now_brazil().strftime("%H:%M")
             for item in market:
-                decision = decision_engine.decide(item.get("asset"), item.get("indicators", {}))
+                indicators = dict(item.get("indicators", {}))
+                indicators["analysis_time"] = analysis_time
+                decision = decision_engine.decide(item.get("asset"), indicators)
                 decision["provider"] = item.get("provider", "auto")
                 decision_candidates.append((decision, item))
 
             if decision_candidates:
                 decision_candidates.sort(key=lambda x: (x[0].get("score", 0), x[0].get("confidence", 0)), reverse=True)
-                best_decision_raw, _ = decision_candidates[0]
+                best_decision_raw, matched_market = decision_candidates[0]
             else:
-                best_decision_raw = {
+                best_decision_raw, matched_market = {
                     "asset": "MERCADO",
                     "decision": "NAO_OPERAR",
                     "direction": None,
                     "score": 0,
                     "confidence": 50,
                     "regime": "unknown",
-                    "reasons": ["Sem dados suficientes no momento"]
-                }
+                    "reasons": ["Sem dados suficientes no momento"],
+                    "setup_id": None,
+                    "strategy_name": "none"
+                }, None
 
             current_decision = decorate_decision(best_decision_raw)
-
-            process_pending_results(market)
-            enqueue_pending_signals(raw_signals, signals)
+            enqueue_pending_decision(current_decision, matched_market)
 
             history = read_json(SIGNAL_HISTORY_FILE, [])
             if signals:
@@ -306,7 +321,7 @@ function showTab(tabId, btn){document.querySelectorAll('.panel').forEach(p=>p.cl
 function escapeHtml(text){if(text===null||text===undefined)return "";return String(text).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;");}
 function formatText(text){return escapeHtml(text).replaceAll("\\n","<br>");}
 function renderSignals(signals){const c=document.getElementById("signals_container");if(!signals||signals.length===0){c.innerHTML='<div class="empty">Nenhum sinal disponível agora.</div>';return;}let h="";signals.forEach(s=>{const bc=s.signal==="CALL"?"call":"put";h+=`<div class="signal-card"><div class="signal-head"><div class="asset">${escapeHtml(s.asset)}</div><div class="badge ${bc}">${escapeHtml(s.signal)}${s.confidence_label ? " • " + escapeHtml(s.confidence_label) : ""}</div></div><div class="signal-grid"><div class="mini"><div class="mini-label">Score</div><div class="mini-value">${escapeHtml(s.score)}</div></div><div class="mini"><div class="mini-label">Confiança</div><div class="mini-value">${escapeHtml(s.confidence)}%</div></div><div class="mini"><div class="mini-label">Análise</div><div class="mini-value">${escapeHtml(s.analysis_time)}</div></div><div class="mini"><div class="mini-label">Entrada</div><div class="mini-value">${escapeHtml(s.entry_time)}</div></div><div class="mini"><div class="mini-label">Expiração</div><div class="mini-value">${escapeHtml(s.expiration)}</div></div><div class="mini"><div class="mini-label">Regime</div><div class="mini-value">${escapeHtml(s.regime)}</div></div></div><div class="reason">${formatText(s.reason_text)}</div></div>`});c.innerHTML=h;}
-function renderDecision(d){const c=document.getElementById("decision_container");if(!d||!d.decision){c.innerHTML='<div class="empty">Sem decisão disponível agora.</div>';return;}let badgeClass="hold";let badgeText=d.decision;if(d.direction==="CALL") badgeClass="call"; else if(d.direction==="PUT") badgeClass="put"; if(d.decision==="NAO_OPERAR") badgeText="NÃO OPERAR"; else if(d.decision==="ENTRADA_FORTE") badgeText=(d.direction||"CALL")+" • FORTE"; else if(d.decision==="ENTRADA_CAUTELA") badgeText=(d.direction||"CALL")+" • CAUTELA"; c.innerHTML=`<div class="decision-card"><div class="decision-head"><div class="asset">${escapeHtml(d.asset||"MERCADO")}</div><div class="badge ${badgeClass}">${escapeHtml(badgeText)}</div></div><div class="signal-grid"><div class="mini"><div class="mini-label">Score</div><div class="mini-value">${escapeHtml(d.score)}</div></div><div class="mini"><div class="mini-label">Confiança</div><div class="mini-value">${escapeHtml(d.confidence)}%</div></div><div class="mini"><div class="mini-label">Análise</div><div class="mini-value">${escapeHtml(d.analysis_time)}</div></div><div class="mini"><div class="mini-label">Entrada</div><div class="mini-value">${escapeHtml(d.entry_time)}</div></div><div class="mini"><div class="mini-label">Expiração</div><div class="mini-value">${escapeHtml(d.expiration)}</div></div><div class="mini"><div class="mini-label">Regime</div><div class="mini-value">${escapeHtml(d.regime)}</div></div></div><div class="reason">${formatText(d.reason_text)}</div></div>`;}
+function renderDecision(d){const c=document.getElementById("decision_container");if(!d||!d.decision){c.innerHTML='<div class="empty">Sem decisão disponível agora.</div>';return;}let badgeClass="hold";let badgeText=d.decision;if(d.direction==="CALL") badgeClass="call"; else if(d.direction==="PUT") badgeClass="put"; if(d.decision==="NAO_OPERAR") badgeText="NÃO OPERAR"; else if(d.decision==="ENTRADA_FORTE") badgeText=(d.direction||"CALL")+" • FORTE"; else if(d.decision==="ENTRADA_CAUTELA") badgeText=(d.direction||"CALL")+" • CAUTELA"; else if(d.decision==="OBSERVAR") badgeText=(d.direction||"CALL")+" • OBSERVAR"; c.innerHTML=`<div class="decision-card"><div class="decision-head"><div class="asset">${escapeHtml(d.asset||"MERCADO")}</div><div class="badge ${badgeClass}">${escapeHtml(badgeText)}</div></div><div class="signal-grid"><div class="mini"><div class="mini-label">Score</div><div class="mini-value">${escapeHtml(d.score)}</div></div><div class="mini"><div class="mini-label">Confiança</div><div class="mini-value">${escapeHtml(d.confidence)}%</div></div><div class="mini"><div class="mini-label">Análise</div><div class="mini-value">${escapeHtml(d.analysis_time)}</div></div><div class="mini"><div class="mini-label">Entrada</div><div class="mini-value">${escapeHtml(d.entry_time)}</div></div><div class="mini"><div class="mini-label">Expiração</div><div class="mini-value">${escapeHtml(d.expiration)}</div></div><div class="mini"><div class="mini-label">Regime</div><div class="mini-value">${escapeHtml(d.regime)}</div></div></div><div class="reason">${formatText(d.reason_text)}</div></div>`;}
 function renderHistory(history){const c=document.getElementById("history_container");if(!history||history.length===0){c.innerHTML='<div class="empty">Ainda não há histórico salvo.</div>';return;}let h="";history.forEach(x=>{h+=`<div class="list-card"><div class="list-title">${escapeHtml(x.asset)} • ${escapeHtml(x.signal)}</div><div class="muted">Análise: ${escapeHtml(x.analysis_time)}<br>Entrada: ${escapeHtml(x.entry_time)}<br>Expiração: ${escapeHtml(x.expiration)}<br>Score: ${escapeHtml(x.score)} • Confiança: ${escapeHtml(x.confidence)}% • Fonte: ${escapeHtml(x.provider)}</div></div>`});c.innerHTML=h;}
 function renderBestAssets(bestAssets){const c=document.getElementById("assets_container");if(!bestAssets||bestAssets.length===0){c.innerHTML='<div class="empty">Ainda sem dados suficientes.</div>';return;}let h="";bestAssets.forEach(x=>{h+=`<div class="list-card"><div class="list-title">${escapeHtml(x.asset)}</div><div class="muted">Win rate: <b>${escapeHtml(x.winrate)}%</b><br>Trades: <b>${escapeHtml(x.total)}</b><br>Wins: <b>${escapeHtml(x.wins)}</b></div></div>`});c.innerHTML=h;}
 function renderBestHours(bestHours){const c=document.getElementById("hours_container");if(!bestHours||bestHours.length===0){c.innerHTML='<div class="empty">Ainda sem dados suficientes.</div>';return;}let h="";bestHours.forEach(x=>{h+=`<div class="list-card"><div class="list-title">${escapeHtml(x.hour)}</div><div class="muted">Win rate: <b>${escapeHtml(x.winrate)}%</b><br>Trades: <b>${escapeHtml(x.total)}</b><br>Wins: <b>${escapeHtml(x.wins)}</b></div></div>`});c.innerHTML=h;}
@@ -336,6 +351,11 @@ def health():
 def snapshot():
     ensure_scanner_started()
     return jsonify(get_snapshot())
+
+@app.route("/ping")
+def ping():
+    ensure_scanner_started()
+    return {"status": "ok"}
 
 if __name__ == "__main__":
     ensure_scanner_started()
