@@ -1,14 +1,15 @@
-V12 ETAPA 1 INTEGRADA
+V12 ETAPA 2 - ACELERAÇÃO DE APRENDIZADO
 
 Substitua estes arquivos:
-- app.py
+- strategy_engine.py
+- adaptive_engine.py
 - decision_engine.py
+- app.py
 - result_engine.py
-- strategy_lab.py
 
 O que entra:
-- setup_id por ativo + estratégia + regime + padrão + horário
-- registro do setup vencedor na decisão
-- avaliação do resultado após expiração
-- atualização do Strategy Lab com WIN / LOSS
-- base real para a Alpha Hive AI aprender padrões, não só ativos
+- estratégias com limiar mais inteligente
+- adaptive engine por estratégia + regime
+- mais setups válidos
+- aprendizado mais rápido, mas ainda estável
+- Alpha Hive AI começa a reforçar o que funciona

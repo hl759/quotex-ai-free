@@ -16,64 +16,68 @@ class StrategyEngine:
         regime = indicators.get("regime", "unknown")
         moved_fast = indicators.get("moved_too_fast", False)
 
-        if regime not in ("trend", "mixed"):
+        if regime not in ("trend", "mixed", "sideways"):
             return {
                 "strategy": "trend",
                 "valid": False,
                 "score": 0.0,
                 "direction": None,
                 "confidence": 50,
-                "reasons": ["Trend strategy ignorada fora de trend/mixed"]
+                "reasons": ["Trend strategy ignorada fora de trend/mixed/sideways"]
             }
 
         if trend_m1 == "bull":
             direction = "CALL"
-            score += 1.7
+            score += 1.35
             reasons.append("Tendência M1 bullish")
         elif trend_m1 == "bear":
             direction = "PUT"
-            score += 1.7
+            score += 1.35
             reasons.append("Tendência M1 bearish")
 
         if trend_m5 in ("bull", "bear"):
             if trend_m5 == trend_m1:
-                score += 2.1
+                score += 1.55
                 reasons.append("M1 alinhado com M5")
             else:
-                score -= 0.9
+                score -= 0.55
                 reasons.append("Conflito entre M1 e M5")
 
-        if direction == "CALL" and rsi <= 46:
-            score += 0.8
+        if direction == "CALL" and rsi <= 48:
+            score += 0.55
             reasons.append("Pullback em tendência de alta")
-        elif direction == "PUT" and rsi >= 54:
-            score += 0.8
+        elif direction == "PUT" and rsi >= 52:
+            score += 0.55
             reasons.append("Pullback em tendência de baixa")
 
         if breakout:
-            score += 0.85
+            score += 0.65
             reasons.append("Breakout a favor da tendência")
 
         if rejection:
-            score += 0.35
+            score += 0.20
             reasons.append("Rejeição favorável")
 
         if volatility:
-            score += 0.35
+            score += 0.25
             reasons.append("Volatilidade saudável")
 
         if moved_fast:
-            score -= 0.35
+            score -= 0.25
             reasons.append("Preço já andou um pouco")
 
-        if score < 0:
-            score = 0
+        if regime == "sideways":
+            score -= 0.20
+            reasons.append("Sideways reduz força da trend")
 
-        confidence = int(min(95, max(50, 52 + score * 8)))
+        if score < 0:
+            score = 0.0
+
+        confidence = int(min(95, max(50, 50 + score * 8)))
 
         return {
             "strategy": "trend",
-            "valid": score >= 1.9 and direction is not None,
+            "valid": score >= 1.45 and direction is not None,
             "score": round(score, 2),
             "direction": direction,
             "confidence": confidence,
@@ -94,34 +98,34 @@ class StrategyEngine:
         volatility = indicators.get("volatility", False)
         moved_fast = indicators.get("moved_too_fast", False)
 
-        if regime not in ("sideways", "mixed"):
+        if regime not in ("sideways", "mixed", "trend"):
             return {
                 "strategy": "reversal",
                 "valid": False,
                 "score": 0.0,
                 "direction": None,
                 "confidence": 50,
-                "reasons": ["Reversal strategy ignorada fora de sideways/mixed"]
+                "reasons": ["Reversal strategy ignorada fora de sideways/mixed/trend"]
             }
 
         if rejection:
-            score += 1.3
+            score += 1.0
             reasons.append("Rejeição relevante para reversão")
 
-        if rsi <= 35:
+        if rsi <= 37:
             direction = "CALL"
-            score += 1.0
+            score += 0.95
             reasons.append("Sobrevenda favorece reversão de alta")
-        elif rsi >= 65:
+        elif rsi >= 63:
             direction = "PUT"
-            score += 1.0
+            score += 0.95
             reasons.append("Sobrecompra favorece reversão de baixa")
 
         if pattern == "bullish" and direction == "CALL":
-            score += 0.8
+            score += 0.65
             reasons.append("Padrão bullish confirma reversão")
         elif pattern == "bearish" and direction == "PUT":
-            score += 0.8
+            score += 0.65
             reasons.append("Padrão bearish confirma reversão")
 
         if regime == "sideways":
@@ -130,13 +134,16 @@ class StrategyEngine:
         elif regime == "mixed":
             score += 0.25
             reasons.append("Regime mixed aceitável para reversão")
+        elif regime == "trend":
+            score -= 0.20
+            reasons.append("Trend reduz força da reversão")
 
         if trend_m1 in ("bull", "bear") and trend_m5 in ("bull", "bear") and trend_m1 == trend_m5:
-            score -= 0.45
+            score -= 0.25
             reasons.append("Tendência alinhada reduz força da reversão")
 
         if volatility:
-            score += 0.25
+            score += 0.20
             reasons.append("Volatilidade ajuda reversão")
 
         if moved_fast:
@@ -144,13 +151,13 @@ class StrategyEngine:
             reasons.append("Preço já andou um pouco")
 
         if score < 0:
-            score = 0
+            score = 0.0
 
         confidence = int(min(95, max(50, 50 + score * 9)))
 
         return {
             "strategy": "reversal",
-            "valid": score >= 1.8 and direction is not None,
+            "valid": score >= 1.35 and direction is not None,
             "score": round(score, 2),
             "direction": direction,
             "confidence": confidence,
@@ -170,53 +177,57 @@ class StrategyEngine:
         moved_fast = indicators.get("moved_too_fast", False)
         rejection = indicators.get("rejection", False)
 
-        if regime not in ("mixed", "trend"):
+        if regime not in ("mixed", "trend", "sideways"):
             return {
                 "strategy": "scalp",
                 "valid": False,
                 "score": 0.0,
                 "direction": None,
                 "confidence": 50,
-                "reasons": ["Scalp strategy ignorada fora de mixed/trend"]
+                "reasons": ["Scalp strategy ignorada fora de mixed/trend/sideways"]
             }
 
         if trend_m1 == "bull":
             direction = "CALL"
-            score += 1.0
+            score += 0.90
             reasons.append("Micro direção bullish")
         elif trend_m1 == "bear":
             direction = "PUT"
-            score += 1.0
+            score += 0.90
             reasons.append("Micro direção bearish")
 
         if volatility:
-            score += 0.9
+            score += 0.75
             reasons.append("Volatilidade favorece scalp")
 
         if breakout:
-            score += 0.7
+            score += 0.55
             reasons.append("Breakout curto aproveitável")
 
         if rejection:
-            score += 0.25
+            score += 0.20
             reasons.append("Rejeição útil para entrada curta")
 
-        if 42 <= rsi <= 58:
-            score += 0.2
+        if 40 <= rsi <= 60:
+            score += 0.20
             reasons.append("RSI neutro operável para scalp")
 
         if moved_fast:
-            score -= 0.45
+            score -= 0.35
             reasons.append("Preço já andou um pouco")
 
+        if regime == "sideways":
+            score += 0.10
+            reasons.append("Sideways permite scalp curto")
+
         if score < 0:
-            score = 0
+            score = 0.0
 
         confidence = int(min(92, max(50, 50 + score * 8)))
 
         return {
             "strategy": "scalp",
-            "valid": score >= 1.7 and direction is not None,
+            "valid": score >= 1.25 and direction is not None,
             "score": round(score, 2),
             "direction": direction,
             "confidence": confidence,

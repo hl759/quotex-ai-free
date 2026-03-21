@@ -1,5 +1,6 @@
 from strategy_engine import StrategyEngine
 from strategy_lab import StrategyLab
+from adaptive_engine import AdaptiveEngine
 
 
 class DecisionEngine:
@@ -7,6 +8,7 @@ class DecisionEngine:
         self.learning = learning
         self.strategy_engine = StrategyEngine()
         self.strategy_lab = StrategyLab()
+        self.adaptive_engine = AdaptiveEngine()
 
     def _build_base_score(self, indicators):
         score = 0.0
@@ -32,33 +34,33 @@ class DecisionEngine:
                 score += 0.9
                 reasons.append("M1 e M5 alinhados")
             else:
-                score -= 0.4
+                score -= 0.35
                 reasons.append("Conflito entre M1 e M5")
 
         if breakout:
-            score += 0.45
+            score += 0.40
             reasons.append("Breakout limpo")
 
         if rejection:
-            score += 0.35
+            score += 0.32
             reasons.append("Rejeição relevante")
 
         if pattern in ("bullish", "bearish"):
-            score += 0.25
+            score += 0.22
             reasons.append(f"Padrão {pattern}")
 
         if volatility:
-            score += 0.25
+            score += 0.22
             reasons.append("Volatilidade saudável")
 
         if regime == "trend":
-            score += 0.35
+            score += 0.32
             reasons.append("Regime trend favorável")
         elif regime == "mixed":
-            score += 0.15
+            score += 0.18
             reasons.append("Regime mixed operável")
         elif regime == "sideways":
-            score += 0.05
+            score += 0.10
             reasons.append("Regime sideways tratável")
         elif regime == "chaotic":
             score -= 0.8
@@ -68,15 +70,15 @@ class DecisionEngine:
             score += 0.10
             reasons.append("RSI em zona útil")
         elif 45 <= rsi <= 55:
-            score -= 0.03
+            score -= 0.02
             reasons.append("RSI neutro")
 
         if moved_fast:
-            score -= 0.18
+            score -= 0.16
             reasons.append("Preço já andou um pouco")
 
         if is_sideways:
-            score -= 0.05
+            score -= 0.04
             reasons.append("Zona de ruído")
 
         if score < 0:
@@ -99,27 +101,27 @@ class DecisionEngine:
     def _weight_by_regime(self, strategy_name, regime):
         if regime == "trend":
             if strategy_name == "trend":
-                return 0.62
+                return 0.58
             if strategy_name == "scalp":
-                return 0.28
+                return 0.30
             if strategy_name == "reversal":
                 return 0.20
 
         if regime == "sideways":
             if strategy_name == "reversal":
-                return 0.62
+                return 0.58
             if strategy_name == "scalp":
-                return 0.25
+                return 0.28
             if strategy_name == "trend":
-                return 0.18
+                return 0.22
 
         if regime == "mixed":
             if strategy_name == "trend":
-                return 0.48
+                return 0.46
             if strategy_name == "reversal":
-                return 0.36
+                return 0.38
             if strategy_name == "scalp":
-                return 0.34
+                return 0.36
 
         return 0.35
 
@@ -146,9 +148,12 @@ class DecisionEngine:
             used = []
 
             for s in valid_strategies[:3]:
-                weight = self._weight_by_regime(s.get("strategy", "none"), regime)
-                fusion_total += float(s.get("score", 0.0)) * weight
-                used.append(s.get("strategy", "none"))
+                strategy_name = s.get("strategy", "none")
+                base_weight = self._weight_by_regime(strategy_name, regime)
+                adaptive_weight = self.adaptive_engine.get_weight(strategy_name, regime)
+                final_weight = base_weight * adaptive_weight
+                fusion_total += float(s.get("score", 0.0)) * final_weight
+                used.append(strategy_name)
 
             adjusted_score += fusion_total
 
@@ -173,6 +178,7 @@ class DecisionEngine:
             setup_boost, setup_reason = self.strategy_lab.get_setup_boost(leader_setup_id)
             adjusted_score += setup_boost
             reasons.append(setup_reason)
+            reasons.append(self.adaptive_engine.get_reason(leader_name, regime))
         else:
             reasons.append("Nenhuma estratégia forte ativa")
 
@@ -200,11 +206,11 @@ class DecisionEngine:
 
         confidence_factor = profile.get("confidence_factor", 1.0)
 
-        if regime == "chaotic" and adjusted_score < 2.4:
+        if regime == "chaotic" and adjusted_score < 2.3:
             confidence = max(50, min(95, int((50 + adjusted_score * 10) * confidence_factor)))
             reasons.append(f"Regime final: {regime}")
             reasons.append(f"Score ajustado: {round(adjusted_score, 2)}")
-            reasons.append("Modo: v12 etapa 1 integrada")
+            reasons.append("Modo: v12 etapa 2 integrada")
             return {
                 "asset": asset,
                 "decision": "NAO_OPERAR",
@@ -222,10 +228,10 @@ class DecisionEngine:
             top1 = valid_strategies[0]
             top2 = valid_strategies[1]
             same_direction = top1.get("direction") == top2.get("direction")
-            both_strong = float(top1.get("score", 0.0)) >= 2.5 and float(top2.get("score", 0.0)) >= 2.0
+            both_strong = float(top1.get("score", 0.0)) >= 2.0 and float(top2.get("score", 0.0)) >= 1.6
 
             if same_direction and both_strong:
-                consensus_bonus = 0.22
+                consensus_bonus = 0.20
                 adjusted_score += consensus_bonus
                 reasons.append("Consenso forte entre estratégias")
             elif same_direction:
@@ -233,19 +239,19 @@ class DecisionEngine:
                 adjusted_score += consensus_bonus
                 reasons.append("Consenso leve entre estratégias")
 
-        if adjusted_score >= 3.35:
+        if adjusted_score >= 3.10:
             decision = "ENTRADA_FORTE"
             direction = final_direction
-        elif adjusted_score >= 2.30:
+        elif adjusted_score >= 2.05:
             decision = "ENTRADA_CAUTELA"
             direction = final_direction
-        elif adjusted_score >= 1.70:
+        elif adjusted_score >= 1.45:
             promote_to_caution = False
             if regime == "trend" and any(s.get("strategy") == "trend" and s.get("valid") for s in valid_strategies):
                 promote_to_caution = True
-            elif regime == "sideways" and any(s.get("strategy") == "reversal" and s.get("valid") for s in valid_strategies):
+            elif regime == "sideways" and any(s.get("strategy") in ("reversal", "scalp") and s.get("valid") for s in valid_strategies):
                 promote_to_caution = True
-            elif regime == "mixed" and len(valid_strategies) >= 2:
+            elif regime == "mixed" and len(valid_strategies) >= 1:
                 promote_to_caution = True
 
             if promote_to_caution:
@@ -269,7 +275,7 @@ class DecisionEngine:
         reasons.append(f"Estratégia líder: {leader_name}")
         reasons.append(f"Strategy score: {round(leader_score, 2)}")
         reasons.append(f"Score ajustado: {round(adjusted_score, 2)}")
-        reasons.append("Modo: v12 etapa 1 integrada")
+        reasons.append("Modo: v12 etapa 2 integrada")
 
         return {
             "asset": asset,
