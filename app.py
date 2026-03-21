@@ -14,6 +14,21 @@ from result_engine import ResultEngine
 from strategy_lab import StrategyLab
 from journal_manager import JournalManager
 from decision_engine import DecisionEngine
+
+try:
+    from adaptive_engine import AdaptiveEngine
+except Exception:
+    AdaptiveEngine = None
+
+try:
+    from memory_engine import MemoryEngine
+except Exception:
+    MemoryEngine = None
+
+try:
+    from market_profile_engine import MarketProfileEngine
+except Exception:
+    MarketProfileEngine = None
 from config import ASSETS, SCAN_INTERVAL_SECONDS
 
 app = Flask(__name__)
@@ -26,6 +41,9 @@ decision_engine = DecisionEngine(learning)
 result_evaluator = ResultEvaluator()
 result_engine = ResultEngine(result_evaluator)
 strategy_lab = StrategyLab()
+adaptive_engine = AdaptiveEngine() if AdaptiveEngine else None
+memory_engine = MemoryEngine() if MemoryEngine else None
+market_profile_engine = MarketProfileEngine() if MarketProfileEngine else None
 journal = JournalManager()
 
 STATE_DIR = "/tmp/nexus_state"
@@ -104,7 +122,9 @@ def decorate_decision(decision):
         "expiration": expiration.strftime("%H:%M"),
         "reason_text": reason_text,
         "setup_id": decision.get("setup_id"),
-        "strategy_name": decision.get("strategy_name", "none")
+        "context_id": decision.get("context_id"),
+        "strategy_name": decision.get("strategy_name", "none"),
+        "evolution_variant": decision.get("evolution_variant", "base")
     }
 
 def _decision_uid(item):
@@ -131,12 +151,93 @@ def enqueue_pending_decision(current_decision, matched_market):
         "entry_time": current_decision.get("entry_time"),
         "expiration": current_decision.get("expiration"),
         "setup_id": current_decision.get("setup_id"),
+        "context_id": current_decision.get("context_id"),
         "strategy_name": current_decision.get("strategy_name", "none"),
+        "evolution_variant": current_decision.get("evolution_variant", "base"),
+        "regime": current_decision.get("regime", "unknown"),
     }
 
     if record["uid"] not in existing:
         pending.append(record)
         write_json(PENDING_DECISIONS_FILE, pending)
+
+
+def register_all_learning_outputs(signal, result_data):
+    result_value = str(result_data.get("result", "")).upper()
+    setup_id = signal.get("setup_id")
+    context_id = signal.get("context_id")
+    strategy_name = signal.get("strategy_name", "none")
+    regime = signal.get("regime", "unknown")
+
+    try:
+        learning.register_result(signal, result_data)
+    except Exception as e:
+        print("Learning register error:", e, flush=True)
+
+    if setup_id:
+        try:
+            strategy_lab.register_result(setup_id, result_value)
+        except Exception as e:
+            print("StrategyLab register error:", e, flush=True)
+
+    if memory_engine and context_id:
+        try:
+            memory_engine.register_result(context_id, result_value)
+        except Exception as e:
+            print("MemoryEngine register error:", e, flush=True)
+
+    if adaptive_engine:
+        try:
+            adaptive_engine.register_result(strategy_name, regime, result_value)
+        except Exception as e:
+            print("AdaptiveEngine register error:", e, flush=True)
+
+    if market_profile_engine:
+        try:
+            market_profile_engine.register_result(regime, result_value)
+        except Exception as e:
+            print("MarketProfileEngine register error:", e, flush=True)
+
+    journal_payload = {
+        "asset": signal.get("asset"),
+        "signal": signal.get("signal"),
+        "strategy_name": strategy_name,
+        "regime": regime,
+        "analysis_time": signal.get("analysis_time"),
+        "entry_time": signal.get("entry_time"),
+        "expiration": signal.get("expiration"),
+        "score": signal.get("score", 0),
+        "confidence": signal.get("confidence", 0),
+        "result": result_value,
+        "setup_id": setup_id,
+        "context_id": context_id,
+        "evolution_variant": signal.get("evolution_variant", "base"),
+    }
+
+    saved = False
+    for method_name in ("register_result", "save_result", "log_result", "append_result"):
+        method = getattr(journal, method_name, None)
+        if callable(method):
+            try:
+                method(journal_payload)
+                saved = True
+                break
+            except TypeError:
+                try:
+                    method(
+                        signal.get("asset"),
+                        result_value,
+                        signal.get("analysis_time") or signal.get("entry_time"),
+                    )
+                    saved = True
+                    break
+                except Exception:
+                    pass
+            except Exception as e:
+                print(f"Journal {method_name} error:", e, flush=True)
+
+    if not saved:
+        print("JournalManager has no compatible write method; stats tabs may remain zero.", flush=True)
 
 def process_pending_decisions(market):
     pending = read_json(PENDING_DECISIONS_FILE, [])
@@ -159,10 +260,7 @@ def process_pending_decisions(market):
 
         result_data = result_engine.evaluate_expired_signal(signal, matched_asset.get("candles", []))
         if result_data:
-            learning.register_result(signal, result_data)
-            setup_id = signal.get("setup_id")
-            if setup_id:
-                strategy_lab.register_result(setup_id, result_data.get("result"))
+            register_all_learning_outputs(signal, result_data)
         else:
             still_pending.append(signal)
 
@@ -316,7 +414,7 @@ body{margin:0;font-family:Arial,sans-serif;background:linear-gradient(180deg,#04
 <div id='hours' class='panel'><div class='card'><div class='section-title'>Melhores horários</div><div class='section-sub'>Ranking por faixa horária</div><div id='hours_container'></div></div></div>
 </div>
 <script>
-const initialSnapshot = {{ snapshot_json|safe }};
+const initialSnapshot = {{ snapshot_json|safe }} || null;
 function showTab(tabId, btn){document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));document.getElementById(tabId).classList.add('active');btn.classList.add('active');}
 function escapeHtml(text){if(text===null||text===undefined)return "";return String(text).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;");}
 function formatText(text){return escapeHtml(text).replaceAll("\\n","<br>");}
@@ -325,9 +423,67 @@ function renderDecision(d){const c=document.getElementById("decision_container")
 function renderHistory(history){const c=document.getElementById("history_container");if(!history||history.length===0){c.innerHTML='<div class="empty">Ainda não há histórico salvo.</div>';return;}let h="";history.forEach(x=>{h+=`<div class="list-card"><div class="list-title">${escapeHtml(x.asset)} • ${escapeHtml(x.signal)}</div><div class="muted">Análise: ${escapeHtml(x.analysis_time)}<br>Entrada: ${escapeHtml(x.entry_time)}<br>Expiração: ${escapeHtml(x.expiration)}<br>Score: ${escapeHtml(x.score)} • Confiança: ${escapeHtml(x.confidence)}% • Fonte: ${escapeHtml(x.provider)}</div></div>`});c.innerHTML=h;}
 function renderBestAssets(bestAssets){const c=document.getElementById("assets_container");if(!bestAssets||bestAssets.length===0){c.innerHTML='<div class="empty">Ainda sem dados suficientes.</div>';return;}let h="";bestAssets.forEach(x=>{h+=`<div class="list-card"><div class="list-title">${escapeHtml(x.asset)}</div><div class="muted">Win rate: <b>${escapeHtml(x.winrate)}%</b><br>Trades: <b>${escapeHtml(x.total)}</b><br>Wins: <b>${escapeHtml(x.wins)}</b></div></div>`});c.innerHTML=h;}
 function renderBestHours(bestHours){const c=document.getElementById("hours_container");if(!bestHours||bestHours.length===0){c.innerHTML='<div class="empty">Ainda sem dados suficientes.</div>';return;}let h="";bestHours.forEach(x=>{h+=`<div class="list-card"><div class="list-title">${escapeHtml(x.hour)}</div><div class="muted">Win rate: <b>${escapeHtml(x.winrate)}%</b><br>Trades: <b>${escapeHtml(x.total)}</b><br>Wins: <b>${escapeHtml(x.wins)}</b></div></div>`});c.innerHTML=h;}
-function applySnapshot(d){document.getElementById("last_scan").textContent=d.meta.last_scan;document.getElementById("scan_count").textContent=d.meta.scan_count;document.getElementById("signal_count").textContent=d.meta.signal_count;document.getElementById("asset_count").textContent=d.meta.asset_count;document.getElementById("stats_total").textContent=d.learning_stats.total;document.getElementById("stats_winrate").textContent=d.learning_stats.winrate + "%";document.getElementById("stats_wins").textContent=d.learning_stats.wins;document.getElementById("stats_loss").textContent=d.learning_stats.loss;renderSignals(d.signals);renderDecision(d.current_decision);renderHistory(d.history);renderBestAssets(d.best_assets);renderBestHours(d.best_hours);}
-async function refreshSnapshot(){const btn=document.getElementById("refreshBtn");btn.disabled=true;btn.textContent="Atualizando...";try{const r=await fetch("/snapshot",{cache:"no-store"});const d=await r.json();applySnapshot(d);btn.textContent="✓ Atualizado";}catch(e){btn.textContent="Erro ao atualizar";}setTimeout(()=>{btn.disabled=false;btn.textContent="↻ Atualizar agora";},1200);}
-applySnapshot(initialSnapshot);
+function safeSnapshot(d){
+  return {
+    signals: Array.isArray(d && d.signals) ? d.signals : [],
+    history: Array.isArray(d && d.history) ? d.history : [],
+    current_decision: d && d.current_decision ? d.current_decision : {},
+    meta: {
+      last_scan: d && d.meta && d.meta.last_scan ? d.meta.last_scan : "--",
+      scan_count: d && d.meta && typeof d.meta.scan_count !== "undefined" ? d.meta.scan_count : 0,
+      signal_count: d && d.meta && typeof d.meta.signal_count !== "undefined" ? d.meta.signal_count : 0,
+      asset_count: d && d.meta && typeof d.meta.asset_count !== "undefined" ? d.meta.asset_count : 0
+    },
+    learning_stats: {
+      total: d && d.learning_stats && typeof d.learning_stats.total !== "undefined" ? d.learning_stats.total : 0,
+      winrate: d && d.learning_stats && typeof d.learning_stats.winrate !== "undefined" ? d.learning_stats.winrate : 0,
+      wins: d && d.learning_stats && typeof d.learning_stats.wins !== "undefined" ? d.learning_stats.wins : 0,
+      loss: d && d.learning_stats && typeof d.learning_stats.loss !== "undefined" ? d.learning_stats.loss : 0
+    },
+    best_assets: Array.isArray(d && d.best_assets) ? d.best_assets : [],
+    best_hours: Array.isArray(d && d.best_hours) ? d.best_hours : []
+  };
+}
+function applySnapshot(d){
+  const s = safeSnapshot(d);
+  document.getElementById("last_scan").textContent=s.meta.last_scan;
+  document.getElementById("scan_count").textContent=s.meta.scan_count;
+  document.getElementById("signal_count").textContent=s.meta.signal_count;
+  document.getElementById("asset_count").textContent=s.meta.asset_count;
+  document.getElementById("stats_total").textContent=s.learning_stats.total;
+  document.getElementById("stats_winrate").textContent=s.learning_stats.winrate + "%";
+  document.getElementById("stats_wins").textContent=s.learning_stats.wins;
+  document.getElementById("stats_loss").textContent=s.learning_stats.loss;
+  renderSignals(s.signals);
+  renderDecision(s.current_decision);
+  renderHistory(s.history);
+  renderBestAssets(s.best_assets);
+  renderBestHours(s.best_hours);
+}
+async function refreshSnapshot(){
+  const btn=document.getElementById("refreshBtn");
+  btn.disabled=true;
+  btn.textContent="Atualizando...";
+  try{
+    const r=await fetch("/snapshot",{cache:"no-store"});
+    const d=await r.json();
+    applySnapshot(d);
+    btn.textContent="✓ Atualizado";
+  }catch(e){
+    console.error("snapshot error", e);
+    btn.textContent="Erro ao atualizar";
+  }
+  setTimeout(()=>{btn.disabled=false;btn.textContent="↻ Atualizar agora";},1200);
+}
+document.addEventListener("DOMContentLoaded", function(){
+  try{
+    applySnapshot(initialSnapshot);
+  }catch(e){
+    console.error("initial snapshot error", e);
+    applySnapshot(null);
+  }
+  setTimeout(refreshSnapshot, 400);
+});
 </script>
 </body>
 </html>

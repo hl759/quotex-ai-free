@@ -1,13 +1,3 @@
-V12 ETAPA 6 - BACKEND ONLY
-
-Substitua estes arquivos:
-- strategy_evolution_engine.py
-- decision_engine.py
-
-Mantenha seu app.py atual.
-
-O que entra:
-- motor de evolução de variações de estratégia
-- promoção de variações vencedoras
-- redução de variações ruins
-- decisão mais próxima de uma mesa que aprende quais versões de setup funcionam melhor
+Substitua apenas o app.py por este arquivo.
+Esta versão REGISTRA de fato em learning, strategy_lab, adaptive_engine, memory_engine e market_profile_engine quando esses motores existirem no projeto.
+Também grava no JournalManager para preencher Stats, Ativos e Horários.
