@@ -2,6 +2,7 @@ from strategy_engine import StrategyEngine
 from strategy_lab import StrategyLab
 from adaptive_engine import AdaptiveEngine
 from memory_engine import MemoryEngine
+from market_profile_engine import MarketProfileEngine
 
 
 class DecisionEngine:
@@ -11,6 +12,7 @@ class DecisionEngine:
         self.strategy_lab = StrategyLab()
         self.adaptive_engine = AdaptiveEngine()
         self.memory_engine = MemoryEngine()
+        self.market_profile_engine = MarketProfileEngine()
 
     def _build_base_score(self, indicators):
         score = 0.0
@@ -129,9 +131,12 @@ class DecisionEngine:
         fallback_direction = indicators.get("direction", "CALL")
         analysis_time = indicators.get("analysis_time")
 
+        market_profile = self.market_profile_engine.get_profile(regime)
+
         base_score, base_reasons = self._build_base_score(indicators)
         reasons = [f"Score base: {base_score}"]
         reasons.extend(base_reasons)
+        reasons.append(market_profile.get("reason", "Mercado em equilíbrio"))
 
         strategies = self.strategy_engine.evaluate_all(asset, indicators)
         valid_strategies = [s for s in strategies if s.get("valid")]
@@ -223,6 +228,7 @@ class DecisionEngine:
             boost = 0.0
 
         adjusted_score += (boost * 0.65)
+        adjusted_score -= market_profile.get("score_shift", 0.0)
         reasons.append(f"Boost aprendizado: {round(boost, 2)}")
 
         try:
@@ -242,7 +248,7 @@ class DecisionEngine:
             confidence = max(50, min(95, int((50 + adjusted_score * 10) * confidence_factor)))
             reasons.append(f"Regime final: {regime}")
             reasons.append(f"Score ajustado: {round(adjusted_score, 2)}")
-            reasons.append("Modo: v12 etapa 4 memória inteligente")
+            reasons.append("Modo: v12 etapa 5 perfil dinâmico")
             return {
                 "asset": asset,
                 "decision": "NAO_OPERAR",
@@ -266,21 +272,21 @@ class DecisionEngine:
                 both_strong = float(top1.get("score", 0.0)) >= 2.0 and float(top2.get("score", 0.0)) >= 1.6
 
                 if same_direction and both_strong:
-                    consensus_bonus = 0.20
+                    consensus_bonus = 0.20 + market_profile.get("consensus_bonus", 0.0)
                     adjusted_score += consensus_bonus
                     reasons.append("Consenso forte entre estratégias")
                 elif same_direction:
-                    consensus_bonus = 0.10
+                    consensus_bonus = 0.10 + market_profile.get("consensus_bonus", 0.0)
                     adjusted_score += consensus_bonus
                     reasons.append("Consenso leve entre estratégias")
 
-        if adjusted_score >= 3.10:
+        if adjusted_score >= 3.05:
             decision = "ENTRADA_FORTE"
             direction = final_direction
-        elif adjusted_score >= 2.00:
+        elif adjusted_score >= 1.95:
             decision = "ENTRADA_CAUTELA"
             direction = final_direction
-        elif adjusted_score >= 1.40:
+        elif adjusted_score >= 1.35:
             promote_to_caution = False
             active_names = [s.get("strategy") for s in valid_strategies if s.get("strategy") not in filtered]
 
@@ -290,6 +296,9 @@ class DecisionEngine:
                 promote_to_caution = True
             elif regime == "mixed" and len(active_names) >= 1:
                 promote_to_caution = True
+
+            if market_profile.get("mode") == "defensive" and decision != "ENTRADA_FORTE":
+                promote_to_caution = False
 
             if promote_to_caution:
                 decision = "ENTRADA_CAUTELA"
@@ -304,15 +313,17 @@ class DecisionEngine:
 
         confidence = 50 + (adjusted_score * 10)
         confidence *= confidence_factor
+        confidence += market_profile.get("confidence_shift", 0)
         if consensus_bonus > 0:
             confidence += 2
         confidence = max(50, min(95, confidence))
 
         reasons.append(f"Regime final: {regime}")
+        reasons.append(f"Perfil de mercado: {market_profile.get('mode', 'neutral')}")
         reasons.append(f"Estratégia líder: {leader_name}")
         reasons.append(f"Strategy score: {round(leader_score, 2)}")
         reasons.append(f"Score ajustado: {round(adjusted_score, 2)}")
-        reasons.append("Modo: v12 etapa 4 memória inteligente")
+        reasons.append("Modo: v12 etapa 5 perfil dinâmico")
 
         return {
             "asset": asset,

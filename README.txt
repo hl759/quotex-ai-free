@@ -1,13 +1,14 @@
-V12 ETAPA 4 - BACKEND ONLY
+V12 ETAPA 5 - BACKEND ONLY
 
 Substitua estes arquivos:
-- memory_engine.py
+- market_profile_engine.py
 - decision_engine.py
 
-Mantenha seu app.py atual funcionando.
+Mantenha seu app.py atual.
 
 O que entra:
-- memória de contexto por ativo + estratégia + regime + padrão + RSI + horário
-- boost por contexto historicamente favorável
-- redução por contexto historicamente ruim
-- decisão baseada em experiência acumulada
+- perfil dinâmico do mercado (aggressive / neutral / defensive)
+- score mínimo ajustado pelo ambiente
+- consenso mais forte ou mais fraco conforme o momento
+- confiança ajustada pelo ambiente
+- Alpha Hive AI muda o estilo operacional conforme o mercado atual
