@@ -314,23 +314,23 @@ function renderBestAssets(bestAssets){const c=document.getElementById("assets_co
 function renderBestHours(bestHours){const c=document.getElementById("hours_container");if(!bestHours||bestHours.length===0){c.innerHTML='<div class="empty">Ainda sem dados suficientes.</div>';return;}let h="";bestHours.forEach(x=>{h+=`<div class="list-card"><div class="list-title">${escapeHtml(x.hour)}</div><div class="muted">Win rate: <b>${escapeHtml(x.winrate)}%</b><br>Trades: <b>${escapeHtml(x.total)}</b><br>Wins: <b>${escapeHtml(x.wins)}</b></div></div>`});c.innerHTML=h;}
 function safeSnapshot(d){
   return {
-    signals: Array.isArray(d?.signals) ? d.signals : [],
-    history: Array.isArray(d?.history) ? d.history : [],
-    current_decision: d?.current_decision || {},
+    signals: Array.isArray(d && d.signals) ? d.signals : [],
+    history: Array.isArray(d && d.history) ? d.history : [],
+    current_decision: d && d.current_decision ? d.current_decision : {},
     meta: {
-      last_scan: d?.meta?.last_scan ?? "--",
-      scan_count: d?.meta?.scan_count ?? 0,
-      signal_count: d?.meta?.signal_count ?? 0,
-      asset_count: d?.meta?.asset_count ?? 0
+      last_scan: d && d.meta && d.meta.last_scan ? d.meta.last_scan : "--",
+      scan_count: d && d.meta && typeof d.meta.scan_count !== "undefined" ? d.meta.scan_count : 0,
+      signal_count: d && d.meta && typeof d.meta.signal_count !== "undefined" ? d.meta.signal_count : 0,
+      asset_count: d && d.meta && typeof d.meta.asset_count !== "undefined" ? d.meta.asset_count : 0
     },
     learning_stats: {
-      total: d?.learning_stats?.total ?? 0,
-      winrate: d?.learning_stats?.winrate ?? 0,
-      wins: d?.learning_stats?.wins ?? 0,
-      loss: d?.learning_stats?.loss ?? 0
+      total: d && d.learning_stats && typeof d.learning_stats.total !== "undefined" ? d.learning_stats.total : 0,
+      winrate: d && d.learning_stats && typeof d.learning_stats.winrate !== "undefined" ? d.learning_stats.winrate : 0,
+      wins: d && d.learning_stats && typeof d.learning_stats.wins !== "undefined" ? d.learning_stats.wins : 0,
+      loss: d && d.learning_stats && typeof d.learning_stats.loss !== "undefined" ? d.learning_stats.loss : 0
     },
-    best_assets: Array.isArray(d?.best_assets) ? d.best_assets : [],
-    best_hours: Array.isArray(d?.best_hours) ? d.best_hours : []
+    best_assets: Array.isArray(d && d.best_assets) ? d.best_assets : [],
+    best_hours: Array.isArray(d && d.best_hours) ? d.best_hours : []
   };
 }
 function applySnapshot(d){
@@ -350,31 +350,31 @@ function applySnapshot(d){
   renderBestHours(s.best_hours);
 }
 async function refreshSnapshot(){
-  const btn=document.getElementById("refreshBtn");
-  btn.disabled=true;
-  btn.textContent="Atualizando...";
+  const btn = document.getElementById("refreshBtn");
+  btn.disabled = true;
+  btn.textContent = "Atualizando...";
   try{
-    const r=await fetch("/snapshot",{cache:"no-store"});
-    const d=await r.json();
+    const r = await fetch("/snapshot", {cache:"no-store"});
+    const d = await r.json();
     applySnapshot(d);
-    btn.textContent="✓ Atualizado";
+    btn.textContent = "✓ Atualizado";
   }catch(e){
-    btn.textContent="Erro ao atualizar";
+    console.error("snapshot error", e);
+    btn.textContent = "Erro ao atualizar";
   }
   setTimeout(()=>{
-    btn.disabled=false;
-    btn.textContent="↻ Atualizar agora";
+    btn.disabled = false;
+    btn.textContent = "↻ Atualizar agora";
   },1200);
 }
-document.addEventListener("DOMContentLoaded", async () => {
+document.addEventListener("DOMContentLoaded", function(){
   try{
     applySnapshot(initialSnapshot);
   }catch(e){
+    console.error("initial snapshot error", e);
     applySnapshot(null);
   }
-  setTimeout(() => {
-    refreshSnapshot();
-  }, 300);
+  setTimeout(refreshSnapshot, 400);
 });
 </script>
 </body>
