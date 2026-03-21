@@ -1,3 +1,3 @@
 Substitua apenas o app.py por este arquivo.
-Esta versão REGISTRA de fato em learning, strategy_lab, adaptive_engine, memory_engine e market_profile_engine quando esses motores existirem no projeto.
-Também grava no JournalManager para preencher Stats, Ativos e Horários.
+Compatível com seu JournalManager.py atual.
+Esta versão chama journal.add_trade(...) e também registra em adaptive_engine, memory_engine e market_profile_engine quando existirem.

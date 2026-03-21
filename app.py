@@ -214,30 +214,10 @@ def register_all_learning_outputs(signal, result_data):
         "evolution_variant": signal.get("evolution_variant", "base"),
     }
 
-    saved = False
-    for method_name in ("register_result", "save_result", "log_result", "append_result"):
-        method = getattr(journal, method_name, None)
-        if callable(method):
-            try:
-                method(journal_payload)
-                saved = True
-                break
-            except TypeError:
-                try:
-                    method(
-                        signal.get("asset"),
-                        result_value,
-                        signal.get("analysis_time") or signal.get("entry_time"),
-                    )
-                    saved = True
-                    break
-                except Exception:
-                    pass
-            except Exception as e:
-                print(f"Journal {method_name} error:", e, flush=True)
-
-    if not saved:
-        print("JournalManager has no compatible write method; stats tabs may remain zero.", flush=True)
+    try:
+        journal.add_trade(journal_payload)
+    except Exception as e:
+        print("Journal add_trade error:", e, flush=True)
 
 def process_pending_decisions(market):
     pending = read_json(PENDING_DECISIONS_FILE, [])
@@ -446,14 +426,14 @@ function safeSnapshot(d){
 }
 function applySnapshot(d){
   const s = safeSnapshot(d);
-  document.getElementById("last_scan").textContent=s.meta.last_scan;
-  document.getElementById("scan_count").textContent=s.meta.scan_count;
-  document.getElementById("signal_count").textContent=s.meta.signal_count;
-  document.getElementById("asset_count").textContent=s.meta.asset_count;
-  document.getElementById("stats_total").textContent=s.learning_stats.total;
-  document.getElementById("stats_winrate").textContent=s.learning_stats.winrate + "%";
-  document.getElementById("stats_wins").textContent=s.learning_stats.wins;
-  document.getElementById("stats_loss").textContent=s.learning_stats.loss;
+  document.getElementById("last_scan").textContent = s.meta.last_scan;
+  document.getElementById("scan_count").textContent = s.meta.scan_count;
+  document.getElementById("signal_count").textContent = s.meta.signal_count;
+  document.getElementById("asset_count").textContent = s.meta.asset_count;
+  document.getElementById("stats_total").textContent = s.learning_stats.total;
+  document.getElementById("stats_winrate").textContent = s.learning_stats.winrate + "%";
+  document.getElementById("stats_wins").textContent = s.learning_stats.wins;
+  document.getElementById("stats_loss").textContent = s.learning_stats.loss;
   renderSignals(s.signals);
   renderDecision(s.current_decision);
   renderHistory(s.history);
@@ -461,19 +441,22 @@ function applySnapshot(d){
   renderBestHours(s.best_hours);
 }
 async function refreshSnapshot(){
-  const btn=document.getElementById("refreshBtn");
-  btn.disabled=true;
-  btn.textContent="Atualizando...";
+  const btn = document.getElementById("refreshBtn");
+  btn.disabled = true;
+  btn.textContent = "Atualizando...";
   try{
-    const r=await fetch("/snapshot",{cache:"no-store"});
-    const d=await r.json();
+    const r = await fetch("/snapshot", {cache:"no-store"});
+    const d = await r.json();
     applySnapshot(d);
-    btn.textContent="✓ Atualizado";
+    btn.textContent = "✓ Atualizado";
   }catch(e){
     console.error("snapshot error", e);
-    btn.textContent="Erro ao atualizar";
+    btn.textContent = "Erro ao atualizar";
   }
-  setTimeout(()=>{btn.disabled=false;btn.textContent="↻ Atualizar agora";},1200);
+  setTimeout(()=>{
+    btn.disabled = false;
+    btn.textContent = "↻ Atualizar agora";
+  },1200);
 }
 document.addEventListener("DOMContentLoaded", function(){
   try{
