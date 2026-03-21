@@ -12,7 +12,6 @@ from learning_engine import LearningEngine
 from result_evaluator import ResultEvaluator
 from result_engine import ResultEngine
 from strategy_lab import StrategyLab
-from adaptive_engine import AdaptiveEngine
 from journal_manager import JournalManager
 from decision_engine import DecisionEngine
 from config import ASSETS, SCAN_INTERVAL_SECONDS
@@ -27,7 +26,6 @@ decision_engine = DecisionEngine(learning)
 result_evaluator = ResultEvaluator()
 result_engine = ResultEngine(result_evaluator)
 strategy_lab = StrategyLab()
-adaptive_engine = AdaptiveEngine()
 journal = JournalManager()
 
 STATE_DIR = "/tmp/nexus_state"
@@ -134,7 +132,6 @@ def enqueue_pending_decision(current_decision, matched_market):
         "expiration": current_decision.get("expiration"),
         "setup_id": current_decision.get("setup_id"),
         "strategy_name": current_decision.get("strategy_name", "none"),
-        "regime": current_decision.get("regime", "unknown"),
     }
 
     if record["uid"] not in existing:
@@ -166,7 +163,6 @@ def process_pending_decisions(market):
             setup_id = signal.get("setup_id")
             if setup_id:
                 strategy_lab.register_result(setup_id, result_data.get("result"))
-            adaptive_engine.register_result(signal.get("strategy_name", "none"), signal.get("regime", "unknown"), result_data.get("result"))
         else:
             still_pending.append(signal)
 
@@ -263,14 +259,31 @@ def ensure_scanner_started():
         threading.Thread(target=scanner_loop, daemon=True).start()
         scanner_started = True
 
-HTML_PAGE = '''<!DOCTYPE html>
-<html lang="pt-BR">
+HTML_PAGE = """
+<!DOCTYPE html>
+<html lang='pt-BR'>
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0'>
 <title>Alpha Hive AI • Inteligência Coletiva</title>
 <style>
-*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;background:linear-gradient(180deg,#04101d 0%,#07192e 100%);color:#eef6ff}.app{max-width:780px;margin:0 auto;padding:18px}.hero,.card{background:linear-gradient(180deg,#0a1d33 0%,#0b2340 100%);border:1px solid rgba(80,220,255,.10);border-radius:28px;padding:18px;margin-bottom:18px;box-shadow:0 12px 40px rgba(0,0,0,.28)}.hero-top{display:flex;justify-content:space-between;align-items:center;gap:12px}.brand{display:flex;align-items:center;gap:14px}.logo{width:62px;height:62px;border-radius:18px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#6c63ff,#24e5c2);font-size:34px}.title{font-size:30px;font-weight:900}.title .ai{color:#25e6c4}.subtitle{color:#8fa7c4;margin-top:8px;font-size:13px;letter-spacing:1.8px}.right-box{display:flex;flex-direction:column;gap:10px}.live{min-width:110px;text-align:center;padding:16px 14px;border-radius:999px;border:1px solid rgba(37,230,196,.24);background:rgba(14,54,55,.45);color:#86ffe8;font-size:18px;font-weight:800}.refresh-btn{border:none;border-radius:999px;padding:12px 16px;background:linear-gradient(180deg,#103153 0%,#153d66 100%);color:#25e6c4;font-size:14px;font-weight:800;cursor:pointer}.metrics{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-top:18px}.metric{background:#132b49;border-radius:18px;padding:18px}.metric-label,.section-sub,.mini-label,.muted{color:#8fa7c4}.metric-value{font-size:24px;font-weight:800}.tabs{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-top:18px}.tab-btn{border:none;border-radius:18px;padding:16px 10px;background:#132b49;color:#a8bdd8;font-size:14px;font-weight:800;cursor:pointer}.tab-btn.active{background:linear-gradient(180deg,#103153 0%,#153d66 100%);color:#25e6c4}.section-title{font-size:17px;font-weight:800;margin-bottom:8px}.status-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.status-item,.signal-card,.list-card,.decision-card{background:#132b49;border-radius:18px;padding:14px;margin-top:12px}.signal-head,.decision-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}.asset{font-size:22px;font-weight:900}.badge{padding:9px 14px;border-radius:999px;font-size:13px;font-weight:900}.call{background:linear-gradient(135deg,#25e6a0,#8affcc);color:#053324}.put{background:linear-gradient(135deg,#ff7a8a,#ffc0c8);color:#3f1119}.hold{background:linear-gradient(135deg,#8c95a6,#d2d7df);color:#20242b}.signal-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.mini{background:#0f223a;border-radius:14px;padding:12px}.mini-value{font-size:18px;font-weight:800}.reason{margin-top:14px;background:#0d1c31;border-radius:14px;padding:14px;color:#bdd0e8;line-height:1.6;white-space:normal}.empty{text-align:center;color:#9bb2cf;padding:26px 10px}.panel{display:none}.panel.active{display:block}.list-title{font-size:18px;font-weight:800;margin-bottom:6px}@media(max-width:640px){.tabs{grid-template-columns:repeat(2,1fr)}.hero-top{align-items:flex-start}.right-box{min-width:120px}}
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,sans-serif;background:linear-gradient(180deg,#04101d 0%,#07192e 100%);color:#eef6ff}
+.app{max-width:780px;margin:0 auto;padding:18px}
+.hero,.card{background:linear-gradient(180deg,#0a1d33 0%,#0b2340 100%);border:1px solid rgba(80,220,255,.10);border-radius:28px;padding:18px;margin-bottom:18px;box-shadow:0 12px 40px rgba(0,0,0,.28)}
+.hero-top{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.brand{display:flex;align-items:center;gap:14px}
+.logo{width:62px;height:62px;border-radius:18px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#6c63ff,#24e5c2);font-size:34px}
+.title{font-size:30px;font-weight:900}.title .ai{color:#25e6c4}.subtitle{color:#8fa7c4;margin-top:8px;font-size:13px;letter-spacing:1.8px}
+.right-box{display:flex;flex-direction:column;gap:10px}.live{min-width:110px;text-align:center;padding:16px 14px;border-radius:999px;border:1px solid rgba(37,230,196,.24);background:rgba(14,54,55,.45);color:#86ffe8;font-size:18px;font-weight:800}.refresh-btn{border:none;border-radius:999px;padding:12px 16px;background:linear-gradient(180deg,#103153 0%,#153d66 100%);color:#25e6c4;font-size:14px;font-weight:800;cursor:pointer}
+.metrics{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-top:18px}.metric{background:#132b49;border-radius:18px;padding:18px}.metric-label,.section-sub,.mini-label,.muted{color:#8fa7c4}.metric-value{font-size:24px;font-weight:800}
+.tabs{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-top:18px}.tab-btn{border:none;border-radius:18px;padding:16px 10px;background:#132b49;color:#a8bdd8;font-size:14px;font-weight:800;cursor:pointer}.tab-btn.active{background:linear-gradient(180deg,#103153 0%,#153d66 100%);color:#25e6c4}
+.section-title{font-size:17px;font-weight:800;margin-bottom:8px}.status-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.status-item,.signal-card,.list-card,.decision-card{background:#132b49;border-radius:18px;padding:14px;margin-top:12px}
+.signal-head,.decision-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}.asset{font-size:22px;font-weight:900}
+.badge{padding:9px 14px;border-radius:999px;font-size:13px;font-weight:900}.call{background:linear-gradient(135deg,#25e6a0,#8affcc);color:#053324}.put{background:linear-gradient(135deg,#ff7a8a,#ffc0c8);color:#3f1119}.hold{background:linear-gradient(135deg,#8c95a6,#d2d7df);color:#20242b}
+.signal-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.mini{background:#0f223a;border-radius:14px;padding:12px}.mini-value{font-size:18px;font-weight:800}.reason{margin-top:14px;background:#0d1c31;border-radius:14px;padding:14px;color:#bdd0e8;line-height:1.6;white-space:normal}
+.empty{text-align:center;color:#9bb2cf;padding:26px 10px}.panel{display:none}.panel.active{display:block}.list-title{font-size:18px;font-weight:800;margin-bottom:6px}
+@media(max-width:640px){.tabs{grid-template-columns:repeat(2,1fr)}.hero-top{align-items:flex-start}.right-box{min-width:120px}}
 </style>
 </head>
 <body>
@@ -306,7 +319,7 @@ HTML_PAGE = '''<!DOCTYPE html>
 const initialSnapshot = {{ snapshot_json|safe }};
 function showTab(tabId, btn){document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));document.getElementById(tabId).classList.add('active');btn.classList.add('active');}
 function escapeHtml(text){if(text===null||text===undefined)return "";return String(text).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;");}
-function formatText(text){return escapeHtml(text).replaceAll("\n","<br>");}
+function formatText(text){return escapeHtml(text).replaceAll("\\n","<br>");}
 function renderSignals(signals){const c=document.getElementById("signals_container");if(!signals||signals.length===0){c.innerHTML='<div class="empty">Nenhum sinal disponível agora.</div>';return;}let h="";signals.forEach(s=>{const bc=s.signal==="CALL"?"call":"put";h+=`<div class="signal-card"><div class="signal-head"><div class="asset">${escapeHtml(s.asset)}</div><div class="badge ${bc}">${escapeHtml(s.signal)}${s.confidence_label ? " • " + escapeHtml(s.confidence_label) : ""}</div></div><div class="signal-grid"><div class="mini"><div class="mini-label">Score</div><div class="mini-value">${escapeHtml(s.score)}</div></div><div class="mini"><div class="mini-label">Confiança</div><div class="mini-value">${escapeHtml(s.confidence)}%</div></div><div class="mini"><div class="mini-label">Análise</div><div class="mini-value">${escapeHtml(s.analysis_time)}</div></div><div class="mini"><div class="mini-label">Entrada</div><div class="mini-value">${escapeHtml(s.entry_time)}</div></div><div class="mini"><div class="mini-label">Expiração</div><div class="mini-value">${escapeHtml(s.expiration)}</div></div><div class="mini"><div class="mini-label">Regime</div><div class="mini-value">${escapeHtml(s.regime)}</div></div></div><div class="reason">${formatText(s.reason_text)}</div></div>`});c.innerHTML=h;}
 function renderDecision(d){const c=document.getElementById("decision_container");if(!d||!d.decision){c.innerHTML='<div class="empty">Sem decisão disponível agora.</div>';return;}let badgeClass="hold";let badgeText=d.decision;if(d.direction==="CALL") badgeClass="call"; else if(d.direction==="PUT") badgeClass="put"; if(d.decision==="NAO_OPERAR") badgeText="NÃO OPERAR"; else if(d.decision==="ENTRADA_FORTE") badgeText=(d.direction||"CALL")+" • FORTE"; else if(d.decision==="ENTRADA_CAUTELA") badgeText=(d.direction||"CALL")+" • CAUTELA"; else if(d.decision==="OBSERVAR") badgeText=(d.direction||"CALL")+" • OBSERVAR"; c.innerHTML=`<div class="decision-card"><div class="decision-head"><div class="asset">${escapeHtml(d.asset||"MERCADO")}</div><div class="badge ${badgeClass}">${escapeHtml(badgeText)}</div></div><div class="signal-grid"><div class="mini"><div class="mini-label">Score</div><div class="mini-value">${escapeHtml(d.score)}</div></div><div class="mini"><div class="mini-label">Confiança</div><div class="mini-value">${escapeHtml(d.confidence)}%</div></div><div class="mini"><div class="mini-label">Análise</div><div class="mini-value">${escapeHtml(d.analysis_time)}</div></div><div class="mini"><div class="mini-label">Entrada</div><div class="mini-value">${escapeHtml(d.entry_time)}</div></div><div class="mini"><div class="mini-label">Expiração</div><div class="mini-value">${escapeHtml(d.expiration)}</div></div><div class="mini"><div class="mini-label">Regime</div><div class="mini-value">${escapeHtml(d.regime)}</div></div></div><div class="reason">${formatText(d.reason_text)}</div></div>`;}
 function renderHistory(history){const c=document.getElementById("history_container");if(!history||history.length===0){c.innerHTML='<div class="empty">Ainda não há histórico salvo.</div>';return;}let h="";history.forEach(x=>{h+=`<div class="list-card"><div class="list-title">${escapeHtml(x.asset)} • ${escapeHtml(x.signal)}</div><div class="muted">Análise: ${escapeHtml(x.analysis_time)}<br>Entrada: ${escapeHtml(x.entry_time)}<br>Expiração: ${escapeHtml(x.expiration)}<br>Score: ${escapeHtml(x.score)} • Confiança: ${escapeHtml(x.confidence)}% • Fonte: ${escapeHtml(x.provider)}</div></div>`});c.innerHTML=h;}
@@ -317,7 +330,8 @@ async function refreshSnapshot(){const btn=document.getElementById("refreshBtn")
 applySnapshot(initialSnapshot);
 </script>
 </body>
-</html>'''
+</html>
+"""
 
 @app.before_request
 def _boot():
