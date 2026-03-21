@@ -12,6 +12,7 @@ from learning_engine import LearningEngine
 from result_evaluator import ResultEvaluator
 from result_engine import ResultEngine
 from strategy_lab import StrategyLab
+from adaptive_engine import AdaptiveEngine
 from journal_manager import JournalManager
 from decision_engine import DecisionEngine
 from config import ASSETS, SCAN_INTERVAL_SECONDS
@@ -26,6 +27,7 @@ decision_engine = DecisionEngine(learning)
 result_evaluator = ResultEvaluator()
 result_engine = ResultEngine(result_evaluator)
 strategy_lab = StrategyLab()
+adaptive_engine = AdaptiveEngine()
 journal = JournalManager()
 
 STATE_DIR = "/tmp/nexus_state"
@@ -132,6 +134,7 @@ def enqueue_pending_decision(current_decision, matched_market):
         "expiration": current_decision.get("expiration"),
         "setup_id": current_decision.get("setup_id"),
         "strategy_name": current_decision.get("strategy_name", "none"),
+        "regime": current_decision.get("regime", "unknown"),
     }
 
     if record["uid"] not in existing:
@@ -163,6 +166,7 @@ def process_pending_decisions(market):
             setup_id = signal.get("setup_id")
             if setup_id:
                 strategy_lab.register_result(setup_id, result_data.get("result"))
+            adaptive_engine.register_result(signal.get("strategy_name", "none"), signal.get("regime", "unknown"), result_data.get("result"))
         else:
             still_pending.append(signal)
 
@@ -321,7 +325,7 @@ function showTab(tabId, btn){document.querySelectorAll('.panel').forEach(p=>p.cl
 function escapeHtml(text){if(text===null||text===undefined)return "";return String(text).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;");}
 function formatText(text){return escapeHtml(text).replaceAll("\\n","<br>");}
 function renderSignals(signals){const c=document.getElementById("signals_container");if(!signals||signals.length===0){c.innerHTML='<div class="empty">Nenhum sinal disponível agora.</div>';return;}let h="";signals.forEach(s=>{const bc=s.signal==="CALL"?"call":"put";h+=`<div class="signal-card"><div class="signal-head"><div class="asset">${escapeHtml(s.asset)}</div><div class="badge ${bc}">${escapeHtml(s.signal)}${s.confidence_label ? " • " + escapeHtml(s.confidence_label) : ""}</div></div><div class="signal-grid"><div class="mini"><div class="mini-label">Score</div><div class="mini-value">${escapeHtml(s.score)}</div></div><div class="mini"><div class="mini-label">Confiança</div><div class="mini-value">${escapeHtml(s.confidence)}%</div></div><div class="mini"><div class="mini-label">Análise</div><div class="mini-value">${escapeHtml(s.analysis_time)}</div></div><div class="mini"><div class="mini-label">Entrada</div><div class="mini-value">${escapeHtml(s.entry_time)}</div></div><div class="mini"><div class="mini-label">Expiração</div><div class="mini-value">${escapeHtml(s.expiration)}</div></div><div class="mini"><div class="mini-label">Regime</div><div class="mini-value">${escapeHtml(s.regime)}</div></div></div><div class="reason">${formatText(s.reason_text)}</div></div>`});c.innerHTML=h;}
-function renderDecision(d){const c=document.getElementById("decision_container");if(!d||!d.decision){c.innerHTML='<div class="empty">Sem decisão disponível agora.</div>';return;}let badgeClass="hold";let badgeText=d.decision;if(d.direction==="CALL") badgeClass="call"; else if(d.direction==="PUT") badgeClass="put"; if(d.decision==="NAO_OPERAR") badgeText="NÃO OPERAR"; else if(d.decision==="ENTRADA_FORTE") badgeText=(d.direction||"CALL")+" • FORTE"; else if(d.decision==="ENTRADA_CAUTELA") badgeText=(d.direction||"CALL")+" • CAUTELA"; else if(d.decision==="OBSERVAR") badgeText=(d.direction||"CALL")+" • OBSERVAR"; c.innerHTML=`<div class="decision-card"><div class="decision-head"><div class="asset">${escapeHtml(d.asset||"MERCADO")}</div><div class="badge ${badgeClass}">${escapeHtml(badgeText)}</div></div><div class="signal-grid"><div class="mini"><div class="mini-label">Score</div><div class="mini-value">${escapeHtml(d.score)}</div></div><div class="mini"><div class="mini-label">Confiança</div><div class="mini-value">${escapeHtml(d.confidence)}%</div></div><div class="mini"><div class="mini-label">Análise</div><div class="mini-value">${escapeHtml(d.analysis_time)}</div></div><div class="mini"><div class="mini-label">Entrada</div><div class="mini-value">${escapeHtml(d.entry_time)}</div></div><div class="mini"><div class="mini-label">Expiração</div><div class="mini-value">${escapeHtml(d.expiration)}</div></div><div class="mini"><div class="mini-label">Regime</div><div class="mini-value">${escapeHtml(d.regime)}</div></div></div><div class="reason">${formatText(d.reason_text)}</div></div>`;}
+function renderDecision(d){const c=document.getElementById("decision_container");if(!d||!d.decision){c.innerHTML='<div class="empty">Sem decisão disponível agora.</div>';return;}let badgeClass="hold";let badgeText=d.decision;if(d.direction==="CALL") badgeClass="call"; else if(d.direction==="PUT") badgeClass="put"; if(d.decision==="NAO_OPERAR") badgeText="NÃO OPERAR"; else if(d.decision==="ENTRADA_FORTE") badgeText=(d.direction||"CALL")+" • FORTE"; else if(d.decision==="ENTRADA_CAUTELA") badgeText=(d.direction||"CALL")+" • CAUTELA"; c.innerHTML=`<div class="decision-card"><div class="decision-head"><div class="asset">${escapeHtml(d.asset||"MERCADO")}</div><div class="badge ${badgeClass}">${escapeHtml(badgeText)}</div></div><div class="signal-grid"><div class="mini"><div class="mini-label">Score</div><div class="mini-value">${escapeHtml(d.score)}</div></div><div class="mini"><div class="mini-label">Confiança</div><div class="mini-value">${escapeHtml(d.confidence)}%</div></div><div class="mini"><div class="mini-label">Análise</div><div class="mini-value">${escapeHtml(d.analysis_time)}</div></div><div class="mini"><div class="mini-label">Entrada</div><div class="mini-value">${escapeHtml(d.entry_time)}</div></div><div class="mini"><div class="mini-label">Expiração</div><div class="mini-value">${escapeHtml(d.expiration)}</div></div><div class="mini"><div class="mini-label">Regime</div><div class="mini-value">${escapeHtml(d.regime)}</div></div></div><div class="reason">${formatText(d.reason_text)}</div></div>`;}
 function renderHistory(history){const c=document.getElementById("history_container");if(!history||history.length===0){c.innerHTML='<div class="empty">Ainda não há histórico salvo.</div>';return;}let h="";history.forEach(x=>{h+=`<div class="list-card"><div class="list-title">${escapeHtml(x.asset)} • ${escapeHtml(x.signal)}</div><div class="muted">Análise: ${escapeHtml(x.analysis_time)}<br>Entrada: ${escapeHtml(x.entry_time)}<br>Expiração: ${escapeHtml(x.expiration)}<br>Score: ${escapeHtml(x.score)} • Confiança: ${escapeHtml(x.confidence)}% • Fonte: ${escapeHtml(x.provider)}</div></div>`});c.innerHTML=h;}
 function renderBestAssets(bestAssets){const c=document.getElementById("assets_container");if(!bestAssets||bestAssets.length===0){c.innerHTML='<div class="empty">Ainda sem dados suficientes.</div>';return;}let h="";bestAssets.forEach(x=>{h+=`<div class="list-card"><div class="list-title">${escapeHtml(x.asset)}</div><div class="muted">Win rate: <b>${escapeHtml(x.winrate)}%</b><br>Trades: <b>${escapeHtml(x.total)}</b><br>Wins: <b>${escapeHtml(x.wins)}</b></div></div>`});c.innerHTML=h;}
 function renderBestHours(bestHours){const c=document.getElementById("hours_container");if(!bestHours||bestHours.length===0){c.innerHTML='<div class="empty">Ainda sem dados suficientes.</div>';return;}let h="";bestHours.forEach(x=>{h+=`<div class="list-card"><div class="list-title">${escapeHtml(x.hour)}</div><div class="muted">Win rate: <b>${escapeHtml(x.winrate)}%</b><br>Trades: <b>${escapeHtml(x.total)}</b><br>Wins: <b>${escapeHtml(x.wins)}</b></div></div>`});c.innerHTML=h;}
