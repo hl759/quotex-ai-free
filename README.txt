@@ -1,14 +1,10 @@
-V12 ETAPA 3 - PERFORMANCE REAL
+RESOLUÇÃO
 
+O problema era o app.py atual do projeto: ele estava com conteúdo placeholder/incompleto.
 Substitua estes arquivos:
+- app.py
 - adaptive_engine.py
 - decision_engine.py
-
-Opcionalmente mantenha os arquivos já ativos da etapa 2.
-
-O que entra:
-- peso por estratégia + regime baseado em WIN/LOSS real
-- redução automática de estratégias fracas
-- favorecimento automático das fortes
-- soft block de estratégia muito ruim
-- Alpha Hive AI começa a operar mais pelo que FUNCIONA de verdade
+- result_engine.py
+- strategy_engine.py
+- strategy_lab.py
