@@ -1,11 +1,15 @@
-ALPHA HIVE AI - FIX DE STATS / ATIVOS / HORÁRIOS
+V11 ETAPA 5 - MOTOR DE RESULTADOS
 
 Substitua estes arquivos:
-- journal_manager.py
-- result_evaluator.py
+- app.py
+- result_engine.py
 
-O que isso corrige:
-- registra WIN/LOSS de forma compatível
-- passa a alimentar Stats, Ativos e Horários
-- salva o journal em /opt/render/project/src/data
-- evita perder tudo por depender só de /tmp
+O que entra:
+- fila de sinais pendentes
+- avaliação só após expiração
+- registro automático de WIN / LOSS
+- alimentação real de Stats, Ativos e Horários
+
+Observação:
+- depois do deploy, deixe rodar alguns ciclos
+- Stats/Ativos/Horários só aparecem após sinais expirarem e serem avaliados

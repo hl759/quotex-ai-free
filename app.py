@@ -10,6 +10,7 @@ from signal_engine import SignalEngine
 from data_manager import DataManager
 from learning_engine import LearningEngine
 from result_evaluator import ResultEvaluator
+from result_engine import ResultEngine
 from journal_manager import JournalManager
 from decision_engine import DecisionEngine
 from config import ASSETS, SCAN_INTERVAL_SECONDS
@@ -22,6 +23,7 @@ scanner = MarketScanner(data_manager, learning)
 signal_engine = SignalEngine(learning)
 decision_engine = DecisionEngine(learning)
 result_evaluator = ResultEvaluator()
+result_engine = ResultEngine(result_evaluator)
 journal = JournalManager()
 
 STATE_DIR = "/tmp/nexus_state"
@@ -29,6 +31,7 @@ LATEST_SIGNALS_FILE = os.path.join(STATE_DIR, "latest_signals.json")
 SIGNAL_HISTORY_FILE = os.path.join(STATE_DIR, "history.json")
 META_FILE = os.path.join(STATE_DIR, "meta.json")
 CURRENT_DECISION_FILE = os.path.join(STATE_DIR, "current_decision.json")
+PENDING_SIGNALS_FILE = os.path.join(STATE_DIR, "pending_signals.json")
 
 os.makedirs(STATE_DIR, exist_ok=True)
 
@@ -77,6 +80,61 @@ def normalize_signals(signals):
             "regime": s.get("regime", "unknown")
         })
     return out
+
+
+def _signal_uid(signal):
+    return f"{signal.get('asset','N/A')}-{signal.get('signal','N/A')}-{signal.get('analysis_time','--:--')}-{signal.get('entry_time','--:--')}-{signal.get('expiration','--:--')}"
+
+def enqueue_pending_signals(raw_signals, normalized_signals):
+    if not raw_signals or not normalized_signals:
+        return
+
+    pending = read_json(PENDING_SIGNALS_FILE, [])
+    existing = {item.get("uid") for item in pending if isinstance(item, dict)}
+
+    for idx, signal in enumerate(raw_signals):
+        if idx >= len(normalized_signals):
+            continue
+
+        norm = normalized_signals[idx]
+        record = dict(signal)
+        record["analysis_time"] = norm.get("analysis_time", "--:--")
+        record["entry_time"] = norm.get("entry_time", "--:--")
+        record["expiration"] = norm.get("expiration", "--:--")
+        record["uid"] = _signal_uid(record)
+
+        if record["uid"] not in existing:
+            pending.append(record)
+            existing.add(record["uid"])
+
+    write_json(PENDING_SIGNALS_FILE, pending)
+
+def process_pending_results(market):
+    pending = read_json(PENDING_SIGNALS_FILE, [])
+    if not pending:
+        return
+
+    now_str = now_brazil().strftime("%H:%M")
+    still_pending = []
+
+    for signal in pending:
+        expiration = str(signal.get("expiration", "99:99"))
+        if expiration > now_str:
+            still_pending.append(signal)
+            continue
+
+        matched_asset = next((item for item in market if item.get("asset") == signal.get("asset")), None)
+        if not matched_asset:
+            still_pending.append(signal)
+            continue
+
+        result_data = result_engine.evaluate_expired_signal(signal, matched_asset.get("candles", []))
+        if result_data:
+            learning.register_result(signal, result_data)
+        else:
+            still_pending.append(signal)
+
+    write_json(PENDING_SIGNALS_FILE, still_pending)
 
 def decorate_decision(decision):
     analysis = now_brazil()
@@ -160,18 +218,8 @@ def scanner_loop():
 
             current_decision = decorate_decision(best_decision_raw)
 
-            if raw_signals:
-                for idx, signal in enumerate(raw_signals):
-                    matched_asset = next((item for item in market if item.get("asset") == signal.get("asset")), None)
-                    if matched_asset:
-                        result_data = result_evaluator.evaluate(signal, matched_asset.get("candles", []))
-                        if result_data:
-                            safe_signal = dict(signal)
-                            if idx < len(signals):
-                                safe_signal["analysis_time"] = signals[idx]["analysis_time"]
-                                safe_signal["entry_time"] = signals[idx]["entry_time"]
-                                safe_signal["expiration"] = signals[idx]["expiration"]
-                            learning.register_result(safe_signal, result_data)
+            process_pending_results(market)
+            enqueue_pending_signals(raw_signals, signals)
 
             history = read_json(SIGNAL_HISTORY_FILE, [])
             if signals:
