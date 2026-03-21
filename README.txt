@@ -1,14 +1,13 @@
-V12 ETAPA 5 - BACKEND ONLY
+V12 ETAPA 6 - BACKEND ONLY
 
 Substitua estes arquivos:
-- market_profile_engine.py
+- strategy_evolution_engine.py
 - decision_engine.py
 
 Mantenha seu app.py atual.
 
 O que entra:
-- perfil dinâmico do mercado (aggressive / neutral / defensive)
-- score mínimo ajustado pelo ambiente
-- consenso mais forte ou mais fraco conforme o momento
-- confiança ajustada pelo ambiente
-- Alpha Hive AI muda o estilo operacional conforme o mercado atual
+- motor de evolução de variações de estratégia
+- promoção de variações vencedoras
+- redução de variações ruins
+- decisão mais próxima de uma mesa que aprende quais versões de setup funcionam melhor
