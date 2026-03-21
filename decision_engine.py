@@ -1,6 +1,7 @@
 from strategy_engine import StrategyEngine
 from strategy_lab import StrategyLab
 from adaptive_engine import AdaptiveEngine
+from memory_engine import MemoryEngine
 
 
 class DecisionEngine:
@@ -9,6 +10,7 @@ class DecisionEngine:
         self.strategy_engine = StrategyEngine()
         self.strategy_lab = StrategyLab()
         self.adaptive_engine = AdaptiveEngine()
+        self.memory_engine = MemoryEngine()
 
     def _build_base_score(self, indicators):
         score = 0.0
@@ -137,6 +139,7 @@ class DecisionEngine:
 
         adjusted_score = float(base_score)
         leader_setup_id = None
+        leader_context_id = None
         leader_name = "none"
         leader_score = 0.0
         filtered = []
@@ -169,19 +172,20 @@ class DecisionEngine:
             else:
                 reasons.append("Estratégias válidas sem força operacional suficiente")
 
-            if valid_strategies:
-                for candidate in valid_strategies:
-                    c_name = candidate.get("strategy", "none")
-                    if c_name not in filtered:
-                        leader = candidate
-                        leader_name = leader.get("strategy", "none")
-                        leader_score = float(leader.get("score", 0.0))
-                        reasons.extend(leader.get("reasons", []))
-                        break
-                else:
-                    leader = valid_strategies[0]
-                    leader_name = leader.get("strategy", "none")
-                    leader_score = float(leader.get("score", 0.0))
+            leader = None
+            for candidate in valid_strategies:
+                c_name = candidate.get("strategy", "none")
+                if c_name not in filtered:
+                    leader = candidate
+                    break
+
+            if leader is None and valid_strategies:
+                leader = valid_strategies[0]
+
+            if leader is not None:
+                leader_name = leader.get("strategy", "none")
+                leader_score = float(leader.get("score", 0.0))
+                reasons.extend(leader.get("reasons", []))
 
             reasons.append(f"Estratégias válidas: {len(valid_strategies)}")
 
@@ -197,6 +201,16 @@ class DecisionEngine:
                 adjusted_score += setup_boost
                 reasons.append(setup_reason)
                 reasons.append(self.adaptive_engine.get_reason(leader_name, regime))
+
+                leader_context_id = self.memory_engine.register_context(
+                    asset=asset,
+                    strategy_name=leader_name,
+                    indicators=indicators,
+                    analysis_time=analysis_time,
+                )
+                memory_boost, memory_reason = self.memory_engine.get_memory_boost(leader_context_id)
+                adjusted_score += memory_boost
+                reasons.append(memory_reason)
         else:
             reasons.append("Nenhuma estratégia forte ativa")
 
@@ -228,7 +242,7 @@ class DecisionEngine:
             confidence = max(50, min(95, int((50 + adjusted_score * 10) * confidence_factor)))
             reasons.append(f"Regime final: {regime}")
             reasons.append(f"Score ajustado: {round(adjusted_score, 2)}")
-            reasons.append("Modo: v12 etapa 3 integrada")
+            reasons.append("Modo: v12 etapa 4 memória inteligente")
             return {
                 "asset": asset,
                 "decision": "NAO_OPERAR",
@@ -238,6 +252,7 @@ class DecisionEngine:
                 "regime": regime,
                 "reasons": reasons,
                 "setup_id": leader_setup_id,
+                "context_id": leader_context_id,
                 "strategy_name": leader_name
             }
 
@@ -297,7 +312,7 @@ class DecisionEngine:
         reasons.append(f"Estratégia líder: {leader_name}")
         reasons.append(f"Strategy score: {round(leader_score, 2)}")
         reasons.append(f"Score ajustado: {round(adjusted_score, 2)}")
-        reasons.append("Modo: v12 etapa 3 integrada")
+        reasons.append("Modo: v12 etapa 4 memória inteligente")
 
         return {
             "asset": asset,
@@ -308,5 +323,6 @@ class DecisionEngine:
             "regime": regime,
             "reasons": reasons,
             "setup_id": leader_setup_id,
+            "context_id": leader_context_id,
             "strategy_name": leader_name
         }
