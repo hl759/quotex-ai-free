@@ -303,7 +303,7 @@ HTML_PAGE = '''<!DOCTYPE html>
 <div id='hours' class='panel'><div class='card'><div class='section-title'>Melhores horários</div><div class='section-sub'>Ranking por faixa horária</div><div id='hours_container'></div></div></div>
 </div>
 <script>
-const initialSnapshot = {{ snapshot_json|safe }};
+const initialSnapshot = {{ snapshot_json|safe }} || null;
 function showTab(tabId, btn){document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));document.getElementById(tabId).classList.add('active');btn.classList.add('active');}
 function escapeHtml(text){if(text===null||text===undefined)return "";return String(text).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;");}
 function formatText(text){return escapeHtml(text).replaceAll("\n","<br>");}
@@ -312,9 +312,70 @@ function renderDecision(d){const c=document.getElementById("decision_container")
 function renderHistory(history){const c=document.getElementById("history_container");if(!history||history.length===0){c.innerHTML='<div class="empty">Ainda não há histórico salvo.</div>';return;}let h="";history.forEach(x=>{h+=`<div class="list-card"><div class="list-title">${escapeHtml(x.asset)} • ${escapeHtml(x.signal)}</div><div class="muted">Análise: ${escapeHtml(x.analysis_time)}<br>Entrada: ${escapeHtml(x.entry_time)}<br>Expiração: ${escapeHtml(x.expiration)}<br>Score: ${escapeHtml(x.score)} • Confiança: ${escapeHtml(x.confidence)}% • Fonte: ${escapeHtml(x.provider)}</div></div>`});c.innerHTML=h;}
 function renderBestAssets(bestAssets){const c=document.getElementById("assets_container");if(!bestAssets||bestAssets.length===0){c.innerHTML='<div class="empty">Ainda sem dados suficientes.</div>';return;}let h="";bestAssets.forEach(x=>{h+=`<div class="list-card"><div class="list-title">${escapeHtml(x.asset)}</div><div class="muted">Win rate: <b>${escapeHtml(x.winrate)}%</b><br>Trades: <b>${escapeHtml(x.total)}</b><br>Wins: <b>${escapeHtml(x.wins)}</b></div></div>`});c.innerHTML=h;}
 function renderBestHours(bestHours){const c=document.getElementById("hours_container");if(!bestHours||bestHours.length===0){c.innerHTML='<div class="empty">Ainda sem dados suficientes.</div>';return;}let h="";bestHours.forEach(x=>{h+=`<div class="list-card"><div class="list-title">${escapeHtml(x.hour)}</div><div class="muted">Win rate: <b>${escapeHtml(x.winrate)}%</b><br>Trades: <b>${escapeHtml(x.total)}</b><br>Wins: <b>${escapeHtml(x.wins)}</b></div></div>`});c.innerHTML=h;}
-function applySnapshot(d){document.getElementById("last_scan").textContent=d.meta.last_scan;document.getElementById("scan_count").textContent=d.meta.scan_count;document.getElementById("signal_count").textContent=d.meta.signal_count;document.getElementById("asset_count").textContent=d.meta.asset_count;document.getElementById("stats_total").textContent=d.learning_stats.total;document.getElementById("stats_winrate").textContent=d.learning_stats.winrate + "%";document.getElementById("stats_wins").textContent=d.learning_stats.wins;document.getElementById("stats_loss").textContent=d.learning_stats.loss;renderSignals(d.signals);renderDecision(d.current_decision);renderHistory(d.history);renderBestAssets(d.best_assets);renderBestHours(d.best_hours);}
-async function refreshSnapshot(){const btn=document.getElementById("refreshBtn");btn.disabled=true;btn.textContent="Atualizando...";try{const r=await fetch("/snapshot",{cache:"no-store"});const d=await r.json();applySnapshot(d);btn.textContent="✓ Atualizado";}catch(e){btn.textContent="Erro ao atualizar";}setTimeout(()=>{btn.disabled=false;btn.textContent="↻ Atualizar agora";},1200);}
-applySnapshot(initialSnapshot);
+function safeSnapshot(d){
+  return {
+    signals: Array.isArray(d?.signals) ? d.signals : [],
+    history: Array.isArray(d?.history) ? d.history : [],
+    current_decision: d?.current_decision || {},
+    meta: {
+      last_scan: d?.meta?.last_scan ?? "--",
+      scan_count: d?.meta?.scan_count ?? 0,
+      signal_count: d?.meta?.signal_count ?? 0,
+      asset_count: d?.meta?.asset_count ?? 0
+    },
+    learning_stats: {
+      total: d?.learning_stats?.total ?? 0,
+      winrate: d?.learning_stats?.winrate ?? 0,
+      wins: d?.learning_stats?.wins ?? 0,
+      loss: d?.learning_stats?.loss ?? 0
+    },
+    best_assets: Array.isArray(d?.best_assets) ? d.best_assets : [],
+    best_hours: Array.isArray(d?.best_hours) ? d.best_hours : []
+  };
+}
+function applySnapshot(d){
+  const s = safeSnapshot(d);
+  document.getElementById("last_scan").textContent = s.meta.last_scan;
+  document.getElementById("scan_count").textContent = s.meta.scan_count;
+  document.getElementById("signal_count").textContent = s.meta.signal_count;
+  document.getElementById("asset_count").textContent = s.meta.asset_count;
+  document.getElementById("stats_total").textContent = s.learning_stats.total;
+  document.getElementById("stats_winrate").textContent = s.learning_stats.winrate + "%";
+  document.getElementById("stats_wins").textContent = s.learning_stats.wins;
+  document.getElementById("stats_loss").textContent = s.learning_stats.loss;
+  renderSignals(s.signals);
+  renderDecision(s.current_decision);
+  renderHistory(s.history);
+  renderBestAssets(s.best_assets);
+  renderBestHours(s.best_hours);
+}
+async function refreshSnapshot(){
+  const btn=document.getElementById("refreshBtn");
+  btn.disabled=true;
+  btn.textContent="Atualizando...";
+  try{
+    const r=await fetch("/snapshot",{cache:"no-store"});
+    const d=await r.json();
+    applySnapshot(d);
+    btn.textContent="✓ Atualizado";
+  }catch(e){
+    btn.textContent="Erro ao atualizar";
+  }
+  setTimeout(()=>{
+    btn.disabled=false;
+    btn.textContent="↻ Atualizar agora";
+  },1200);
+}
+document.addEventListener("DOMContentLoaded", async () => {
+  try{
+    applySnapshot(initialSnapshot);
+  }catch(e){
+    applySnapshot(null);
+  }
+  setTimeout(() => {
+    refreshSnapshot();
+  }, 300);
+});
 </script>
 </body>
 </html>'''
