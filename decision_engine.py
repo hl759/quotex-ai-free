@@ -4,7 +4,6 @@ from adaptive_engine import AdaptiveEngine
 from memory_engine import MemoryEngine
 from market_profile_engine import MarketProfileEngine
 from strategy_evolution_engine import StrategyEvolutionEngine
-from context_intelligence_engine import ContextIntelligenceEngine
 
 
 class DecisionEngine:
@@ -16,7 +15,6 @@ class DecisionEngine:
         self.memory_engine = MemoryEngine()
         self.market_profile_engine = MarketProfileEngine()
         self.strategy_evolution_engine = StrategyEvolutionEngine()
-        self.context_intelligence_engine = ContextIntelligenceEngine()
 
     def _build_base_score(self, indicators):
         score = 0.0
@@ -134,7 +132,6 @@ class DecisionEngine:
         regime = indicators.get("regime", "unknown")
         fallback_direction = indicators.get("direction", "CALL")
         analysis_time = indicators.get("analysis_time")
-        weekday = indicators.get("weekday")
 
         market_profile = self.market_profile_engine.get_profile(regime)
 
@@ -143,19 +140,11 @@ class DecisionEngine:
         reasons.extend(base_reasons)
         reasons.append(market_profile.get("reason", "Mercado em equilíbrio"))
 
-        context_adj = self.context_intelligence_engine.get_adjustment(
-            asset=asset,
-            regime=regime,
-            analysis_time=analysis_time,
-            weekday=weekday,
-        )
-        reasons.append(context_adj.get("reason", "Contexto neutro"))
-
         strategies = self.strategy_engine.evaluate_all(asset, indicators)
         valid_strategies = [s for s in strategies if s.get("valid")]
         valid_strategies.sort(key=lambda x: (x.get("score", 0), x.get("confidence", 0)), reverse=True)
 
-        adjusted_score = float(base_score) + context_adj.get("score_boost", 0.0)
+        adjusted_score = float(base_score)
         leader_setup_id = None
         leader_context_id = None
         leader_name = "none"
@@ -265,11 +254,9 @@ class DecisionEngine:
 
         if regime == "chaotic" and adjusted_score < 2.3:
             confidence = max(50, min(95, int((50 + adjusted_score * 10) * confidence_factor)))
-            confidence += context_adj.get("confidence_shift", 0)
-            confidence = max(50, min(95, confidence))
             reasons.append(f"Regime final: {regime}")
             reasons.append(f"Score ajustado: {round(adjusted_score, 2)}")
-            reasons.append("Modo: v12 etapa 7 context intelligence")
+            reasons.append("Modo: v12 etapa 6 evolução de variações")
             return {
                 "asset": asset,
                 "decision": "NAO_OPERAR",
@@ -281,8 +268,7 @@ class DecisionEngine:
                 "setup_id": leader_setup_id,
                 "context_id": leader_context_id,
                 "strategy_name": leader_name,
-                "evolution_variant": evolution_variant,
-                "context_intelligence_mode": context_adj.get("mode", "neutral")
+                "evolution_variant": evolution_variant
             }
 
         consensus_bonus = 0.0
@@ -320,7 +306,7 @@ class DecisionEngine:
             elif regime == "mixed" and len(active_names) >= 1:
                 promote_to_caution = True
 
-            if market_profile.get("mode") == "defensive":
+            if market_profile.get("mode") == "defensive" and decision != "ENTRADA_FORTE":
                 promote_to_caution = False
 
             if evolution_variant == "promovida" and final_direction:
@@ -340,19 +326,17 @@ class DecisionEngine:
         confidence = 50 + (adjusted_score * 10)
         confidence *= confidence_factor
         confidence += market_profile.get("confidence_shift", 0)
-        confidence += context_adj.get("confidence_shift", 0)
         if consensus_bonus > 0:
             confidence += 2
         confidence = max(50, min(95, confidence))
 
         reasons.append(f"Regime final: {regime}")
         reasons.append(f"Perfil de mercado: {market_profile.get('mode', 'neutral')}")
-        reasons.append(f"Context Intelligence: {context_adj.get('mode', 'neutral')}")
         reasons.append(f"Estratégia líder: {leader_name}")
         reasons.append(f"Strategy score: {round(leader_score, 2)}")
         reasons.append(f"Variação: {evolution_variant}")
         reasons.append(f"Score ajustado: {round(adjusted_score, 2)}")
-        reasons.append("Modo: v12 etapa 7 context intelligence")
+        reasons.append("Modo: v12 etapa 6 evolução de variações")
 
         return {
             "asset": asset,
@@ -365,6 +349,5 @@ class DecisionEngine:
             "setup_id": leader_setup_id,
             "context_id": leader_context_id,
             "strategy_name": leader_name,
-            "evolution_variant": evolution_variant,
-            "context_intelligence_mode": context_adj.get("mode", "neutral")
+            "evolution_variant": evolution_variant
         }
