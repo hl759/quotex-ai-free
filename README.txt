@@ -1,13 +1,24 @@
-V13 ETAPA 1 - BACKEND-ONLY
+V13 ETAPA 2 - BACKEND-ONLY
 
 Substitua estes arquivos:
-- strategy_variants_engine.py
+- capital_mind_engine.py
 - decision_engine.py
 
 O que entra:
-- Strategy Variants Lab
-- criação de variações controladas das estratégias existentes
-- competição entre variantes
-- desempenho por variante usando o fluxo já existente (strategy_name salvo no journal)
+- Capital Mind Engine
+- risco adaptativo baseado em capital, score e confiança
+- metas inteligentes (alvo diário e stop diário)
+- crescimento progressivo e preservação de capital
 - sem alterar app.py
 - sem remover nada existente
+
+Observação:
+Para funcionar no máximo do potencial, você pode passar estes campos em indicators no futuro:
+- capital_current
+- capital_peak
+- daily_pnl
+- streak
+- daily_target_pct
+- daily_stop_pct
+
+Sem esses campos, o módulo permanece neutro e não quebra nada.
