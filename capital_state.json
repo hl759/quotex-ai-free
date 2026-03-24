@@ -1,6 +1,6 @@
 {
-  "capital_current": 1000.0,
-  "capital_peak": 1000.0,
+  "capital_current": 0.0,
+  "capital_peak": 0.0,
   "daily_pnl": 0.0,
   "streak": 0,
   "daily_target_pct": 2.0,

@@ -7,22 +7,10 @@ DATA_DIR = os.environ.get("ALPHA_HIVE_DATA_DIR", "/opt/render/project/src/data")
 os.makedirs(DATA_DIR, exist_ok=True)
 
 JOURNAL_FILE = os.path.join(DATA_DIR, "alpha_hive_journal.json")
-CAPITAL_STATE_FILE = os.path.join(DATA_DIR, "capital_state.json")
+CAPITAL_STATE_FILE = os.path.join("/tmp/nexus_state", "capital_state.json")
 
 
 class CapitalAutoTracker:
-    """
-    Atualiza automaticamente:
-    - daily_pnl
-    - streak
-    - capital_peak
-
-    com base no journal e no capital atual.
-    """
-
-    def __init__(self):
-        pass
-
     def _load_json(self, path, default):
         try:
             if os.path.exists(path):
@@ -34,6 +22,7 @@ class CapitalAutoTracker:
         return default
 
     def _save_json(self, path, data):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
@@ -68,11 +57,7 @@ class CapitalAutoTracker:
         return datetime.utcnow().strftime("%Y-%m-%d")
 
     def _trade_date_key(self, trade):
-        # tenta usar analysis_time com campo date explícito, se existir
-        if trade.get("date"):
-            return str(trade.get("date"))
-        # fallback: sem data persistida, considera todos os resultados como do "dia atual"
-        return self._today_key()
+        return str(trade.get("date") or self._today_key())
 
     def _valid_trades(self, journal):
         return [t for t in journal if self._result_value(t) in ("WIN", "LOSS")]
@@ -93,45 +78,29 @@ class CapitalAutoTracker:
                     streak -= 1
                 else:
                     break
-            else:
-                break
         return streak
 
     def _compute_daily_pnl(self, valid_trades, capital_current):
         today = self._today_key()
-        # Sem payout real salvo no journal, usa aproximação neutra por stake teórica:
-        # WIN = +1 unidade, LOSS = -1 unidade
-        # e converte para % leve do capital para não distorcer.
         todays = [t for t in valid_trades if self._trade_date_key(t) == today]
         if not todays or capital_current <= 0:
             return 0.0
-
         unit_risk = max(1.0, round(capital_current * 0.01, 2))
         pnl = 0.0
         for trade in todays:
-            if self._result_value(trade) == "WIN":
-                pnl += unit_risk
-            else:
-                pnl -= unit_risk
+            pnl += unit_risk if self._result_value(trade) == "WIN" else -unit_risk
         return round(pnl, 2)
 
     def update(self):
         state = self._load_capital_state()
         journal = self._load_journal()
         valid = self._valid_trades(journal)
-
         capital_current = float(state.get("capital_current", 0.0) or 0.0)
         capital_peak = float(state.get("capital_peak", 0.0) or 0.0)
-
-        daily_pnl = self._compute_daily_pnl(valid, capital_current)
-        streak = self._compute_streak(valid)
-
+        state["daily_pnl"] = self._compute_daily_pnl(valid, capital_current)
+        state["streak"] = self._compute_streak(valid)
         if capital_current > capital_peak:
             capital_peak = capital_current
-
-        state["daily_pnl"] = daily_pnl
-        state["streak"] = streak
         state["capital_peak"] = round(capital_peak, 2)
-
         self._save_json(CAPITAL_STATE_FILE, state)
         return state

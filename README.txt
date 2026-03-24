@@ -1,14 +1,7 @@
-V13 ETAPA 5 - BACKEND-ONLY
-
-Arquivos:
+Substitua estes arquivos:
+- app.py
 - capital_auto_tracker.py
+- capital_state.json
 
-O que entra:
-- atualização automática de daily_pnl
-- atualização automática de streak
-- atualização automática de capital_peak
-- baseado no journal_manager / alpha_hive_journal.json
-- sem alterar app.py neste pacote
-
-Observação:
-Para ativar, é preciso integrar 2 linhas no app.py conforme INTEGRACAO.txt.
+Esta versão mantém o que já funciona e integra o Capital Auto-Tracker + painel de capital.
+Você pode informar só o saldo atual; o sistema passa a atualizar automaticamente streak, daily_pnl e capital_peak com base no journal.
