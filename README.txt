@@ -1,13 +1,13 @@
-V12 ETAPA 6 - BACKEND ONLY
+V13 ETAPA 1 - BACKEND-ONLY
 
 Substitua estes arquivos:
-- strategy_evolution_engine.py
+- strategy_variants_engine.py
 - decision_engine.py
 
-Mantenha seu app.py atual.
-
 O que entra:
-- motor de evolução de variações de estratégia
-- promoção de variações vencedoras
-- redução de variações ruins
-- decisão mais próxima de uma mesa que aprende quais versões de setup funcionam melhor
+- Strategy Variants Lab
+- criação de variações controladas das estratégias existentes
+- competição entre variantes
+- desempenho por variante usando o fluxo já existente (strategy_name salvo no journal)
+- sem alterar app.py
+- sem remover nada existente
