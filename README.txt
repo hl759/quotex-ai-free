@@ -1,7 +1,9 @@
 Substitua estes arquivos:
 - app.py
-- capital_auto_tracker.py
 - capital_state.json
 
-Baseado no seu app.py real enviado na conversa, com painel de capital no layout + auto tracker integrado.
-Mantém app = Flask(__name__) e preserva o que já funciona.
+Baseado no app.py enviado pelo usuário, com tudo integrado no próprio app:
+- painel de capital no layout
+- rotas GET/POST de capital
+- auto tracker integrado dentro do app.py
+- compatível com Render (app = Flask(__name__))

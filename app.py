@@ -14,7 +14,6 @@ from result_engine import ResultEngine
 from strategy_lab import StrategyLab
 from journal_manager import JournalManager
 from decision_engine import DecisionEngine
-from capital_auto_tracker import CapitalAutoTracker
 
 try:
     from adaptive_engine import AdaptiveEngine
@@ -30,6 +29,7 @@ try:
     from market_profile_engine import MarketProfileEngine
 except Exception:
     MarketProfileEngine = None
+
 from config import ASSETS, SCAN_INTERVAL_SECONDS
 
 app = Flask(__name__)
@@ -46,7 +46,6 @@ adaptive_engine = AdaptiveEngine() if AdaptiveEngine else None
 memory_engine = MemoryEngine() if MemoryEngine else None
 market_profile_engine = MarketProfileEngine() if MarketProfileEngine else None
 journal = JournalManager()
-capital_auto_tracker = CapitalAutoTracker()
 
 STATE_DIR = "/tmp/nexus_state"
 LATEST_SIGNALS_FILE = os.path.join(STATE_DIR, "latest_signals.json")
@@ -57,11 +56,11 @@ PENDING_DECISIONS_FILE = os.path.join(STATE_DIR, "pending_decisions.json")
 CAPITAL_STATE_FILE = os.path.join(STATE_DIR, "capital_state.json")
 
 os.makedirs(STATE_DIR, exist_ok=True)
-ensure_capital_state()
 
 scan_count = 0
 scanner_started = False
 scanner_lock = threading.Lock()
+
 
 def read_json(path, default):
     try:
@@ -69,6 +68,7 @@ def read_json(path, default):
             return json.load(f)
     except Exception:
         return default
+
 
 def write_json(path, data):
     tmp = path + ".tmp"
@@ -91,13 +91,15 @@ def ensure_capital_state():
         current = dict(default_state)
     for key, value in default_state.items():
         current.setdefault(key, value)
-    if current["capital_peak"] < current["capital_current"]:
-        current["capital_peak"] = current["capital_current"]
+    if float(current.get("capital_peak", 0.0) or 0.0) < float(current.get("capital_current", 0.0) or 0.0):
+        current["capital_peak"] = float(current.get("capital_current", 0.0) or 0.0)
     write_json(CAPITAL_STATE_FILE, current)
     return current
 
+
 def load_capital_state():
     return ensure_capital_state()
+
 
 def save_capital_state(data):
     current = ensure_capital_state()
@@ -114,8 +116,88 @@ def save_capital_state(data):
     write_json(CAPITAL_STATE_FILE, merged)
     return merged
 
+
+class CapitalAutoTracker:
+    def __init__(self):
+        self.data_dir = os.environ.get("ALPHA_HIVE_DATA_DIR", "/opt/render/project/src/data")
+        self.journal_file = os.path.join(self.data_dir, "alpha_hive_journal.json")
+
+    def _load_journal(self):
+        data = read_json(self.journal_file, [])
+        return data if isinstance(data, list) else []
+
+    def _result_value(self, trade):
+        return str(trade.get("result", "")).upper()
+
+    def _today_key(self):
+        return datetime.utcnow().strftime("%Y-%m-%d")
+
+    def _trade_date_key(self, trade):
+        explicit = trade.get("date")
+        if explicit:
+            return str(explicit)
+        return self._today_key()
+
+    def _valid_trades(self, journal_rows):
+        return [t for t in journal_rows if self._result_value(t) in ("WIN", "LOSS")]
+
+    def _compute_streak(self, valid_trades):
+        if not valid_trades:
+            return 0
+        streak = 0
+        for trade in valid_trades:
+            result = self._result_value(trade)
+            if result == "WIN":
+                if streak >= 0:
+                    streak += 1
+                else:
+                    break
+            elif result == "LOSS":
+                if streak <= 0:
+                    streak -= 1
+                else:
+                    break
+        return streak
+
+    def _compute_daily_pnl(self, valid_trades, capital_current):
+        today = self._today_key()
+        todays = [t for t in valid_trades if self._trade_date_key(t) == today]
+        if not todays or capital_current <= 0:
+            return 0.0
+
+        # aproximação neutra de risco diário
+        unit_risk = max(1.0, round(capital_current * 0.01, 2))
+        pnl = 0.0
+        for trade in todays:
+            pnl += unit_risk if self._result_value(trade) == "WIN" else -unit_risk
+        return round(pnl, 2)
+
+    def update(self):
+        state = load_capital_state()
+        journal_rows = self._load_journal()
+        valid = self._valid_trades(journal_rows)
+
+        capital_current = float(state.get("capital_current", 0.0) or 0.0)
+        capital_peak = float(state.get("capital_peak", 0.0) or 0.0)
+
+        state["daily_pnl"] = self._compute_daily_pnl(valid, capital_current)
+        state["streak"] = self._compute_streak(valid)
+
+        if capital_current > capital_peak:
+            capital_peak = capital_current
+        state["capital_peak"] = round(capital_peak, 2)
+
+        write_json(CAPITAL_STATE_FILE, state)
+        return state
+
+
+capital_auto_tracker = CapitalAutoTracker()
+ensure_capital_state()
+
+
 def now_brazil():
     return datetime.utcnow() - timedelta(hours=3)
+
 
 def normalize_signals(signals):
     out = []
@@ -143,6 +225,7 @@ def normalize_signals(signals):
         })
     return out
 
+
 def decorate_decision(decision):
     analysis = now_brazil()
     entry = analysis + timedelta(minutes=1)
@@ -169,8 +252,10 @@ def decorate_decision(decision):
         "evolution_variant": decision.get("evolution_variant", "base")
     }
 
+
 def _decision_uid(item):
     return f"{item.get('asset','N/A')}-{item.get('direction','N/A')}-{item.get('analysis_time','--:--')}-{item.get('entry_time','--:--')}-{item.get('expiration','--:--')}"
+
 
 def enqueue_pending_decision(current_decision, matched_market):
     if not current_decision:
@@ -261,6 +346,7 @@ def register_all_learning_outputs(signal, result_data):
     except Exception as e:
         print("Journal add_trade error:", e, flush=True)
 
+
 def process_pending_decisions(market):
     pending = read_json(PENDING_DECISIONS_FILE, [])
     if not pending:
@@ -288,11 +374,13 @@ def process_pending_decisions(market):
 
     write_json(PENDING_DECISIONS_FILE, still_pending)
 
+
 def save_state(signals, history, current_decision, scans):
     write_json(LATEST_SIGNALS_FILE, signals)
     write_json(SIGNAL_HISTORY_FILE, history[:50])
     write_json(CURRENT_DECISION_FILE, current_decision)
     write_json(META_FILE, {"last_scan": now_brazil().strftime("%H:%M:%S"), "scan_count": scans})
+
 
 def load_state():
     signals = read_json(LATEST_SIGNALS_FILE, [])
@@ -301,8 +389,10 @@ def load_state():
     meta = read_json(META_FILE, {"last_scan": "--", "scan_count": 0})
     return signals, history, current_decision, meta
 
+
 def get_snapshot():
     signals, history, current_decision, meta = load_state()
+    capital_auto_tracker.update()
     return {
         "signals": signals,
         "history": history[:20],
@@ -319,6 +409,7 @@ def get_snapshot():
         "capital_state": load_capital_state(),
     }
 
+
 def scanner_loop():
     global scan_count
     while True:
@@ -332,10 +423,13 @@ def scanner_loop():
 
             decision_candidates = []
             analysis_time = now_brazil().strftime("%H:%M")
+            capital_state = load_capital_state()
+
             for item in market:
                 indicators = dict(item.get("indicators", {}))
                 indicators["analysis_time"] = analysis_time
-                indicators.update(load_capital_state())
+                indicators["weekday"] = now_brazil().weekday()
+                indicators.update(capital_state)
                 decision = decision_engine.decide(item.get("asset"), indicators)
                 decision["provider"] = item.get("provider", "auto")
                 decision_candidates.append((decision, item))
@@ -366,11 +460,15 @@ def scanner_loop():
             scan_count += 1
             save_state(signals, history, current_decision, scan_count)
 
-            print(f"Scan #{scan_count} | Signals: {len(signals)} | Decision: {current_decision['decision']} | Asset: {current_decision['asset']}", flush=True)
+            print(
+                f"Scan #{scan_count} | Signals: {len(signals)} | Decision: {current_decision['decision']} | Asset: {current_decision['asset']}",
+                flush=True
+            )
             time.sleep(SCAN_INTERVAL_SECONDS)
         except Exception as e:
             print("Scanner error:", e, flush=True)
             time.sleep(2)
+
 
 def ensure_scanner_started():
     global scanner_started
@@ -381,6 +479,7 @@ def ensure_scanner_started():
             return
         threading.Thread(target=scanner_loop, daemon=True).start()
         scanner_started = True
+
 
 HTML_PAGE = """
 <!DOCTYPE html>
@@ -400,13 +499,14 @@ body{margin:0;font-family:Arial,sans-serif;background:linear-gradient(180deg,#04
 .title{font-size:30px;font-weight:900}.title .ai{color:#25e6c4}.subtitle{color:#8fa7c4;margin-top:8px;font-size:13px;letter-spacing:1.8px}
 .right-box{display:flex;flex-direction:column;gap:10px}.live{min-width:110px;text-align:center;padding:16px 14px;border-radius:999px;border:1px solid rgba(37,230,196,.24);background:rgba(14,54,55,.45);color:#86ffe8;font-size:18px;font-weight:800}.refresh-btn{border:none;border-radius:999px;padding:12px 16px;background:linear-gradient(180deg,#103153 0%,#153d66 100%);color:#25e6c4;font-size:14px;font-weight:800;cursor:pointer}
 .metrics{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-top:18px}.metric{background:#132b49;border-radius:18px;padding:18px}.metric-label,.section-sub,.mini-label,.muted{color:#8fa7c4}.metric-value{font-size:24px;font-weight:800}
-.tabs{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-top:18px}.tab-btn{border:none;border-radius:18px;padding:16px 10px;background:#132b49;color:#a8bdd8;font-size:14px;font-weight:800;cursor:pointer}.tab-btn.active{background:linear-gradient(180deg,#103153 0%,#153d66 100%);color:#25e6c4}
+.tabs{display:grid;grid-template-columns:repeat(7,1fr);gap:12px;margin-top:18px}.tab-btn{border:none;border-radius:18px;padding:16px 10px;background:#132b49;color:#a8bdd8;font-size:14px;font-weight:800;cursor:pointer}.tab-btn.active{background:linear-gradient(180deg,#103153 0%,#153d66 100%);color:#25e6c4}
 .section-title{font-size:17px;font-weight:800;margin-bottom:8px}.status-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.status-item,.signal-card,.list-card,.decision-card{background:#132b49;border-radius:18px;padding:14px;margin-top:12px}
 .signal-head,.decision-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}.asset{font-size:22px;font-weight:900}
 .badge{padding:9px 14px;border-radius:999px;font-size:13px;font-weight:900}.call{background:linear-gradient(135deg,#25e6a0,#8affcc);color:#053324}.put{background:linear-gradient(135deg,#ff7a8a,#ffc0c8);color:#3f1119}.hold{background:linear-gradient(135deg,#8c95a6,#d2d7df);color:#20242b}
 .signal-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.mini{background:#0f223a;border-radius:14px;padding:12px}.mini-value{font-size:18px;font-weight:800}.reason{margin-top:14px;background:#0d1c31;border-radius:14px;padding:14px;color:#bdd0e8;line-height:1.6;white-space:normal}
-.empty{text-align:center;color:#9bb2cf;padding:26px 10px}.panel{display:none}.panel.active{display:block}.list-title{font-size:18px;font-weight:800;margin-bottom:6px}.form-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.field{display:flex;flex-direction:column;gap:8px;background:#132b49;border-radius:16px;padding:12px}.field label{font-size:13px;color:#8fa7c4}.field input{width:100%;background:#0f223a;border:1px solid rgba(255,255,255,.08);border-radius:12px;color:#eef6ff;padding:12px;font-size:15px}.save-btn{margin-top:14px;border:none;border-radius:16px;padding:14px 16px;background:linear-gradient(180deg,#103153 0%,#153d66 100%);color:#25e6c4;font-size:15px;font-weight:800;cursor:pointer}.save-status{margin-top:10px;color:#8fa7c4;font-size:14px}
-@media(max-width:640px){.tabs{grid-template-columns:repeat(2,1fr)}.hero-top{align-items:flex-start}.right-box{min-width:120px}}
+.empty{text-align:center;color:#9bb2cf;padding:26px 10px}.panel{display:none}.panel.active{display:block}.list-title{font-size:18px;font-weight:800;margin-bottom:6px}
+.form-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.field{display:flex;flex-direction:column;gap:8px;background:#132b49;border-radius:16px;padding:12px}.field label{font-size:13px;color:#8fa7c4}.field input{width:100%;background:#0f223a;border:1px solid rgba(255,255,255,.08);border-radius:12px;color:#eef6ff;padding:12px;font-size:15px}.save-btn{margin-top:14px;border:none;border-radius:16px;padding:14px 16px;background:linear-gradient(180deg,#103153 0%,#153d66 100%);color:#25e6c4;font-size:15px;font-weight:800;cursor:pointer}.save-status{margin-top:10px;color:#8fa7c4;font-size:14px}
+@media(max-width:640px){.tabs{grid-template-columns:repeat(2,1fr)}.hero-top{align-items:flex-start}.right-box{min-width:120px}.form-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -432,6 +532,7 @@ body{margin:0;font-family:Arial,sans-serif;background:linear-gradient(180deg,#04
 <button class='tab-btn' onclick="showTab('capital', this)">💰 Capital</button>
 </div>
 </div>
+
 <div id='signals' class='panel active'><div class='card'><div class='section-title'>Sinais atuais</div><div class='section-sub'>Fluxo original preservado</div><div id='signals_container'></div></div></div>
 <div id='decision' class='panel'><div class='card'><div class='section-title'>Decisão do momento</div><div class='section-sub'>Alpha Hive AI • motor inteligente de decisão</div><div id='decision_container'></div></div></div>
 <div id='history' class='panel'><div class='card'><div class='section-title'>Histórico recente</div><div class='section-sub'>Últimos sinais salvos</div><div id='history_container'></div></div></div>
@@ -451,16 +552,103 @@ body{margin:0;font-family:Arial,sans-serif;background:linear-gradient(180deg,#04
 <div id='capital_status' class='save-status'></div>
 </div></div>
 </div>
+
 <script>
 const initialSnapshot = {{ snapshot_json|safe }} || null;
-function showTab(tabId, btn){document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));document.getElementById(tabId).classList.add('active');btn.classList.add('active');}
-function escapeHtml(text){if(text===null||text===undefined)return "";return String(text).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;");}
-function formatText(text){return escapeHtml(text).replaceAll("\\n","<br>");}
-function renderSignals(signals){const c=document.getElementById("signals_container");if(!signals||signals.length===0){c.innerHTML='<div class="empty">Nenhum sinal disponível agora.</div>';return;}let h="";signals.forEach(s=>{const bc=s.signal==="CALL"?"call":"put";h+=`<div class="signal-card"><div class="signal-head"><div class="asset">${escapeHtml(s.asset)}</div><div class="badge ${bc}">${escapeHtml(s.signal)}${s.confidence_label ? " • " + escapeHtml(s.confidence_label) : ""}</div></div><div class="signal-grid"><div class="mini"><div class="mini-label">Score</div><div class="mini-value">${escapeHtml(s.score)}</div></div><div class="mini"><div class="mini-label">Confiança</div><div class="mini-value">${escapeHtml(s.confidence)}%</div></div><div class="mini"><div class="mini-label">Análise</div><div class="mini-value">${escapeHtml(s.analysis_time)}</div></div><div class="mini"><div class="mini-label">Entrada</div><div class="mini-value">${escapeHtml(s.entry_time)}</div></div><div class="mini"><div class="mini-label">Expiração</div><div class="mini-value">${escapeHtml(s.expiration)}</div></div><div class="mini"><div class="mini-label">Regime</div><div class="mini-value">${escapeHtml(s.regime)}</div></div></div><div class="reason">${formatText(s.reason_text)}</div></div>`});c.innerHTML=h;}
-function renderDecision(d){const c=document.getElementById("decision_container");if(!d||!d.decision){c.innerHTML='<div class="empty">Sem decisão disponível agora.</div>';return;}let badgeClass="hold";let badgeText=d.decision;if(d.direction==="CALL") badgeClass="call"; else if(d.direction==="PUT") badgeClass="put"; if(d.decision==="NAO_OPERAR") badgeText="NÃO OPERAR"; else if(d.decision==="ENTRADA_FORTE") badgeText=(d.direction||"CALL")+" • FORTE"; else if(d.decision==="ENTRADA_CAUTELA") badgeText=(d.direction||"CALL")+" • CAUTELA"; else if(d.decision==="OBSERVAR") badgeText=(d.direction||"CALL")+" • OBSERVAR"; c.innerHTML=`<div class="decision-card"><div class="decision-head"><div class="asset">${escapeHtml(d.asset||"MERCADO")}</div><div class="badge ${badgeClass}">${escapeHtml(badgeText)}</div></div><div class="signal-grid"><div class="mini"><div class="mini-label">Score</div><div class="mini-value">${escapeHtml(d.score)}</div></div><div class="mini"><div class="mini-label">Confiança</div><div class="mini-value">${escapeHtml(d.confidence)}%</div></div><div class="mini"><div class="mini-label">Análise</div><div class="mini-value">${escapeHtml(d.analysis_time)}</div></div><div class="mini"><div class="mini-label">Entrada</div><div class="mini-value">${escapeHtml(d.entry_time)}</div></div><div class="mini"><div class="mini-label">Expiração</div><div class="mini-value">${escapeHtml(d.expiration)}</div></div><div class="mini"><div class="mini-label">Regime</div><div class="mini-value">${escapeHtml(d.regime)}</div></div></div><div class="reason">${formatText(d.reason_text)}</div></div>`;}
-function renderHistory(history){const c=document.getElementById("history_container");if(!history||history.length===0){c.innerHTML='<div class="empty">Ainda não há histórico salvo.</div>';return;}let h="";history.forEach(x=>{h+=`<div class="list-card"><div class="list-title">${escapeHtml(x.asset)} • ${escapeHtml(x.signal)}</div><div class="muted">Análise: ${escapeHtml(x.analysis_time)}<br>Entrada: ${escapeHtml(x.entry_time)}<br>Expiração: ${escapeHtml(x.expiration)}<br>Score: ${escapeHtml(x.score)} • Confiança: ${escapeHtml(x.confidence)}% • Fonte: ${escapeHtml(x.provider)}</div></div>`});c.innerHTML=h;}
-function renderBestAssets(bestAssets){const c=document.getElementById("assets_container");if(!bestAssets||bestAssets.length===0){c.innerHTML='<div class="empty">Ainda sem dados suficientes.</div>';return;}let h="";bestAssets.forEach(x=>{h+=`<div class="list-card"><div class="list-title">${escapeHtml(x.asset)}</div><div class="muted">Win rate: <b>${escapeHtml(x.winrate)}%</b><br>Trades: <b>${escapeHtml(x.total)}</b><br>Wins: <b>${escapeHtml(x.wins)}</b></div></div>`});c.innerHTML=h;}
-function renderBestHours(bestHours){const c=document.getElementById("hours_container");if(!bestHours||bestHours.length===0){c.innerHTML='<div class="empty">Ainda sem dados suficientes.</div>';return;}let h="";bestHours.forEach(x=>{h+=`<div class="list-card"><div class="list-title">${escapeHtml(x.hour)}</div><div class="muted">Win rate: <b>${escapeHtml(x.winrate)}%</b><br>Trades: <b>${escapeHtml(x.total)}</b><br>Wins: <b>${escapeHtml(x.wins)}</b></div></div>`});c.innerHTML=h;}
+
+function showTab(tabId, btn){
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById(tabId).classList.add('active');
+  btn.classList.add('active');
+}
+
+function escapeHtml(text){
+  if(text===null||text===undefined) return "";
+  return String(text)
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;")
+    .replaceAll("'","&#039;");
+}
+
+function formatText(text){
+  return escapeHtml(text).replaceAll("\\n","<br>");
+}
+
+function renderSignals(signals){
+  const c=document.getElementById("signals_container");
+  if(!signals||signals.length===0){
+    c.innerHTML='<div class="empty">Nenhum sinal disponível agora.</div>';
+    return;
+  }
+  let h="";
+  signals.forEach(s=>{
+    const bc=s.signal==="CALL"?"call":"put";
+    h+=`<div class="signal-card"><div class="signal-head"><div class="asset">${escapeHtml(s.asset)}</div><div class="badge ${bc}">${escapeHtml(s.signal)}${s.confidence_label ? " • " + escapeHtml(s.confidence_label) : ""}</div></div><div class="signal-grid"><div class="mini"><div class="mini-label">Score</div><div class="mini-value">${escapeHtml(s.score)}</div></div><div class="mini"><div class="mini-label">Confiança</div><div class="mini-value">${escapeHtml(s.confidence)}%</div></div><div class="mini"><div class="mini-label">Análise</div><div class="mini-value">${escapeHtml(s.analysis_time)}</div></div><div class="mini"><div class="mini-label">Entrada</div><div class="mini-value">${escapeHtml(s.entry_time)}</div></div><div class="mini"><div class="mini-label">Expiração</div><div class="mini-value">${escapeHtml(s.expiration)}</div></div><div class="mini"><div class="mini-label">Regime</div><div class="mini-value">${escapeHtml(s.regime)}</div></div></div><div class="reason">${formatText(s.reason_text)}</div></div>`;
+  });
+  c.innerHTML=h;
+}
+
+function renderDecision(d){
+  const c=document.getElementById("decision_container");
+  if(!d||!d.decision){
+    c.innerHTML='<div class="empty">Sem decisão disponível agora.</div>';
+    return;
+  }
+  let badgeClass="hold";
+  let badgeText=d.decision;
+  if(d.direction==="CALL") badgeClass="call";
+  else if(d.direction==="PUT") badgeClass="put";
+
+  if(d.decision==="NAO_OPERAR") badgeText="NÃO OPERAR";
+  else if(d.decision==="ENTRADA_FORTE") badgeText=(d.direction||"CALL")+" • FORTE";
+  else if(d.decision==="ENTRADA_CAUTELA") badgeText=(d.direction||"CALL")+" • CAUTELA";
+  else if(d.decision==="OBSERVAR") badgeText=(d.direction||"CALL")+" • OBSERVAR";
+
+  c.innerHTML=`<div class="decision-card"><div class="decision-head"><div class="asset">${escapeHtml(d.asset||"MERCADO")}</div><div class="badge ${badgeClass}">${escapeHtml(badgeText)}</div></div><div class="signal-grid"><div class="mini"><div class="mini-label">Score</div><div class="mini-value">${escapeHtml(d.score)}</div></div><div class="mini"><div class="mini-label">Confiança</div><div class="mini-value">${escapeHtml(d.confidence)}%</div></div><div class="mini"><div class="mini-label">Análise</div><div class="mini-value">${escapeHtml(d.analysis_time)}</div></div><div class="mini"><div class="mini-label">Entrada</div><div class="mini-value">${escapeHtml(d.entry_time)}</div></div><div class="mini"><div class="mini-label">Expiração</div><div class="mini-value">${escapeHtml(d.expiration)}</div></div><div class="mini"><div class="mini-label">Regime</div><div class="mini-value">${escapeHtml(d.regime)}</div></div></div><div class="reason">${formatText(d.reason_text)}</div></div>`;
+}
+
+function renderHistory(history){
+  const c=document.getElementById("history_container");
+  if(!history||history.length===0){
+    c.innerHTML='<div class="empty">Ainda não há histórico salvo.</div>';
+    return;
+  }
+  let h="";
+  history.forEach(x=>{
+    h+=`<div class="list-card"><div class="list-title">${escapeHtml(x.asset)} • ${escapeHtml(x.signal)}</div><div class="muted">Análise: ${escapeHtml(x.analysis_time)}<br>Entrada: ${escapeHtml(x.entry_time)}<br>Expiração: ${escapeHtml(x.expiration)}<br>Score: ${escapeHtml(x.score)} • Confiança: ${escapeHtml(x.confidence)}% • Fonte: ${escapeHtml(x.provider)}</div></div>`;
+  });
+  c.innerHTML=h;
+}
+
+function renderBestAssets(bestAssets){
+  const c=document.getElementById("assets_container");
+  if(!bestAssets||bestAssets.length===0){
+    c.innerHTML='<div class="empty">Ainda sem dados suficientes.</div>';
+    return;
+  }
+  let h="";
+  bestAssets.forEach(x=>{
+    h+=`<div class="list-card"><div class="list-title">${escapeHtml(x.asset)}</div><div class="muted">Win rate: <b>${escapeHtml(x.winrate)}%</b><br>Trades: <b>${escapeHtml(x.total)}</b><br>Wins: <b>${escapeHtml(x.wins)}</b></div></div>`;
+  });
+  c.innerHTML=h;
+}
+
+function renderBestHours(bestHours){
+  const c=document.getElementById("hours_container");
+  if(!bestHours||bestHours.length===0){
+    c.innerHTML='<div class="empty">Ainda sem dados suficientes.</div>';
+    return;
+  }
+  let h="";
+  bestHours.forEach(x=>{
+    h+=`<div class="list-card"><div class="list-title">${escapeHtml(x.hour)}</div><div class="muted">Win rate: <b>${escapeHtml(x.winrate)}%</b><br>Trades: <b>${escapeHtml(x.total)}</b><br>Wins: <b>${escapeHtml(x.wins)}</b></div></div>`;
+  });
+  c.innerHTML=h;
+}
+
 function safeSnapshot(d){
   return {
     signals: Array.isArray(d && d.signals) ? d.signals : [],
@@ -483,8 +671,10 @@ function safeSnapshot(d){
     capital_state: d && d.capital_state ? d.capital_state : {}
   };
 }
+
 function fillCapitalForm(cap){
-  if(!document.getElementById("capital_current")) return;
+  const form = document.getElementById("capital_current");
+  if(!form) return;
   document.getElementById("capital_current").value = cap.capital_current ?? 0;
   document.getElementById("capital_peak").value = cap.capital_peak ?? 0;
   document.getElementById("daily_pnl").value = cap.daily_pnl ?? 0;
@@ -492,6 +682,7 @@ function fillCapitalForm(cap){
   document.getElementById("daily_target_pct").value = cap.daily_target_pct ?? 2.0;
   document.getElementById("daily_stop_pct").value = cap.daily_stop_pct ?? 3.0;
 }
+
 function applySnapshot(d){
   const s = safeSnapshot(d);
   document.getElementById("last_scan").textContent = s.meta.last_scan;
@@ -509,6 +700,7 @@ function applySnapshot(d){
   renderBestHours(s.best_hours);
   fillCapitalForm(s.capital_state || {});
 }
+
 async function refreshSnapshot(){
   const btn = document.getElementById("refreshBtn");
   btn.disabled = true;
@@ -527,12 +719,15 @@ async function refreshSnapshot(){
     btn.textContent = "↻ Atualizar agora";
   },1200);
 }
+
 async function saveCapitalState(){
   const btn = document.getElementById("saveCapitalBtn");
   const status = document.getElementById("capital_status");
   if(!btn || !status) return;
+
   btn.disabled = true;
   status.textContent = "Salvando...";
+
   const payload = {
     capital_current: parseFloat(document.getElementById("capital_current").value || 0),
     capital_peak: parseFloat(document.getElementById("capital_peak").value || 0),
@@ -541,6 +736,7 @@ async function saveCapitalState(){
     daily_target_pct: parseFloat(document.getElementById("daily_target_pct").value || 2),
     daily_stop_pct: parseFloat(document.getElementById("daily_stop_pct").value || 3)
   };
+
   try{
     const r = await fetch("/capital-state", {
       method: "POST",
@@ -555,8 +751,12 @@ async function saveCapitalState(){
     console.error("capital save error", e);
     status.textContent = "Erro ao salvar capital";
   }
-  setTimeout(()=>{btn.disabled = false;},800);
+
+  setTimeout(()=>{
+    btn.disabled = false;
+  },800);
 }
+
 document.addEventListener("DOMContentLoaded", function(){
   try{
     applySnapshot(initialSnapshot);
@@ -571,14 +771,17 @@ document.addEventListener("DOMContentLoaded", function(){
 </html>
 """
 
+
 @app.before_request
 def _boot():
     ensure_scanner_started()
+
 
 @app.route("/")
 def home():
     ensure_scanner_started()
     return render_template_string(HTML_PAGE, snapshot_json=json.dumps(get_snapshot(), ensure_ascii=False))
+
 
 @app.route("/health")
 def health():
@@ -592,23 +795,27 @@ def capital_state_get():
     capital_auto_tracker.update()
     return jsonify(load_capital_state())
 
+
 @app.route("/capital-state", methods=["POST"])
 def capital_state_post():
     ensure_scanner_started()
     payload = request.get_json(silent=True) or {}
-    saved = save_capital_state(payload)
+    save_capital_state(payload)
     capital_auto_tracker.update()
     return jsonify(load_capital_state())
+
 
 @app.route("/snapshot")
 def snapshot():
     ensure_scanner_started()
     return jsonify(get_snapshot())
 
+
 @app.route("/ping")
 def ping():
     ensure_scanner_started()
     return {"status": "ok"}
+
 
 if __name__ == "__main__":
     ensure_scanner_started()
