@@ -3,5 +3,5 @@ Substitua estes arquivos:
 - capital_auto_tracker.py
 - capital_state.json
 
-Esta versão mantém o que já funciona e integra o Capital Auto-Tracker + painel de capital.
-Você pode informar só o saldo atual; o sistema passa a atualizar automaticamente streak, daily_pnl e capital_peak com base no journal.
+Baseado no seu app.py real enviado na conversa, com painel de capital no layout + auto tracker integrado.
+Mantém app = Flask(__name__) e preserva o que já funciona.

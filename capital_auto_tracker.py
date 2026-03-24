@@ -15,8 +15,7 @@ class CapitalAutoTracker:
         try:
             if os.path.exists(path):
                 with open(path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    return data
+                    return json.load(f)
         except Exception:
             pass
         return default

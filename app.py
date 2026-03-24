@@ -1,2 +1,616 @@
-# Cole aqui exatamente o app.py que te enviei anteriormente.
-# (Arquivo preparado para upload direto no GitHub)
+import json
+import os
+import threading
+import time
+from datetime import datetime, timedelta
+from flask import Flask, jsonify, render_template_string, request
+
+from scanner import MarketScanner
+from signal_engine import SignalEngine
+from data_manager import DataManager
+from learning_engine import LearningEngine
+from result_evaluator import ResultEvaluator
+from result_engine import ResultEngine
+from strategy_lab import StrategyLab
+from journal_manager import JournalManager
+from decision_engine import DecisionEngine
+from capital_auto_tracker import CapitalAutoTracker
+
+try:
+    from adaptive_engine import AdaptiveEngine
+except Exception:
+    AdaptiveEngine = None
+
+try:
+    from memory_engine import MemoryEngine
+except Exception:
+    MemoryEngine = None
+
+try:
+    from market_profile_engine import MarketProfileEngine
+except Exception:
+    MarketProfileEngine = None
+from config import ASSETS, SCAN_INTERVAL_SECONDS
+
+app = Flask(__name__)
+
+data_manager = DataManager()
+learning = LearningEngine()
+scanner = MarketScanner(data_manager, learning)
+signal_engine = SignalEngine(learning)
+decision_engine = DecisionEngine(learning)
+result_evaluator = ResultEvaluator()
+result_engine = ResultEngine(result_evaluator)
+strategy_lab = StrategyLab()
+adaptive_engine = AdaptiveEngine() if AdaptiveEngine else None
+memory_engine = MemoryEngine() if MemoryEngine else None
+market_profile_engine = MarketProfileEngine() if MarketProfileEngine else None
+journal = JournalManager()
+capital_auto_tracker = CapitalAutoTracker()
+
+STATE_DIR = "/tmp/nexus_state"
+LATEST_SIGNALS_FILE = os.path.join(STATE_DIR, "latest_signals.json")
+SIGNAL_HISTORY_FILE = os.path.join(STATE_DIR, "history.json")
+META_FILE = os.path.join(STATE_DIR, "meta.json")
+CURRENT_DECISION_FILE = os.path.join(STATE_DIR, "current_decision.json")
+PENDING_DECISIONS_FILE = os.path.join(STATE_DIR, "pending_decisions.json")
+CAPITAL_STATE_FILE = os.path.join(STATE_DIR, "capital_state.json")
+
+os.makedirs(STATE_DIR, exist_ok=True)
+ensure_capital_state()
+
+scan_count = 0
+scanner_started = False
+scanner_lock = threading.Lock()
+
+def read_json(path, default):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+def write_json(path, data):
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+    os.replace(tmp, path)
+
+
+def ensure_capital_state():
+    default_state = {
+        "capital_current": 0.0,
+        "capital_peak": 0.0,
+        "daily_pnl": 0.0,
+        "streak": 0,
+        "daily_target_pct": 2.0,
+        "daily_stop_pct": 3.0
+    }
+    current = read_json(CAPITAL_STATE_FILE, default_state)
+    if not isinstance(current, dict):
+        current = dict(default_state)
+    for key, value in default_state.items():
+        current.setdefault(key, value)
+    if current["capital_peak"] < current["capital_current"]:
+        current["capital_peak"] = current["capital_current"]
+    write_json(CAPITAL_STATE_FILE, current)
+    return current
+
+def load_capital_state():
+    return ensure_capital_state()
+
+def save_capital_state(data):
+    current = ensure_capital_state()
+    merged = {
+        "capital_current": float(data.get("capital_current", current.get("capital_current", 0.0)) or 0.0),
+        "capital_peak": float(data.get("capital_peak", current.get("capital_peak", 0.0)) or 0.0),
+        "daily_pnl": float(data.get("daily_pnl", current.get("daily_pnl", 0.0)) or 0.0),
+        "streak": int(float(data.get("streak", current.get("streak", 0)) or 0)),
+        "daily_target_pct": float(data.get("daily_target_pct", current.get("daily_target_pct", 2.0)) or 2.0),
+        "daily_stop_pct": float(data.get("daily_stop_pct", current.get("daily_stop_pct", 3.0)) or 3.0),
+    }
+    if merged["capital_peak"] < merged["capital_current"]:
+        merged["capital_peak"] = merged["capital_current"]
+    write_json(CAPITAL_STATE_FILE, merged)
+    return merged
+
+def now_brazil():
+    return datetime.utcnow() - timedelta(hours=3)
+
+def normalize_signals(signals):
+    out = []
+    for s in signals:
+        analysis = now_brazil()
+        entry = analysis + timedelta(minutes=1)
+        expiration = entry + timedelta(minutes=1)
+        reason = s.get("reason", [])
+        if isinstance(reason, list):
+            reason_text = "\n".join(["• " + str(r) for r in reason]) if reason else "Sem detalhes"
+        else:
+            reason_text = str(reason)
+        out.append({
+            "asset": s.get("asset", "N/A"),
+            "signal": s.get("signal", "CALL"),
+            "score": s.get("score", 0),
+            "confidence": s.get("confidence", 50),
+            "confidence_label": s.get("confidence_label", "MÉDIO"),
+            "provider": s.get("provider", "auto"),
+            "analysis_time": analysis.strftime("%H:%M"),
+            "entry_time": entry.strftime("%H:%M"),
+            "expiration": expiration.strftime("%H:%M"),
+            "reason_text": reason_text,
+            "regime": s.get("regime", "unknown")
+        })
+    return out
+
+def decorate_decision(decision):
+    analysis = now_brazil()
+    entry = analysis + timedelta(minutes=1)
+    expiration = entry + timedelta(minutes=1)
+    reasons = decision.get("reasons", [])
+    if isinstance(reasons, list):
+        reason_text = "\n".join(["• " + str(r) for r in reasons]) if reasons else "Sem detalhes"
+    else:
+        reason_text = str(reasons)
+    return {
+        "asset": decision.get("asset", "MERCADO"),
+        "decision": decision.get("decision", "NAO_OPERAR"),
+        "direction": decision.get("direction"),
+        "score": decision.get("score", 0),
+        "confidence": decision.get("confidence", 50),
+        "regime": decision.get("regime", "unknown"),
+        "analysis_time": analysis.strftime("%H:%M"),
+        "entry_time": entry.strftime("%H:%M"),
+        "expiration": expiration.strftime("%H:%M"),
+        "reason_text": reason_text,
+        "setup_id": decision.get("setup_id"),
+        "context_id": decision.get("context_id"),
+        "strategy_name": decision.get("strategy_name", "none"),
+        "evolution_variant": decision.get("evolution_variant", "base")
+    }
+
+def _decision_uid(item):
+    return f"{item.get('asset','N/A')}-{item.get('direction','N/A')}-{item.get('analysis_time','--:--')}-{item.get('entry_time','--:--')}-{item.get('expiration','--:--')}"
+
+def enqueue_pending_decision(current_decision, matched_market):
+    if not current_decision:
+        return
+    if current_decision.get("decision") not in ("ENTRADA_FORTE", "ENTRADA_CAUTELA"):
+        return
+    if not matched_market:
+        return
+
+    pending = read_json(PENDING_DECISIONS_FILE, [])
+    existing = {item.get("uid") for item in pending if isinstance(item, dict)}
+
+    record = {
+        "uid": _decision_uid(current_decision),
+        "asset": current_decision.get("asset"),
+        "signal": current_decision.get("direction"),
+        "score": current_decision.get("score", 0),
+        "confidence": current_decision.get("confidence", 0),
+        "analysis_time": current_decision.get("analysis_time"),
+        "entry_time": current_decision.get("entry_time"),
+        "expiration": current_decision.get("expiration"),
+        "setup_id": current_decision.get("setup_id"),
+        "context_id": current_decision.get("context_id"),
+        "strategy_name": current_decision.get("strategy_name", "none"),
+        "evolution_variant": current_decision.get("evolution_variant", "base"),
+        "regime": current_decision.get("regime", "unknown"),
+    }
+
+    if record["uid"] not in existing:
+        pending.append(record)
+        write_json(PENDING_DECISIONS_FILE, pending)
+
+
+def register_all_learning_outputs(signal, result_data):
+    result_value = str(result_data.get("result", "")).upper()
+    setup_id = signal.get("setup_id")
+    context_id = signal.get("context_id")
+    strategy_name = signal.get("strategy_name", "none")
+    regime = signal.get("regime", "unknown")
+
+    try:
+        learning.register_result(signal, result_data)
+    except Exception as e:
+        print("Learning register error:", e, flush=True)
+
+    if setup_id:
+        try:
+            strategy_lab.register_result(setup_id, result_value)
+        except Exception as e:
+            print("StrategyLab register error:", e, flush=True)
+
+    if memory_engine and context_id:
+        try:
+            memory_engine.register_result(context_id, result_value)
+        except Exception as e:
+            print("MemoryEngine register error:", e, flush=True)
+
+    if adaptive_engine:
+        try:
+            adaptive_engine.register_result(strategy_name, regime, result_value)
+        except Exception as e:
+            print("AdaptiveEngine register error:", e, flush=True)
+
+    if market_profile_engine:
+        try:
+            market_profile_engine.register_result(regime, result_value)
+        except Exception as e:
+            print("MarketProfileEngine register error:", e, flush=True)
+
+    journal_payload = {
+        "asset": signal.get("asset"),
+        "signal": signal.get("signal"),
+        "strategy_name": strategy_name,
+        "regime": regime,
+        "analysis_time": signal.get("analysis_time"),
+        "entry_time": signal.get("entry_time"),
+        "expiration": signal.get("expiration"),
+        "score": signal.get("score", 0),
+        "confidence": signal.get("confidence", 0),
+        "result": result_value,
+        "setup_id": setup_id,
+        "context_id": context_id,
+        "evolution_variant": signal.get("evolution_variant", "base"),
+    }
+
+    try:
+        journal.add_trade(journal_payload)
+    except Exception as e:
+        print("Journal add_trade error:", e, flush=True)
+
+def process_pending_decisions(market):
+    pending = read_json(PENDING_DECISIONS_FILE, [])
+    if not pending:
+        return
+
+    now_str = now_brazil().strftime("%H:%M")
+    still_pending = []
+
+    for signal in pending:
+        expiration = str(signal.get("expiration", "99:99"))
+        if expiration > now_str:
+            still_pending.append(signal)
+            continue
+
+        matched_asset = next((item for item in market if item.get("asset") == signal.get("asset")), None)
+        if not matched_asset:
+            still_pending.append(signal)
+            continue
+
+        result_data = result_engine.evaluate_expired_signal(signal, matched_asset.get("candles", []))
+        if result_data:
+            register_all_learning_outputs(signal, result_data)
+        else:
+            still_pending.append(signal)
+
+    write_json(PENDING_DECISIONS_FILE, still_pending)
+
+def save_state(signals, history, current_decision, scans):
+    write_json(LATEST_SIGNALS_FILE, signals)
+    write_json(SIGNAL_HISTORY_FILE, history[:50])
+    write_json(CURRENT_DECISION_FILE, current_decision)
+    write_json(META_FILE, {"last_scan": now_brazil().strftime("%H:%M:%S"), "scan_count": scans})
+
+def load_state():
+    signals = read_json(LATEST_SIGNALS_FILE, [])
+    history = read_json(SIGNAL_HISTORY_FILE, [])
+    current_decision = read_json(CURRENT_DECISION_FILE, {})
+    meta = read_json(META_FILE, {"last_scan": "--", "scan_count": 0})
+    return signals, history, current_decision, meta
+
+def get_snapshot():
+    signals, history, current_decision, meta = load_state()
+    return {
+        "signals": signals,
+        "history": history[:20],
+        "current_decision": current_decision,
+        "meta": {
+            "last_scan": meta.get("last_scan", "--"),
+            "scan_count": meta.get("scan_count", 0),
+            "signal_count": len(signals),
+            "asset_count": len(ASSETS),
+        },
+        "learning_stats": journal.stats(),
+        "best_assets": journal.best_assets(),
+        "best_hours": journal.best_hours(),
+        "capital_state": load_capital_state(),
+    }
+
+def scanner_loop():
+    global scan_count
+    while True:
+        try:
+            market = scanner.scan_assets()
+            raw_signals = signal_engine.generate_signals(market)
+            signals = normalize_signals(raw_signals if raw_signals else [])
+
+            process_pending_decisions(market)
+            capital_auto_tracker.update()
+
+            decision_candidates = []
+            analysis_time = now_brazil().strftime("%H:%M")
+            for item in market:
+                indicators = dict(item.get("indicators", {}))
+                indicators["analysis_time"] = analysis_time
+                indicators.update(load_capital_state())
+                decision = decision_engine.decide(item.get("asset"), indicators)
+                decision["provider"] = item.get("provider", "auto")
+                decision_candidates.append((decision, item))
+
+            if decision_candidates:
+                decision_candidates.sort(key=lambda x: (x[0].get("score", 0), x[0].get("confidence", 0)), reverse=True)
+                best_decision_raw, matched_market = decision_candidates[0]
+            else:
+                best_decision_raw, matched_market = {
+                    "asset": "MERCADO",
+                    "decision": "NAO_OPERAR",
+                    "direction": None,
+                    "score": 0,
+                    "confidence": 50,
+                    "regime": "unknown",
+                    "reasons": ["Sem dados suficientes no momento"],
+                    "setup_id": None,
+                    "strategy_name": "none"
+                }, None
+
+            current_decision = decorate_decision(best_decision_raw)
+            enqueue_pending_decision(current_decision, matched_market)
+
+            history = read_json(SIGNAL_HISTORY_FILE, [])
+            if signals:
+                history = signals + history
+
+            scan_count += 1
+            save_state(signals, history, current_decision, scan_count)
+
+            print(f"Scan #{scan_count} | Signals: {len(signals)} | Decision: {current_decision['decision']} | Asset: {current_decision['asset']}", flush=True)
+            time.sleep(SCAN_INTERVAL_SECONDS)
+        except Exception as e:
+            print("Scanner error:", e, flush=True)
+            time.sleep(2)
+
+def ensure_scanner_started():
+    global scanner_started
+    if scanner_started:
+        return
+    with scanner_lock:
+        if scanner_started:
+            return
+        threading.Thread(target=scanner_loop, daemon=True).start()
+        scanner_started = True
+
+HTML_PAGE = """
+<!DOCTYPE html>
+<html lang='pt-BR'>
+<head>
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0'>
+<title>Alpha Hive AI • Inteligência Coletiva</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,sans-serif;background:linear-gradient(180deg,#04101d 0%,#07192e 100%);color:#eef6ff}
+.app{max-width:780px;margin:0 auto;padding:18px}
+.hero,.card{background:linear-gradient(180deg,#0a1d33 0%,#0b2340 100%);border:1px solid rgba(80,220,255,.10);border-radius:28px;padding:18px;margin-bottom:18px;box-shadow:0 12px 40px rgba(0,0,0,.28)}
+.hero-top{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.brand{display:flex;align-items:center;gap:14px}
+.logo{width:62px;height:62px;border-radius:18px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#6c63ff,#24e5c2);font-size:34px}
+.title{font-size:30px;font-weight:900}.title .ai{color:#25e6c4}.subtitle{color:#8fa7c4;margin-top:8px;font-size:13px;letter-spacing:1.8px}
+.right-box{display:flex;flex-direction:column;gap:10px}.live{min-width:110px;text-align:center;padding:16px 14px;border-radius:999px;border:1px solid rgba(37,230,196,.24);background:rgba(14,54,55,.45);color:#86ffe8;font-size:18px;font-weight:800}.refresh-btn{border:none;border-radius:999px;padding:12px 16px;background:linear-gradient(180deg,#103153 0%,#153d66 100%);color:#25e6c4;font-size:14px;font-weight:800;cursor:pointer}
+.metrics{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-top:18px}.metric{background:#132b49;border-radius:18px;padding:18px}.metric-label,.section-sub,.mini-label,.muted{color:#8fa7c4}.metric-value{font-size:24px;font-weight:800}
+.tabs{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-top:18px}.tab-btn{border:none;border-radius:18px;padding:16px 10px;background:#132b49;color:#a8bdd8;font-size:14px;font-weight:800;cursor:pointer}.tab-btn.active{background:linear-gradient(180deg,#103153 0%,#153d66 100%);color:#25e6c4}
+.section-title{font-size:17px;font-weight:800;margin-bottom:8px}.status-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.status-item,.signal-card,.list-card,.decision-card{background:#132b49;border-radius:18px;padding:14px;margin-top:12px}
+.signal-head,.decision-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}.asset{font-size:22px;font-weight:900}
+.badge{padding:9px 14px;border-radius:999px;font-size:13px;font-weight:900}.call{background:linear-gradient(135deg,#25e6a0,#8affcc);color:#053324}.put{background:linear-gradient(135deg,#ff7a8a,#ffc0c8);color:#3f1119}.hold{background:linear-gradient(135deg,#8c95a6,#d2d7df);color:#20242b}
+.signal-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.mini{background:#0f223a;border-radius:14px;padding:12px}.mini-value{font-size:18px;font-weight:800}.reason{margin-top:14px;background:#0d1c31;border-radius:14px;padding:14px;color:#bdd0e8;line-height:1.6;white-space:normal}
+.empty{text-align:center;color:#9bb2cf;padding:26px 10px}.panel{display:none}.panel.active{display:block}.list-title{font-size:18px;font-weight:800;margin-bottom:6px}.form-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.field{display:flex;flex-direction:column;gap:8px;background:#132b49;border-radius:16px;padding:12px}.field label{font-size:13px;color:#8fa7c4}.field input{width:100%;background:#0f223a;border:1px solid rgba(255,255,255,.08);border-radius:12px;color:#eef6ff;padding:12px;font-size:15px}.save-btn{margin-top:14px;border:none;border-radius:16px;padding:14px 16px;background:linear-gradient(180deg,#103153 0%,#153d66 100%);color:#25e6c4;font-size:15px;font-weight:800;cursor:pointer}.save-status{margin-top:10px;color:#8fa7c4;font-size:14px}
+@media(max-width:640px){.tabs{grid-template-columns:repeat(2,1fr)}.hero-top{align-items:flex-start}.right-box{min-width:120px}}
+</style>
+</head>
+<body>
+<div class='app'>
+<div class='hero'>
+<div class='hero-top'>
+<div class='brand'><div class='logo'>🐝</div><div><div class='title'>Alpha Hive <span class='ai'>AI</span></div><div class='subtitle'>INTELIGÊNCIA COLETIVA DE MERCADO</div></div></div>
+<div class='right-box'><div class='live'>● LIVE</div><button id='refreshBtn' class='refresh-btn' onclick='refreshSnapshot()'>↻ Atualizar agora</button></div>
+</div>
+<div class='metrics'>
+<div class='metric'><div class='metric-label'>Último scan</div><div class='metric-value' id='last_scan'></div></div>
+<div class='metric'><div class='metric-label'>Scans</div><div class='metric-value' id='scan_count'></div></div>
+<div class='metric'><div class='metric-label'>Sinais</div><div class='metric-value' id='signal_count'></div></div>
+<div class='metric'><div class='metric-label'>Ativos</div><div class='metric-value' id='asset_count'></div></div>
+</div>
+<div class='tabs'>
+<button class='tab-btn active' onclick="showTab('signals', this)">⚡ Sinais</button>
+<button class='tab-btn' onclick="showTab('decision', this)">🧠 Decisão</button>
+<button class='tab-btn' onclick="showTab('history', this)">📋 Histórico</button>
+<button class='tab-btn' onclick="showTab('stats', this)">📊 Stats</button>
+<button class='tab-btn' onclick="showTab('assets', this)">🏆 Ativos</button>
+<button class='tab-btn' onclick="showTab('hours', this)">⏰ Horários</button>
+<button class='tab-btn' onclick="showTab('capital', this)">💰 Capital</button>
+</div>
+</div>
+<div id='signals' class='panel active'><div class='card'><div class='section-title'>Sinais atuais</div><div class='section-sub'>Fluxo original preservado</div><div id='signals_container'></div></div></div>
+<div id='decision' class='panel'><div class='card'><div class='section-title'>Decisão do momento</div><div class='section-sub'>Alpha Hive AI • motor inteligente de decisão</div><div id='decision_container'></div></div></div>
+<div id='history' class='panel'><div class='card'><div class='section-title'>Histórico recente</div><div class='section-sub'>Últimos sinais salvos</div><div id='history_container'></div></div></div>
+<div id='stats' class='panel'><div class='card'><div class='section-title'>Aprendizado</div><div class='section-sub'>Acompanhamento do motor adaptativo</div><div class='status-grid'><div class='status-item'>Total avaliadas<br><b id='stats_total'></b></div><div class='status-item'>Win rate<br><b id='stats_winrate'></b></div><div class='status-item'>Wins<br><b id='stats_wins'></b></div><div class='status-item'>Loss<br><b id='stats_loss'></b></div></div></div></div>
+<div id='assets' class='panel'><div class='card'><div class='section-title'>Melhores ativos</div><div class='section-sub'>Ranking baseado no histórico avaliado</div><div id='assets_container'></div></div></div>
+<div id='hours' class='panel'><div class='card'><div class='section-title'>Melhores horários</div><div class='section-sub'>Ranking por faixa horária</div><div id='hours_container'></div></div></div>
+<div id='capital' class='panel'><div class='card'><div class='section-title'>Capital da IA</div><div class='section-sub'>Informe a banca para a IA gerir como patrimônio próprio</div>
+<div class='form-grid'>
+<div class='field'><label>Capital atual</label><input id='capital_current' type='number' step='0.01' min='0'></div>
+<div class='field'><label>Pico da banca</label><input id='capital_peak' type='number' step='0.01' min='0'></div>
+<div class='field'><label>PnL do dia</label><input id='daily_pnl' type='number' step='0.01'></div>
+<div class='field'><label>Sequência</label><input id='streak' type='number' step='1'></div>
+<div class='field'><label>Meta diária %</label><input id='daily_target_pct' type='number' step='0.1' min='0'></div>
+<div class='field'><label>Stop diário %</label><input id='daily_stop_pct' type='number' step='0.1' min='0'></div>
+</div>
+<button id='saveCapitalBtn' class='save-btn' onclick='saveCapitalState()'>Salvar capital</button>
+<div id='capital_status' class='save-status'></div>
+</div></div>
+</div>
+<script>
+const initialSnapshot = {{ snapshot_json|safe }} || null;
+function showTab(tabId, btn){document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));document.getElementById(tabId).classList.add('active');btn.classList.add('active');}
+function escapeHtml(text){if(text===null||text===undefined)return "";return String(text).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;");}
+function formatText(text){return escapeHtml(text).replaceAll("\\n","<br>");}
+function renderSignals(signals){const c=document.getElementById("signals_container");if(!signals||signals.length===0){c.innerHTML='<div class="empty">Nenhum sinal disponível agora.</div>';return;}let h="";signals.forEach(s=>{const bc=s.signal==="CALL"?"call":"put";h+=`<div class="signal-card"><div class="signal-head"><div class="asset">${escapeHtml(s.asset)}</div><div class="badge ${bc}">${escapeHtml(s.signal)}${s.confidence_label ? " • " + escapeHtml(s.confidence_label) : ""}</div></div><div class="signal-grid"><div class="mini"><div class="mini-label">Score</div><div class="mini-value">${escapeHtml(s.score)}</div></div><div class="mini"><div class="mini-label">Confiança</div><div class="mini-value">${escapeHtml(s.confidence)}%</div></div><div class="mini"><div class="mini-label">Análise</div><div class="mini-value">${escapeHtml(s.analysis_time)}</div></div><div class="mini"><div class="mini-label">Entrada</div><div class="mini-value">${escapeHtml(s.entry_time)}</div></div><div class="mini"><div class="mini-label">Expiração</div><div class="mini-value">${escapeHtml(s.expiration)}</div></div><div class="mini"><div class="mini-label">Regime</div><div class="mini-value">${escapeHtml(s.regime)}</div></div></div><div class="reason">${formatText(s.reason_text)}</div></div>`});c.innerHTML=h;}
+function renderDecision(d){const c=document.getElementById("decision_container");if(!d||!d.decision){c.innerHTML='<div class="empty">Sem decisão disponível agora.</div>';return;}let badgeClass="hold";let badgeText=d.decision;if(d.direction==="CALL") badgeClass="call"; else if(d.direction==="PUT") badgeClass="put"; if(d.decision==="NAO_OPERAR") badgeText="NÃO OPERAR"; else if(d.decision==="ENTRADA_FORTE") badgeText=(d.direction||"CALL")+" • FORTE"; else if(d.decision==="ENTRADA_CAUTELA") badgeText=(d.direction||"CALL")+" • CAUTELA"; else if(d.decision==="OBSERVAR") badgeText=(d.direction||"CALL")+" • OBSERVAR"; c.innerHTML=`<div class="decision-card"><div class="decision-head"><div class="asset">${escapeHtml(d.asset||"MERCADO")}</div><div class="badge ${badgeClass}">${escapeHtml(badgeText)}</div></div><div class="signal-grid"><div class="mini"><div class="mini-label">Score</div><div class="mini-value">${escapeHtml(d.score)}</div></div><div class="mini"><div class="mini-label">Confiança</div><div class="mini-value">${escapeHtml(d.confidence)}%</div></div><div class="mini"><div class="mini-label">Análise</div><div class="mini-value">${escapeHtml(d.analysis_time)}</div></div><div class="mini"><div class="mini-label">Entrada</div><div class="mini-value">${escapeHtml(d.entry_time)}</div></div><div class="mini"><div class="mini-label">Expiração</div><div class="mini-value">${escapeHtml(d.expiration)}</div></div><div class="mini"><div class="mini-label">Regime</div><div class="mini-value">${escapeHtml(d.regime)}</div></div></div><div class="reason">${formatText(d.reason_text)}</div></div>`;}
+function renderHistory(history){const c=document.getElementById("history_container");if(!history||history.length===0){c.innerHTML='<div class="empty">Ainda não há histórico salvo.</div>';return;}let h="";history.forEach(x=>{h+=`<div class="list-card"><div class="list-title">${escapeHtml(x.asset)} • ${escapeHtml(x.signal)}</div><div class="muted">Análise: ${escapeHtml(x.analysis_time)}<br>Entrada: ${escapeHtml(x.entry_time)}<br>Expiração: ${escapeHtml(x.expiration)}<br>Score: ${escapeHtml(x.score)} • Confiança: ${escapeHtml(x.confidence)}% • Fonte: ${escapeHtml(x.provider)}</div></div>`});c.innerHTML=h;}
+function renderBestAssets(bestAssets){const c=document.getElementById("assets_container");if(!bestAssets||bestAssets.length===0){c.innerHTML='<div class="empty">Ainda sem dados suficientes.</div>';return;}let h="";bestAssets.forEach(x=>{h+=`<div class="list-card"><div class="list-title">${escapeHtml(x.asset)}</div><div class="muted">Win rate: <b>${escapeHtml(x.winrate)}%</b><br>Trades: <b>${escapeHtml(x.total)}</b><br>Wins: <b>${escapeHtml(x.wins)}</b></div></div>`});c.innerHTML=h;}
+function renderBestHours(bestHours){const c=document.getElementById("hours_container");if(!bestHours||bestHours.length===0){c.innerHTML='<div class="empty">Ainda sem dados suficientes.</div>';return;}let h="";bestHours.forEach(x=>{h+=`<div class="list-card"><div class="list-title">${escapeHtml(x.hour)}</div><div class="muted">Win rate: <b>${escapeHtml(x.winrate)}%</b><br>Trades: <b>${escapeHtml(x.total)}</b><br>Wins: <b>${escapeHtml(x.wins)}</b></div></div>`});c.innerHTML=h;}
+function safeSnapshot(d){
+  return {
+    signals: Array.isArray(d && d.signals) ? d.signals : [],
+    history: Array.isArray(d && d.history) ? d.history : [],
+    current_decision: d && d.current_decision ? d.current_decision : {},
+    meta: {
+      last_scan: d && d.meta && d.meta.last_scan ? d.meta.last_scan : "--",
+      scan_count: d && d.meta && typeof d.meta.scan_count !== "undefined" ? d.meta.scan_count : 0,
+      signal_count: d && d.meta && typeof d.meta.signal_count !== "undefined" ? d.meta.signal_count : 0,
+      asset_count: d && d.meta && typeof d.meta.asset_count !== "undefined" ? d.meta.asset_count : 0
+    },
+    learning_stats: {
+      total: d && d.learning_stats && typeof d.learning_stats.total !== "undefined" ? d.learning_stats.total : 0,
+      winrate: d && d.learning_stats && typeof d.learning_stats.winrate !== "undefined" ? d.learning_stats.winrate : 0,
+      wins: d && d.learning_stats && typeof d.learning_stats.wins !== "undefined" ? d.learning_stats.wins : 0,
+      loss: d && d.learning_stats && typeof d.learning_stats.loss !== "undefined" ? d.learning_stats.loss : 0
+    },
+    best_assets: Array.isArray(d && d.best_assets) ? d.best_assets : [],
+    best_hours: Array.isArray(d && d.best_hours) ? d.best_hours : [],
+    capital_state: d && d.capital_state ? d.capital_state : {}
+  };
+}
+function fillCapitalForm(cap){
+  if(!document.getElementById("capital_current")) return;
+  document.getElementById("capital_current").value = cap.capital_current ?? 0;
+  document.getElementById("capital_peak").value = cap.capital_peak ?? 0;
+  document.getElementById("daily_pnl").value = cap.daily_pnl ?? 0;
+  document.getElementById("streak").value = cap.streak ?? 0;
+  document.getElementById("daily_target_pct").value = cap.daily_target_pct ?? 2.0;
+  document.getElementById("daily_stop_pct").value = cap.daily_stop_pct ?? 3.0;
+}
+function applySnapshot(d){
+  const s = safeSnapshot(d);
+  document.getElementById("last_scan").textContent = s.meta.last_scan;
+  document.getElementById("scan_count").textContent = s.meta.scan_count;
+  document.getElementById("signal_count").textContent = s.meta.signal_count;
+  document.getElementById("asset_count").textContent = s.meta.asset_count;
+  document.getElementById("stats_total").textContent = s.learning_stats.total;
+  document.getElementById("stats_winrate").textContent = s.learning_stats.winrate + "%";
+  document.getElementById("stats_wins").textContent = s.learning_stats.wins;
+  document.getElementById("stats_loss").textContent = s.learning_stats.loss;
+  renderSignals(s.signals);
+  renderDecision(s.current_decision);
+  renderHistory(s.history);
+  renderBestAssets(s.best_assets);
+  renderBestHours(s.best_hours);
+  fillCapitalForm(s.capital_state || {});
+}
+async function refreshSnapshot(){
+  const btn = document.getElementById("refreshBtn");
+  btn.disabled = true;
+  btn.textContent = "Atualizando...";
+  try{
+    const r = await fetch("/snapshot", {cache:"no-store"});
+    const d = await r.json();
+    applySnapshot(d);
+    btn.textContent = "✓ Atualizado";
+  }catch(e){
+    console.error("snapshot error", e);
+    btn.textContent = "Erro ao atualizar";
+  }
+  setTimeout(()=>{
+    btn.disabled = false;
+    btn.textContent = "↻ Atualizar agora";
+  },1200);
+}
+async function saveCapitalState(){
+  const btn = document.getElementById("saveCapitalBtn");
+  const status = document.getElementById("capital_status");
+  if(!btn || !status) return;
+  btn.disabled = true;
+  status.textContent = "Salvando...";
+  const payload = {
+    capital_current: parseFloat(document.getElementById("capital_current").value || 0),
+    capital_peak: parseFloat(document.getElementById("capital_peak").value || 0),
+    daily_pnl: parseFloat(document.getElementById("daily_pnl").value || 0),
+    streak: parseInt(document.getElementById("streak").value || 0),
+    daily_target_pct: parseFloat(document.getElementById("daily_target_pct").value || 2),
+    daily_stop_pct: parseFloat(document.getElementById("daily_stop_pct").value || 3)
+  };
+  try{
+    const r = await fetch("/capital-state", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify(payload)
+    });
+    const d = await r.json();
+    fillCapitalForm(d);
+    status.textContent = "Capital salvo com sucesso";
+    setTimeout(refreshSnapshot, 300);
+  }catch(e){
+    console.error("capital save error", e);
+    status.textContent = "Erro ao salvar capital";
+  }
+  setTimeout(()=>{btn.disabled = false;},800);
+}
+document.addEventListener("DOMContentLoaded", function(){
+  try{
+    applySnapshot(initialSnapshot);
+  }catch(e){
+    console.error("initial snapshot error", e);
+    applySnapshot(null);
+  }
+  setTimeout(refreshSnapshot, 400);
+});
+</script>
+</body>
+</html>
+"""
+
+@app.before_request
+def _boot():
+    ensure_scanner_started()
+
+@app.route("/")
+def home():
+    ensure_scanner_started()
+    return render_template_string(HTML_PAGE, snapshot_json=json.dumps(get_snapshot(), ensure_ascii=False))
+
+@app.route("/health")
+def health():
+    ensure_scanner_started()
+    return {"status": "running"}
+
+
+@app.route("/capital-state", methods=["GET"])
+def capital_state_get():
+    ensure_scanner_started()
+    capital_auto_tracker.update()
+    return jsonify(load_capital_state())
+
+@app.route("/capital-state", methods=["POST"])
+def capital_state_post():
+    ensure_scanner_started()
+    payload = request.get_json(silent=True) or {}
+    saved = save_capital_state(payload)
+    capital_auto_tracker.update()
+    return jsonify(load_capital_state())
+
+@app.route("/snapshot")
+def snapshot():
+    ensure_scanner_started()
+    return jsonify(get_snapshot())
+
+@app.route("/ping")
+def ping():
+    ensure_scanner_started()
+    return {"status": "ok"}
+
+if __name__ == "__main__":
+    ensure_scanner_started()
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
