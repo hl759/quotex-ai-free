@@ -12,23 +12,9 @@ from learning_engine import LearningEngine
 from result_evaluator import ResultEvaluator
 from result_engine import ResultEngine
 from strategy_lab import StrategyLab
+from adaptive_engine import AdaptiveEngine
 from journal_manager import JournalManager
 from decision_engine import DecisionEngine
-
-try:
-    from adaptive_engine import AdaptiveEngine
-except Exception:
-    AdaptiveEngine = None
-
-try:
-    from memory_engine import MemoryEngine
-except Exception:
-    MemoryEngine = None
-
-try:
-    from market_profile_engine import MarketProfileEngine
-except Exception:
-    MarketProfileEngine = None
 from config import ASSETS, SCAN_INTERVAL_SECONDS
 
 app = Flask(__name__)
@@ -41,12 +27,11 @@ decision_engine = DecisionEngine(learning)
 result_evaluator = ResultEvaluator()
 result_engine = ResultEngine(result_evaluator)
 strategy_lab = StrategyLab()
-adaptive_engine = AdaptiveEngine() if AdaptiveEngine else None
-memory_engine = MemoryEngine() if MemoryEngine else None
-market_profile_engine = MarketProfileEngine() if MarketProfileEngine else None
+adaptive_engine = AdaptiveEngine()
 journal = JournalManager()
 
 STATE_DIR = "/tmp/nexus_state"
+CAPITAL_STATE_FILE = os.path.join(STATE_DIR, "capital_state.json")
 LATEST_SIGNALS_FILE = os.path.join(STATE_DIR, "latest_signals.json")
 SIGNAL_HISTORY_FILE = os.path.join(STATE_DIR, "history.json")
 META_FILE = os.path.join(STATE_DIR, "meta.json")
@@ -54,6 +39,7 @@ CURRENT_DECISION_FILE = os.path.join(STATE_DIR, "current_decision.json")
 PENDING_DECISIONS_FILE = os.path.join(STATE_DIR, "pending_decisions.json")
 
 os.makedirs(STATE_DIR, exist_ok=True)
+ensure_capital_state()
 
 scan_count = 0
 scanner_started = False
@@ -71,6 +57,27 @@ def write_json(path, data):
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False)
     os.replace(tmp, path)
+
+
+def ensure_capital_state():
+    default_state = {
+        "capital_current": 0.0,
+        "capital_peak": 0.0,
+        "daily_pnl": 0.0,
+        "streak": 0,
+        "daily_target_pct": 2.0,
+        "daily_stop_pct": 3.0
+    }
+    current = read_json(CAPITAL_STATE_FILE, default_state)
+    if not isinstance(current, dict):
+        current = default_state
+    for key, value in default_state.items():
+        current.setdefault(key, value)
+    write_json(CAPITAL_STATE_FILE, current)
+    return current
+
+def load_capital_state():
+    return ensure_capital_state()
 
 def now_brazil():
     return datetime.utcnow() - timedelta(hours=3)
@@ -122,9 +129,7 @@ def decorate_decision(decision):
         "expiration": expiration.strftime("%H:%M"),
         "reason_text": reason_text,
         "setup_id": decision.get("setup_id"),
-        "context_id": decision.get("context_id"),
-        "strategy_name": decision.get("strategy_name", "none"),
-        "evolution_variant": decision.get("evolution_variant", "base")
+        "strategy_name": decision.get("strategy_name", "none")
     }
 
 def _decision_uid(item):
@@ -151,73 +156,13 @@ def enqueue_pending_decision(current_decision, matched_market):
         "entry_time": current_decision.get("entry_time"),
         "expiration": current_decision.get("expiration"),
         "setup_id": current_decision.get("setup_id"),
-        "context_id": current_decision.get("context_id"),
         "strategy_name": current_decision.get("strategy_name", "none"),
-        "evolution_variant": current_decision.get("evolution_variant", "base"),
         "regime": current_decision.get("regime", "unknown"),
     }
 
     if record["uid"] not in existing:
         pending.append(record)
         write_json(PENDING_DECISIONS_FILE, pending)
-
-
-def register_all_learning_outputs(signal, result_data):
-    result_value = str(result_data.get("result", "")).upper()
-    setup_id = signal.get("setup_id")
-    context_id = signal.get("context_id")
-    strategy_name = signal.get("strategy_name", "none")
-    regime = signal.get("regime", "unknown")
-
-    try:
-        learning.register_result(signal, result_data)
-    except Exception as e:
-        print("Learning register error:", e, flush=True)
-
-    if setup_id:
-        try:
-            strategy_lab.register_result(setup_id, result_value)
-        except Exception as e:
-            print("StrategyLab register error:", e, flush=True)
-
-    if memory_engine and context_id:
-        try:
-            memory_engine.register_result(context_id, result_value)
-        except Exception as e:
-            print("MemoryEngine register error:", e, flush=True)
-
-    if adaptive_engine:
-        try:
-            adaptive_engine.register_result(strategy_name, regime, result_value)
-        except Exception as e:
-            print("AdaptiveEngine register error:", e, flush=True)
-
-    if market_profile_engine:
-        try:
-            market_profile_engine.register_result(regime, result_value)
-        except Exception as e:
-            print("MarketProfileEngine register error:", e, flush=True)
-
-    journal_payload = {
-        "asset": signal.get("asset"),
-        "signal": signal.get("signal"),
-        "strategy_name": strategy_name,
-        "regime": regime,
-        "analysis_time": signal.get("analysis_time"),
-        "entry_time": signal.get("entry_time"),
-        "expiration": signal.get("expiration"),
-        "score": signal.get("score", 0),
-        "confidence": signal.get("confidence", 0),
-        "result": result_value,
-        "setup_id": setup_id,
-        "context_id": context_id,
-        "evolution_variant": signal.get("evolution_variant", "base"),
-    }
-
-    try:
-        journal.add_trade(journal_payload)
-    except Exception as e:
-        print("Journal add_trade error:", e, flush=True)
 
 def process_pending_decisions(market):
     pending = read_json(PENDING_DECISIONS_FILE, [])
@@ -240,7 +185,11 @@ def process_pending_decisions(market):
 
         result_data = result_engine.evaluate_expired_signal(signal, matched_asset.get("candles", []))
         if result_data:
-            register_all_learning_outputs(signal, result_data)
+            learning.register_result(signal, result_data)
+            setup_id = signal.get("setup_id")
+            if setup_id:
+                strategy_lab.register_result(setup_id, result_data.get("result"))
+            adaptive_engine.register_result(signal.get("strategy_name", "none"), signal.get("regime", "unknown"), result_data.get("result"))
         else:
             still_pending.append(signal)
 
@@ -274,6 +223,7 @@ def get_snapshot():
         "learning_stats": journal.stats(),
         "best_assets": journal.best_assets(),
         "best_hours": journal.best_hours(),
+        "capital_state": load_capital_state(),
     }
 
 def scanner_loop():
@@ -291,6 +241,7 @@ def scanner_loop():
             for item in market:
                 indicators = dict(item.get("indicators", {}))
                 indicators["analysis_time"] = analysis_time
+                indicators.update(load_capital_state())
                 decision = decision_engine.decide(item.get("asset"), indicators)
                 decision["provider"] = item.get("provider", "auto")
                 decision_candidates.append((decision, item))
@@ -337,31 +288,14 @@ def ensure_scanner_started():
         threading.Thread(target=scanner_loop, daemon=True).start()
         scanner_started = True
 
-HTML_PAGE = """
-<!DOCTYPE html>
-<html lang='pt-BR'>
+HTML_PAGE = '''<!DOCTYPE html>
+<html lang="pt-BR">
 <head>
-<meta charset='UTF-8'>
-<meta name='viewport' content='width=device-width, initial-scale=1.0'>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Alpha Hive AI • Inteligência Coletiva</title>
 <style>
-*{box-sizing:border-box}
-body{margin:0;font-family:Arial,sans-serif;background:linear-gradient(180deg,#04101d 0%,#07192e 100%);color:#eef6ff}
-.app{max-width:780px;margin:0 auto;padding:18px}
-.hero,.card{background:linear-gradient(180deg,#0a1d33 0%,#0b2340 100%);border:1px solid rgba(80,220,255,.10);border-radius:28px;padding:18px;margin-bottom:18px;box-shadow:0 12px 40px rgba(0,0,0,.28)}
-.hero-top{display:flex;justify-content:space-between;align-items:center;gap:12px}
-.brand{display:flex;align-items:center;gap:14px}
-.logo{width:62px;height:62px;border-radius:18px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#6c63ff,#24e5c2);font-size:34px}
-.title{font-size:30px;font-weight:900}.title .ai{color:#25e6c4}.subtitle{color:#8fa7c4;margin-top:8px;font-size:13px;letter-spacing:1.8px}
-.right-box{display:flex;flex-direction:column;gap:10px}.live{min-width:110px;text-align:center;padding:16px 14px;border-radius:999px;border:1px solid rgba(37,230,196,.24);background:rgba(14,54,55,.45);color:#86ffe8;font-size:18px;font-weight:800}.refresh-btn{border:none;border-radius:999px;padding:12px 16px;background:linear-gradient(180deg,#103153 0%,#153d66 100%);color:#25e6c4;font-size:14px;font-weight:800;cursor:pointer}
-.metrics{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-top:18px}.metric{background:#132b49;border-radius:18px;padding:18px}.metric-label,.section-sub,.mini-label,.muted{color:#8fa7c4}.metric-value{font-size:24px;font-weight:800}
-.tabs{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-top:18px}.tab-btn{border:none;border-radius:18px;padding:16px 10px;background:#132b49;color:#a8bdd8;font-size:14px;font-weight:800;cursor:pointer}.tab-btn.active{background:linear-gradient(180deg,#103153 0%,#153d66 100%);color:#25e6c4}
-.section-title{font-size:17px;font-weight:800;margin-bottom:8px}.status-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.status-item,.signal-card,.list-card,.decision-card{background:#132b49;border-radius:18px;padding:14px;margin-top:12px}
-.signal-head,.decision-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}.asset{font-size:22px;font-weight:900}
-.badge{padding:9px 14px;border-radius:999px;font-size:13px;font-weight:900}.call{background:linear-gradient(135deg,#25e6a0,#8affcc);color:#053324}.put{background:linear-gradient(135deg,#ff7a8a,#ffc0c8);color:#3f1119}.hold{background:linear-gradient(135deg,#8c95a6,#d2d7df);color:#20242b}
-.signal-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.mini{background:#0f223a;border-radius:14px;padding:12px}.mini-value{font-size:18px;font-weight:800}.reason{margin-top:14px;background:#0d1c31;border-radius:14px;padding:14px;color:#bdd0e8;line-height:1.6;white-space:normal}
-.empty{text-align:center;color:#9bb2cf;padding:26px 10px}.panel{display:none}.panel.active{display:block}.list-title{font-size:18px;font-weight:800;margin-bottom:6px}
-@media(max-width:640px){.tabs{grid-template-columns:repeat(2,1fr)}.hero-top{align-items:flex-start}.right-box{min-width:120px}}
+*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;background:linear-gradient(180deg,#04101d 0%,#07192e 100%);color:#eef6ff}.app{max-width:780px;margin:0 auto;padding:18px}.hero,.card{background:linear-gradient(180deg,#0a1d33 0%,#0b2340 100%);border:1px solid rgba(80,220,255,.10);border-radius:28px;padding:18px;margin-bottom:18px;box-shadow:0 12px 40px rgba(0,0,0,.28)}.hero-top{display:flex;justify-content:space-between;align-items:center;gap:12px}.brand{display:flex;align-items:center;gap:14px}.logo{width:62px;height:62px;border-radius:18px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#6c63ff,#24e5c2);font-size:34px}.title{font-size:30px;font-weight:900}.title .ai{color:#25e6c4}.subtitle{color:#8fa7c4;margin-top:8px;font-size:13px;letter-spacing:1.8px}.right-box{display:flex;flex-direction:column;gap:10px}.live{min-width:110px;text-align:center;padding:16px 14px;border-radius:999px;border:1px solid rgba(37,230,196,.24);background:rgba(14,54,55,.45);color:#86ffe8;font-size:18px;font-weight:800}.refresh-btn{border:none;border-radius:999px;padding:12px 16px;background:linear-gradient(180deg,#103153 0%,#153d66 100%);color:#25e6c4;font-size:14px;font-weight:800;cursor:pointer}.metrics{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-top:18px}.metric{background:#132b49;border-radius:18px;padding:18px}.metric-label,.section-sub,.mini-label,.muted{color:#8fa7c4}.metric-value{font-size:24px;font-weight:800}.tabs{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-top:18px}.tab-btn{border:none;border-radius:18px;padding:16px 10px;background:#132b49;color:#a8bdd8;font-size:14px;font-weight:800;cursor:pointer}.tab-btn.active{background:linear-gradient(180deg,#103153 0%,#153d66 100%);color:#25e6c4}.section-title{font-size:17px;font-weight:800;margin-bottom:8px}.status-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.status-item,.signal-card,.list-card,.decision-card{background:#132b49;border-radius:18px;padding:14px;margin-top:12px}.signal-head,.decision-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}.asset{font-size:22px;font-weight:900}.badge{padding:9px 14px;border-radius:999px;font-size:13px;font-weight:900}.call{background:linear-gradient(135deg,#25e6a0,#8affcc);color:#053324}.put{background:linear-gradient(135deg,#ff7a8a,#ffc0c8);color:#3f1119}.hold{background:linear-gradient(135deg,#8c95a6,#d2d7df);color:#20242b}.signal-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.mini{background:#0f223a;border-radius:14px;padding:12px}.mini-value{font-size:18px;font-weight:800}.reason{margin-top:14px;background:#0d1c31;border-radius:14px;padding:14px;color:#bdd0e8;line-height:1.6;white-space:normal}.empty{text-align:center;color:#9bb2cf;padding:26px 10px}.panel{display:none}.panel.active{display:block}.list-title{font-size:18px;font-weight:800;margin-bottom:6px}@media(max-width:640px){.tabs{grid-template-columns:repeat(2,1fr)}.hero-top{align-items:flex-start}.right-box{min-width:120px}}
 </style>
 </head>
 <body>
@@ -394,83 +328,21 @@ body{margin:0;font-family:Arial,sans-serif;background:linear-gradient(180deg,#04
 <div id='hours' class='panel'><div class='card'><div class='section-title'>Melhores horários</div><div class='section-sub'>Ranking por faixa horária</div><div id='hours_container'></div></div></div>
 </div>
 <script>
-const initialSnapshot = {{ snapshot_json|safe }} || null;
+const initialSnapshot = {{ snapshot_json|safe }};
 function showTab(tabId, btn){document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));document.getElementById(tabId).classList.add('active');btn.classList.add('active');}
 function escapeHtml(text){if(text===null||text===undefined)return "";return String(text).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;");}
-function formatText(text){return escapeHtml(text).replaceAll("\\n","<br>");}
+function formatText(text){return escapeHtml(text).replaceAll("\n","<br>");}
 function renderSignals(signals){const c=document.getElementById("signals_container");if(!signals||signals.length===0){c.innerHTML='<div class="empty">Nenhum sinal disponível agora.</div>';return;}let h="";signals.forEach(s=>{const bc=s.signal==="CALL"?"call":"put";h+=`<div class="signal-card"><div class="signal-head"><div class="asset">${escapeHtml(s.asset)}</div><div class="badge ${bc}">${escapeHtml(s.signal)}${s.confidence_label ? " • " + escapeHtml(s.confidence_label) : ""}</div></div><div class="signal-grid"><div class="mini"><div class="mini-label">Score</div><div class="mini-value">${escapeHtml(s.score)}</div></div><div class="mini"><div class="mini-label">Confiança</div><div class="mini-value">${escapeHtml(s.confidence)}%</div></div><div class="mini"><div class="mini-label">Análise</div><div class="mini-value">${escapeHtml(s.analysis_time)}</div></div><div class="mini"><div class="mini-label">Entrada</div><div class="mini-value">${escapeHtml(s.entry_time)}</div></div><div class="mini"><div class="mini-label">Expiração</div><div class="mini-value">${escapeHtml(s.expiration)}</div></div><div class="mini"><div class="mini-label">Regime</div><div class="mini-value">${escapeHtml(s.regime)}</div></div></div><div class="reason">${formatText(s.reason_text)}</div></div>`});c.innerHTML=h;}
 function renderDecision(d){const c=document.getElementById("decision_container");if(!d||!d.decision){c.innerHTML='<div class="empty">Sem decisão disponível agora.</div>';return;}let badgeClass="hold";let badgeText=d.decision;if(d.direction==="CALL") badgeClass="call"; else if(d.direction==="PUT") badgeClass="put"; if(d.decision==="NAO_OPERAR") badgeText="NÃO OPERAR"; else if(d.decision==="ENTRADA_FORTE") badgeText=(d.direction||"CALL")+" • FORTE"; else if(d.decision==="ENTRADA_CAUTELA") badgeText=(d.direction||"CALL")+" • CAUTELA"; else if(d.decision==="OBSERVAR") badgeText=(d.direction||"CALL")+" • OBSERVAR"; c.innerHTML=`<div class="decision-card"><div class="decision-head"><div class="asset">${escapeHtml(d.asset||"MERCADO")}</div><div class="badge ${badgeClass}">${escapeHtml(badgeText)}</div></div><div class="signal-grid"><div class="mini"><div class="mini-label">Score</div><div class="mini-value">${escapeHtml(d.score)}</div></div><div class="mini"><div class="mini-label">Confiança</div><div class="mini-value">${escapeHtml(d.confidence)}%</div></div><div class="mini"><div class="mini-label">Análise</div><div class="mini-value">${escapeHtml(d.analysis_time)}</div></div><div class="mini"><div class="mini-label">Entrada</div><div class="mini-value">${escapeHtml(d.entry_time)}</div></div><div class="mini"><div class="mini-label">Expiração</div><div class="mini-value">${escapeHtml(d.expiration)}</div></div><div class="mini"><div class="mini-label">Regime</div><div class="mini-value">${escapeHtml(d.regime)}</div></div></div><div class="reason">${formatText(d.reason_text)}</div></div>`;}
 function renderHistory(history){const c=document.getElementById("history_container");if(!history||history.length===0){c.innerHTML='<div class="empty">Ainda não há histórico salvo.</div>';return;}let h="";history.forEach(x=>{h+=`<div class="list-card"><div class="list-title">${escapeHtml(x.asset)} • ${escapeHtml(x.signal)}</div><div class="muted">Análise: ${escapeHtml(x.analysis_time)}<br>Entrada: ${escapeHtml(x.entry_time)}<br>Expiração: ${escapeHtml(x.expiration)}<br>Score: ${escapeHtml(x.score)} • Confiança: ${escapeHtml(x.confidence)}% • Fonte: ${escapeHtml(x.provider)}</div></div>`});c.innerHTML=h;}
 function renderBestAssets(bestAssets){const c=document.getElementById("assets_container");if(!bestAssets||bestAssets.length===0){c.innerHTML='<div class="empty">Ainda sem dados suficientes.</div>';return;}let h="";bestAssets.forEach(x=>{h+=`<div class="list-card"><div class="list-title">${escapeHtml(x.asset)}</div><div class="muted">Win rate: <b>${escapeHtml(x.winrate)}%</b><br>Trades: <b>${escapeHtml(x.total)}</b><br>Wins: <b>${escapeHtml(x.wins)}</b></div></div>`});c.innerHTML=h;}
 function renderBestHours(bestHours){const c=document.getElementById("hours_container");if(!bestHours||bestHours.length===0){c.innerHTML='<div class="empty">Ainda sem dados suficientes.</div>';return;}let h="";bestHours.forEach(x=>{h+=`<div class="list-card"><div class="list-title">${escapeHtml(x.hour)}</div><div class="muted">Win rate: <b>${escapeHtml(x.winrate)}%</b><br>Trades: <b>${escapeHtml(x.total)}</b><br>Wins: <b>${escapeHtml(x.wins)}</b></div></div>`});c.innerHTML=h;}
-function safeSnapshot(d){
-  return {
-    signals: Array.isArray(d && d.signals) ? d.signals : [],
-    history: Array.isArray(d && d.history) ? d.history : [],
-    current_decision: d && d.current_decision ? d.current_decision : {},
-    meta: {
-      last_scan: d && d.meta && d.meta.last_scan ? d.meta.last_scan : "--",
-      scan_count: d && d.meta && typeof d.meta.scan_count !== "undefined" ? d.meta.scan_count : 0,
-      signal_count: d && d.meta && typeof d.meta.signal_count !== "undefined" ? d.meta.signal_count : 0,
-      asset_count: d && d.meta && typeof d.meta.asset_count !== "undefined" ? d.meta.asset_count : 0
-    },
-    learning_stats: {
-      total: d && d.learning_stats && typeof d.learning_stats.total !== "undefined" ? d.learning_stats.total : 0,
-      winrate: d && d.learning_stats && typeof d.learning_stats.winrate !== "undefined" ? d.learning_stats.winrate : 0,
-      wins: d && d.learning_stats && typeof d.learning_stats.wins !== "undefined" ? d.learning_stats.wins : 0,
-      loss: d && d.learning_stats && typeof d.learning_stats.loss !== "undefined" ? d.learning_stats.loss : 0
-    },
-    best_assets: Array.isArray(d && d.best_assets) ? d.best_assets : [],
-    best_hours: Array.isArray(d && d.best_hours) ? d.best_hours : []
-  };
-}
-function applySnapshot(d){
-  const s = safeSnapshot(d);
-  document.getElementById("last_scan").textContent = s.meta.last_scan;
-  document.getElementById("scan_count").textContent = s.meta.scan_count;
-  document.getElementById("signal_count").textContent = s.meta.signal_count;
-  document.getElementById("asset_count").textContent = s.meta.asset_count;
-  document.getElementById("stats_total").textContent = s.learning_stats.total;
-  document.getElementById("stats_winrate").textContent = s.learning_stats.winrate + "%";
-  document.getElementById("stats_wins").textContent = s.learning_stats.wins;
-  document.getElementById("stats_loss").textContent = s.learning_stats.loss;
-  renderSignals(s.signals);
-  renderDecision(s.current_decision);
-  renderHistory(s.history);
-  renderBestAssets(s.best_assets);
-  renderBestHours(s.best_hours);
-}
-async function refreshSnapshot(){
-  const btn = document.getElementById("refreshBtn");
-  btn.disabled = true;
-  btn.textContent = "Atualizando...";
-  try{
-    const r = await fetch("/snapshot", {cache:"no-store"});
-    const d = await r.json();
-    applySnapshot(d);
-    btn.textContent = "✓ Atualizado";
-  }catch(e){
-    console.error("snapshot error", e);
-    btn.textContent = "Erro ao atualizar";
-  }
-  setTimeout(()=>{
-    btn.disabled = false;
-    btn.textContent = "↻ Atualizar agora";
-  },1200);
-}
-document.addEventListener("DOMContentLoaded", function(){
-  try{
-    applySnapshot(initialSnapshot);
-  }catch(e){
-    console.error("initial snapshot error", e);
-    applySnapshot(null);
-  }
-  setTimeout(refreshSnapshot, 400);
-});
+function applySnapshot(d){document.getElementById("last_scan").textContent=d.meta.last_scan;document.getElementById("scan_count").textContent=d.meta.scan_count;document.getElementById("signal_count").textContent=d.meta.signal_count;document.getElementById("asset_count").textContent=d.meta.asset_count;document.getElementById("stats_total").textContent=d.learning_stats.total;document.getElementById("stats_winrate").textContent=d.learning_stats.winrate + "%";document.getElementById("stats_wins").textContent=d.learning_stats.wins;document.getElementById("stats_loss").textContent=d.learning_stats.loss;renderSignals(d.signals);renderDecision(d.current_decision);renderHistory(d.history);renderBestAssets(d.best_assets);renderBestHours(d.best_hours);}
+async function refreshSnapshot(){const btn=document.getElementById("refreshBtn");btn.disabled=true;btn.textContent="Atualizando...";try{const r=await fetch("/snapshot",{cache:"no-store"});const d=await r.json();applySnapshot(d);btn.textContent="✓ Atualizado";}catch(e){btn.textContent="Erro ao atualizar";}setTimeout(()=>{btn.disabled=false;btn.textContent="↻ Atualizar agora";},1200);}
+applySnapshot(initialSnapshot);
 </script>
 </body>
-</html>
-"""
+</html>'''
 
 @app.before_request
 def _boot():

@@ -1,24 +1,20 @@
-V13 ETAPA 2 - BACKEND-ONLY
+V13 ETAPA 3 - BACKEND-ONLY
 
-Substitua estes arquivos:
-- capital_mind_engine.py
-- decision_engine.py
+Arquivos:
+- app.py
+- capital_state.json
 
 O que entra:
-- Capital Mind Engine
-- risco adaptativo baseado em capital, score e confiança
-- metas inteligentes (alvo diário e stop diário)
-- crescimento progressivo e preservação de capital
-- sem alterar app.py
-- sem remover nada existente
+- lugar fixo para informar a banca real da IA
+- leitura automática de capital_state.json no app.py
+- integração automática com o Capital Mind Engine via indicators
+
+Como usar:
+1. Substitua o app.py pelo deste pacote.
+2. Coloque capital_state.json no mesmo ambiente/estado usado pelo app.
+3. Edite os campos:
+   capital_current, capital_peak, daily_pnl, streak, daily_target_pct, daily_stop_pct
 
 Observação:
-Para funcionar no máximo do potencial, você pode passar estes campos em indicators no futuro:
-- capital_current
-- capital_peak
-- daily_pnl
-- streak
-- daily_target_pct
-- daily_stop_pct
-
-Sem esses campos, o módulo permanece neutro e não quebra nada.
+- esta versão não remove nada existente
+- apenas adiciona leitura automática da banca
