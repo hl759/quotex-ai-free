@@ -1,9 +1,13 @@
-Substitua estes arquivos:
-- app.py
-- capital_state.json
+V13 ETAPA 6 - BACKEND-ONLY
 
-Baseado no app.py enviado pelo usuário, com tudo integrado no próprio app:
-- painel de capital no layout
-- rotas GET/POST de capital
-- auto tracker integrado dentro do app.py
-- compatível com Render (app = Flask(__name__))
+Substitua estes arquivos:
+- context_pattern_intelligence_engine.py
+- decision_engine.py
+
+O que entra:
+- aprendizado por padrão de contexto (ativo, horário, regime, estratégia)
+- ajuste dinâmico de score e confiança
+- sem regras fixas
+- integrado ao decision_engine e ao learning já existente
+- sem alterar app.py
+- sem remover nada existente
