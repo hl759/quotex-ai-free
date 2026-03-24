@@ -1,5 +1,14 @@
-V13 ETAPA 4 — PAINEL DE CAPITAL NO LAYOUT
+V13 ETAPA 5 - BACKEND-ONLY
 
-Substitua apenas o app.py por este arquivo.
-O painel de capital foi adicionado ao layout com leitura e gravação automática.
-A IA lê os dados salvos e os injeta no fluxo de decisão sem remover nada existente.
+Arquivos:
+- capital_auto_tracker.py
+
+O que entra:
+- atualização automática de daily_pnl
+- atualização automática de streak
+- atualização automática de capital_peak
+- baseado no journal_manager / alpha_hive_journal.json
+- sem alterar app.py neste pacote
+
+Observação:
+Para ativar, é preciso integrar 2 linhas no app.py conforme INTEGRACAO.txt.
