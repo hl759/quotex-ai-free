@@ -1,13 +1,13 @@
-VERSÃO INTEGRADA SEGURA DO SIGNAL_ENGINE
+SISTEMA HÍBRIDO IMPLEMENTADO
 
-Baseada no seu signal_engine.py real enviado na conversa.
+✔ 1 sinal principal (o melhor)
+✔ 1 backup interno (não exibido)
+✔ IA passa a pensar em plano A + plano B
+✔ Não altera app.py
+✔ Não quebra nada existente
 
-O que foi feito:
-- alinhamento entre aba Sinais e decisão dominante
-- sem rename
-- sem signal_engine_original.py
-- sem alterar app.py
-- mantendo a estrutura do seu SignalEngine
+O backup fica salvo em:
+self.last_backup
 
-Substitua apenas:
-- signal_engine.py
+Futuro:
+Você pode usar isso para auto-reentrada inteligente
