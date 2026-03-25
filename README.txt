@@ -1,20 +1,10 @@
-CORREÇÃO DEFINITIVA DE CONFLUÊNCIA
+AJUSTE: RESUMO NA ABA SINAIS
 
-Problema resolvido:
-- a aba Sinais estava vazia enquanto a aba Decisão mostrava entrada forte
-
-Causa:
-- o signal_engine estava usando lógica separada e mais rígida que o decision_engine
-
-Correção:
-- agora a aba Sinais nasce do MESMO motor da aba Decisão
-- se a Decisão mostrar entrada, a aba Sinais mostrará o mesmo ativo e mesma direção
-- se a Decisão disser não operar, a aba Sinais fica vazia
-
-Efeito:
-- confluência total
-- sem 'Base signal'
-- sem contradição entre abas
+O que muda:
+- aba Sinais agora mostra só um resumo curto dos motivos
+- aba Decisão continua com todos os motivos completos
+- mantém confluência total entre as duas abas
+- mantém modo sniper
 - sem alterar app.py
 
 Substitua apenas:
