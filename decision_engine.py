@@ -1,5 +1,5 @@
 from strategy_engine import StrategyEngine
-from context_pattern_intelligence_engine import ContextPatternIntelligenceEngine
+from meta_context_reasoning_engine import MetaContextReasoningEngine
 
 try:
     from strategy_variants_engine import StrategyVariantsEngine
@@ -52,6 +52,12 @@ except Exception:
     class ContextIntelligenceEngine:
         def get_adjustment(self, *args, **kwargs): return {"score_boost": 0.0, "confidence_shift": 0, "reason": "Contexto neutro", "mode": "neutral"}
 
+try:
+    from context_pattern_intelligence_engine import ContextPatternIntelligenceEngine
+except Exception:
+    class ContextPatternIntelligenceEngine:
+        def get_adjustment(self, *args, **kwargs): return {"score_boost": 0.0, "confidence_shift": 0, "reason": "Context Pattern neutro", "mode": "neutral"}
+
 
 class DecisionEngine:
     def __init__(self, learning):
@@ -66,6 +72,7 @@ class DecisionEngine:
         self.capital_mind_engine = CapitalMindEngine()
         self.context_intelligence_engine = ContextIntelligenceEngine()
         self.context_pattern_engine = ContextPatternIntelligenceEngine()
+        self.meta_context_engine = MetaContextReasoningEngine()
 
     def _build_base_score(self, indicators):
         score = 0.0
@@ -80,6 +87,7 @@ class DecisionEngine:
         moved_fast = indicators.get("moved_too_fast", False)
         is_sideways = indicators.get("is_sideways", False)
         pattern = indicators.get("pattern")
+
         if trend_m1 in ("bull", "bear"):
             score += 1.0; reasons.append("Tendência M1 definida")
         if trend_m5 in ("bull", "bear"):
@@ -168,6 +176,8 @@ class DecisionEngine:
         filtered = []
         pattern_conf_shift = 0
         pattern_mode = "neutral"
+        meta_conf_shift = 0
+        meta_data = {"market_narrative": "none", "trend_quality": "neutra", "breakout_quality": "ausente", "conflict_type": "neutro"}
 
         if candidates:
             fusion_total = 0.0
@@ -196,6 +206,12 @@ class DecisionEngine:
             reasons.append(pattern_adj.get("reason", "Context Pattern neutro"))
             pattern_conf_shift = pattern_adj.get("confidence_shift", 0)
             pattern_mode = pattern_adj.get("mode", "neutral")
+
+            meta_adj = self.meta_context_engine.get_adjustment(asset=asset, strategy_name=leader_name, indicators=indicators, analysis_time=analysis_time)
+            adjusted_score += meta_adj.get("score_boost", 0.0)
+            meta_conf_shift = meta_adj.get("confidence_shift", 0)
+            meta_data = meta_adj.get("meta_context", meta_data)
+            reasons.extend(meta_adj.get("reasons", []))
 
             if leader_name != "none":
                 leader_setup_id = self.strategy_lab.register_setup(asset=asset, strategy_name=leader_name, indicators=indicators, signal=leader.get("direction"), analysis_time=analysis_time)
@@ -248,6 +264,7 @@ class DecisionEngine:
         base_confidence += market_profile.get("confidence_shift", 0)
         base_confidence += context_adj.get("confidence_shift", 0)
         base_confidence += pattern_conf_shift
+        base_confidence += meta_conf_shift
         if consensus_bonus > 0:
             base_confidence += 2
         base_confidence = int(max(50, min(95, base_confidence)))
@@ -284,13 +301,17 @@ class DecisionEngine:
             f"Perfil de mercado: {market_profile.get('mode', 'neutral')}",
             f"Context Intelligence: {context_adj.get('mode', 'neutral')}",
             f"Context Pattern: {pattern_mode}",
+            f"Narrativa de mercado: {meta_data.get('market_narrative', 'none')}",
+            f"Qualidade de tendência: {meta_data.get('trend_quality', 'neutra')}",
+            f"Qualidade de breakout: {meta_data.get('breakout_quality', 'ausente')}",
+            f"Tipo de conflito: {meta_data.get('conflict_type', 'neutro')}",
             f"Estratégia líder: {leader_name}",
             f"Strategy score: {round(leader_score, 2)}",
             f"Evolução: {evolution_variant}",
             f"Capital Mind: {capital_plan.get('phase', 'neutral')}",
             f"Stake sugerida: {capital_plan.get('stake_value', 0.0)}",
             f"Score ajustado: {round(adjusted_score, 2)}",
-            "Modo: v13 etapa 6 context pattern intelligence"
+            "Modo: v13 etapa 8 meta-context reasoning"
         ])
 
         return {
@@ -307,6 +328,10 @@ class DecisionEngine:
             "evolution_variant": evolution_variant,
             "context_intelligence_mode": context_adj.get("mode", "neutral"),
             "context_pattern_mode": pattern_mode,
+            "market_narrative": meta_data.get("market_narrative", "none"),
+            "trend_quality": meta_data.get("trend_quality", "neutra"),
+            "breakout_quality": meta_data.get("breakout_quality", "ausente"),
+            "conflict_type": meta_data.get("conflict_type", "neutro"),
             "capital_phase": capital_plan.get("phase", "neutral"),
             "suggested_stake": capital_plan.get("stake_value", 0.0),
             "risk_pct": capital_plan.get("risk_pct", 0.0),

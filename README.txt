@@ -1,11 +1,16 @@
-AJUSTE: RESUMO NA ABA SINAIS
+V13 ETAPA 8 - BACKEND-ONLY
 
-O que muda:
-- aba Sinais agora mostra só um resumo curto dos motivos
-- aba Decisão continua com todos os motivos completos
-- mantém confluência total entre as duas abas
-- mantém modo sniper
+Substitua estes arquivos:
+- meta_context_reasoning_engine.py
+- decision_engine.py
+
+O que entra:
+- leitura semântica do mercado além dos indicadores
+- narrativa de mercado: compressão, expansão, acumulação, distribuição, exaustão, transição
+- qualidade de tendência: forte, frágil, exausta
+- qualidade de breakout: limpo, duvidoso, armadilha
+- tipo de conflito: útil, transicional, destrutivo
+- ajuste dinâmico de score e confiança
+- aprendizado com histórico via journal_manager
 - sem alterar app.py
-
-Substitua apenas:
-- signal_engine.py
+- sem remover nada existente
