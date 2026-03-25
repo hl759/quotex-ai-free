@@ -1,14 +1,12 @@
-DECISÃO DINÂMICA IMPLEMENTADA
+CORREÇÃO COM CONFLUÊNCIA FORTE
 
-✔ IA reavalia decisão em tempo real
-✔ pode trocar para backup automaticamente
-✔ pode abortar entrada fraca
-✔ mantém estabilidade (não fica trocando toda hora)
+O que foi corrigido:
+- a direção dominante agora vem do DecisionEngine
+- a aba Sinais só mostra sinal alinhado com a aba Decisão
+- híbrido mantido (backup interno)
+- decisão dinâmica mantida
+- modo sniper: retorna só 1 sinal
+- sem alterar app.py
 
-Ações possíveis:
-- KEEP → mantém sinal
-- SWITCH_TO_BACKUP → troca ativo
-- ABORT → não opera
-
-Sem alterar app.py
-Seguro para produção
+Substitua apenas:
+- signal_engine.py
