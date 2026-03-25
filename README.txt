@@ -1,13 +1,14 @@
-SISTEMA HÍBRIDO IMPLEMENTADO
+DECISÃO DINÂMICA IMPLEMENTADA
 
-✔ 1 sinal principal (o melhor)
-✔ 1 backup interno (não exibido)
-✔ IA passa a pensar em plano A + plano B
-✔ Não altera app.py
-✔ Não quebra nada existente
+✔ IA reavalia decisão em tempo real
+✔ pode trocar para backup automaticamente
+✔ pode abortar entrada fraca
+✔ mantém estabilidade (não fica trocando toda hora)
 
-O backup fica salvo em:
-self.last_backup
+Ações possíveis:
+- KEEP → mantém sinal
+- SWITCH_TO_BACKUP → troca ativo
+- ABORT → não opera
 
-Futuro:
-Você pode usar isso para auto-reentrada inteligente
+Sem alterar app.py
+Seguro para produção
