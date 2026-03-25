@@ -1,15 +1,13 @@
-V13 ETAPA 7 - BACKEND-ONLY
+VERSÃO INTEGRADA SEGURA DO SIGNAL_ENGINE
 
-Arquivos:
-- signal_alignment_engine.py
-- signal_engine.py
+Baseada no seu signal_engine.py real enviado na conversa.
 
-IMPORTANTE:
-1. Renomeie seu signal_engine.py atual para signal_engine_original.py
-2. Coloque este novo signal_engine.py no lugar
-
-O que entra:
-- sinais filtrados e priorizados com base na decisão dominante
-- prioridade para sinais alinhados com a aba Decisão
+O que foi feito:
+- alinhamento entre aba Sinais e decisão dominante
+- sem rename
+- sem signal_engine_original.py
 - sem alterar app.py
-- mantém estrutura atual
+- mantendo a estrutura do seu SignalEngine
+
+Substitua apenas:
+- signal_engine.py
