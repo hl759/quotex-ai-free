@@ -5,6 +5,9 @@ STATE_FILE = "/tmp/nexus_learning.json"
 
 
 class LearningEngine:
+    def dynamic_signal_limit(self):
+    return 5
+    
     def should_filter_asset(self, asset):
         asset = self._ensure_asset(asset)
         if not asset:
