@@ -1,13 +1,15 @@
-V13 ETAPA 6 - BACKEND-ONLY
+V13 ETAPA 7 - BACKEND-ONLY
 
-Substitua estes arquivos:
-- context_pattern_intelligence_engine.py
-- decision_engine.py
+Arquivos:
+- signal_alignment_engine.py
+- signal_engine.py
+
+IMPORTANTE:
+1. Renomeie seu signal_engine.py atual para signal_engine_original.py
+2. Coloque este novo signal_engine.py no lugar
 
 O que entra:
-- aprendizado por padrão de contexto (ativo, horário, regime, estratégia)
-- ajuste dinâmico de score e confiança
-- sem regras fixas
-- integrado ao decision_engine e ao learning já existente
+- sinais filtrados e priorizados com base na decisão dominante
+- prioridade para sinais alinhados com a aba Decisão
 - sem alterar app.py
-- sem remover nada existente
+- mantém estrutura atual
