@@ -1,5 +1,5 @@
 from strategy_engine import StrategyEngine
-from meta_context_reasoning_engine import MetaContextReasoningEngine
+from veteran_discernment_layer import VeteranDiscernmentLayer
 
 try:
     from strategy_variants_engine import StrategyVariantsEngine
@@ -58,6 +58,13 @@ except Exception:
     class ContextPatternIntelligenceEngine:
         def get_adjustment(self, *args, **kwargs): return {"score_boost": 0.0, "confidence_shift": 0, "reason": "Context Pattern neutro", "mode": "neutral"}
 
+try:
+    from meta_context_reasoning_engine import MetaContextReasoningEngine
+except Exception:
+    class MetaContextReasoningEngine:
+        def get_adjustment(self, *args, **kwargs):
+            return {"score_boost": 0.0, "confidence_shift": 0, "reasons": ["Meta-contexto neutro"], "meta_context": {"market_narrative": "none", "trend_quality": "neutra", "breakout_quality": "ausente", "conflict_type": "neutro"}}
+
 
 class DecisionEngine:
     def __init__(self, learning):
@@ -73,6 +80,7 @@ class DecisionEngine:
         self.context_intelligence_engine = ContextIntelligenceEngine()
         self.context_pattern_engine = ContextPatternIntelligenceEngine()
         self.meta_context_engine = MetaContextReasoningEngine()
+        self.veteran_discernment = VeteranDiscernmentLayer()
 
     def _build_base_score(self, indicators):
         score = 0.0
@@ -87,7 +95,6 @@ class DecisionEngine:
         moved_fast = indicators.get("moved_too_fast", False)
         is_sideways = indicators.get("is_sideways", False)
         pattern = indicators.get("pattern")
-
         if trend_m1 in ("bull", "bear"):
             score += 1.0; reasons.append("Tendência M1 definida")
         if trend_m5 in ("bull", "bear"):
@@ -178,6 +185,9 @@ class DecisionEngine:
         pattern_mode = "neutral"
         meta_conf_shift = 0
         meta_data = {"market_narrative": "none", "trend_quality": "neutra", "breakout_quality": "ausente", "conflict_type": "neutro"}
+        discernment_quality = "aceitavel"
+        discernment_veto = False
+        anti_pattern_risk = "unknown"
 
         if candidates:
             fusion_total = 0.0
@@ -269,17 +279,27 @@ class DecisionEngine:
             base_confidence += 2
         base_confidence = int(max(50, min(95, base_confidence)))
 
+        discernment = self.veteran_discernment.evaluate(asset=asset, strategy_name=leader_name, indicators=indicators, current_score=adjusted_score, current_confidence=base_confidence, meta_context=meta_data)
+        adjusted_score += discernment.get("score_boost", 0.0)
+        base_confidence += discernment.get("confidence_shift", 0)
+        reasons.extend(discernment.get("reasons", []))
+        discernment_quality = discernment.get("quality", "aceitavel")
+        discernment_veto = discernment.get("veto", False)
+        anti_pattern_risk = discernment.get("anti_pattern_risk", "unknown")
+
         capital_plan = self.capital_mind_engine.get_plan(asset=asset, adjusted_score=adjusted_score, confidence=base_confidence, indicators=indicators)
         adjusted_score += capital_plan.get("score_shift", 0.0)
         reasons.append(capital_plan.get("reason", "Capital Mind neutro"))
 
-        if regime == "chaotic" and adjusted_score < 2.3:
+        if discernment_veto:
             decision, direction = "NAO_OPERAR", None
-        elif adjusted_score >= 3.00:
+        elif regime == "chaotic" and adjusted_score < 2.3:
+            decision, direction = "NAO_OPERAR", None
+        elif adjusted_score >= 3.00 and discernment_quality in ("premium", "bom", "aceitavel"):
             decision, direction = "ENTRADA_FORTE", final_direction
-        elif adjusted_score >= 1.90:
+        elif adjusted_score >= 1.90 and discernment_quality in ("premium", "bom", "aceitavel"):
             decision, direction = "ENTRADA_CAUTELA", final_direction
-        elif adjusted_score >= 1.30:
+        elif adjusted_score >= 1.30 and discernment_quality in ("premium", "bom", "aceitavel"):
             promote = len(active) >= 1 and market_profile.get("mode") != "defensive"
             if evolution_variant == "promovida" and final_direction:
                 promote = True
@@ -305,13 +325,15 @@ class DecisionEngine:
             f"Qualidade de tendência: {meta_data.get('trend_quality', 'neutra')}",
             f"Qualidade de breakout: {meta_data.get('breakout_quality', 'ausente')}",
             f"Tipo de conflito: {meta_data.get('conflict_type', 'neutro')}",
+            f"Discernimento veterano: {discernment_quality}",
+            f"Anti-pattern risk: {anti_pattern_risk}",
             f"Estratégia líder: {leader_name}",
             f"Strategy score: {round(leader_score, 2)}",
             f"Evolução: {evolution_variant}",
             f"Capital Mind: {capital_plan.get('phase', 'neutral')}",
             f"Stake sugerida: {capital_plan.get('stake_value', 0.0)}",
             f"Score ajustado: {round(adjusted_score, 2)}",
-            "Modo: v13 etapa 8 meta-context reasoning"
+            "Modo: v13 etapa 9 veteran discernment"
         ])
 
         return {
@@ -332,6 +354,8 @@ class DecisionEngine:
             "trend_quality": meta_data.get("trend_quality", "neutra"),
             "breakout_quality": meta_data.get("breakout_quality", "ausente"),
             "conflict_type": meta_data.get("conflict_type", "neutro"),
+            "discernment_quality": discernment_quality,
+            "anti_pattern_risk": anti_pattern_risk,
             "capital_phase": capital_plan.get("phase", "neutral"),
             "suggested_stake": capital_plan.get("stake_value", 0.0),
             "risk_pct": capital_plan.get("risk_pct", 0.0),

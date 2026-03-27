@@ -1,16 +1,15 @@
-V13 ETAPA 8 - BACKEND-ONLY
+V13 ETAPA 9 - BACKEND-ONLY
 
 Substitua estes arquivos:
-- meta_context_reasoning_engine.py
+- veteran_discernment_layer.py
 - decision_engine.py
 
 O que entra:
-- leitura semântica do mercado além dos indicadores
-- narrativa de mercado: compressão, expansão, acumulação, distribuição, exaustão, transição
-- qualidade de tendência: forte, frágil, exausta
-- qualidade de breakout: limpo, duvidoso, armadilha
-- tipo de conflito: útil, transicional, destrutivo
-- ajuste dinâmico de score e confiança
+- julgamento de qualidade final: premium, bom, aceitável, duvidoso, vetado
+- anti-pattern memory (memória de armadilhas recorrentes)
+- hierarquia de contexto sobre setup
+- veto inteligente mesmo com score alto
+- integrado ao decision_engine como camada final
 - aprendizado com histórico via journal_manager
 - sem alterar app.py
 - sem remover nada existente
