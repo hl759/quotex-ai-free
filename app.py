@@ -34,6 +34,14 @@ from config import ASSETS, SCAN_INTERVAL_SECONDS
 
 app = Flask(__name__)
 
+@app.route("/health", methods=["GET"])
+def health():
+    return {
+        "status": "ok",
+        "service": "alpha-hive",
+        "mode": "alive"
+    }, 200
+
 data_manager = DataManager()
 learning = LearningEngine()
 scanner = MarketScanner(data_manager, learning)
