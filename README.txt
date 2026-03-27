@@ -1,24 +1,18 @@
-EQUILÍBRIO OPERACIONAL POR AMBIENTE
+V13 ETAPA 10 — Environment Transition Engine
 
 Arquivos:
-- decision_engine.py
+- environment_transition_engine.py
 
-O que entra:
-- classificação de ambiente operacional:
-  - clean
-  - complex
-  - structured_chaos
-  - destructive
-- ajuste de score/confiança por ambiente
-- decisão adaptada ao ambiente
-- mantém veteran_discernment, meta_context e contexto já existentes
-- sem alterar app.py
+O que faz:
+- detecta mudança de ambiente antes de acontecer
+- prevê próximo estado do mercado
+- ajusta score/confiança baseado em transição
 
-Substitua apenas:
-- decision_engine.py
+Integração:
+- importar no decision_engine
+- aplicar após meta_context
 
-Observação:
-Este arquivo pressupõe que você já tenha as etapas anteriores:
-- veteran_discernment_layer.py
-- meta_context_reasoning_engine.py
-- context_pattern_intelligence_engine.py
+Resultado:
+- IA antecipa mudança
+- evita entrar atrasado
+- identifica oportunidades antes de ficarem óbvias
