@@ -34,17 +34,6 @@ from config import ASSETS, SCAN_INTERVAL_SECONDS
 
 app = Flask(__name__)
 
-START_TIME = time.time()
-
-@app.route("/health", methods=["GET"])
-def health():
-    return {
-        "status": "ok",
-        "service": "alpha-hive",
-        "alive": True,
-        "uptime_seconds": round(time.time() - START_TIME, 2)
-    }, 200
-
 data_manager = DataManager()
 learning = LearningEngine()
 scanner = MarketScanner(data_manager, learning)
@@ -794,10 +783,18 @@ def home():
     return render_template_string(HTML_PAGE, snapshot_json=json.dumps(get_snapshot(), ensure_ascii=False))
 
 
-@app.route("/health")
+import time
+
+START_TIME = time.time()
+
+@app.route("/health", methods=["GET"])
 def health():
-    ensure_scanner_started()
-    return {"status": "running"}
+    return {
+        "status": "ok",
+        "service": "alpha-hive",
+        "alive": True,
+        "uptime_seconds": round(time.time() - START_TIME, 2)
+    }, 200
 
 
 @app.route("/capital-state", methods=["GET"])
