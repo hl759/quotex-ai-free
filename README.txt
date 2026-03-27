@@ -1,15 +1,24 @@
-V13 ETAPA 9 - BACKEND-ONLY
+EQUILÍBRIO OPERACIONAL POR AMBIENTE
 
-Substitua estes arquivos:
-- veteran_discernment_layer.py
+Arquivos:
 - decision_engine.py
 
 O que entra:
-- julgamento de qualidade final: premium, bom, aceitável, duvidoso, vetado
-- anti-pattern memory (memória de armadilhas recorrentes)
-- hierarquia de contexto sobre setup
-- veto inteligente mesmo com score alto
-- integrado ao decision_engine como camada final
-- aprendizado com histórico via journal_manager
+- classificação de ambiente operacional:
+  - clean
+  - complex
+  - structured_chaos
+  - destructive
+- ajuste de score/confiança por ambiente
+- decisão adaptada ao ambiente
+- mantém veteran_discernment, meta_context e contexto já existentes
 - sem alterar app.py
-- sem remover nada existente
+
+Substitua apenas:
+- decision_engine.py
+
+Observação:
+Este arquivo pressupõe que você já tenha as etapas anteriores:
+- veteran_discernment_layer.py
+- meta_context_reasoning_engine.py
+- context_pattern_intelligence_engine.py

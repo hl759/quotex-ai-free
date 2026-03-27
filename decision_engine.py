@@ -63,7 +63,17 @@ try:
 except Exception:
     class MetaContextReasoningEngine:
         def get_adjustment(self, *args, **kwargs):
-            return {"score_boost": 0.0, "confidence_shift": 0, "reasons": ["Meta-contexto neutro"], "meta_context": {"market_narrative": "none", "trend_quality": "neutra", "breakout_quality": "ausente", "conflict_type": "neutro"}}
+            return {
+                "score_boost": 0.0,
+                "confidence_shift": 0,
+                "reasons": ["Meta-contexto neutro"],
+                "meta_context": {
+                    "market_narrative": "none",
+                    "trend_quality": "neutra",
+                    "breakout_quality": "ausente",
+                    "conflict_type": "neutro"
+                },
+            }
 
 
 class DecisionEngine:
@@ -95,6 +105,7 @@ class DecisionEngine:
         moved_fast = indicators.get("moved_too_fast", False)
         is_sideways = indicators.get("is_sideways", False)
         pattern = indicators.get("pattern")
+
         if trend_m1 in ("bull", "bear"):
             score += 1.0; reasons.append("Tendência M1 definida")
         if trend_m5 in ("bull", "bear"):
@@ -159,6 +170,22 @@ class DecisionEngine:
                 pass
         return [s for s in base_candidates if s.get("valid")]
 
+    def _classify_environment(self, meta):
+        trend = meta.get("trend_quality")
+        breakout = meta.get("breakout_quality")
+        conflict = meta.get("conflict_type")
+        narrative = meta.get("market_narrative")
+
+        if trend == "forte" and breakout == "limpo" and conflict == "util":
+            return "clean"
+        if narrative in ("compressao_pre_breakout", "transicao"):
+            return "complex"
+        if narrative in ("expansao", "acumulacao") and conflict != "destrutivo":
+            return "structured_chaos"
+        if narrative in ("exaustao", "distribuicao") or breakout == "armadilha" or conflict == "destrutivo":
+            return "destructive"
+        return "complex"
+
     def decide(self, asset, indicators):
         regime = indicators.get("regime", "unknown")
         fallback_direction = indicators.get("direction", "CALL")
@@ -166,10 +193,15 @@ class DecisionEngine:
         weekday = indicators.get("weekday")
 
         market_profile = self.market_profile_engine.get_profile(regime)
-        context_adj = self.context_intelligence_engine.get_adjustment(asset=asset, regime=regime, analysis_time=analysis_time, weekday=weekday)
+        context_adj = self.context_intelligence_engine.get_adjustment(
+            asset=asset, regime=regime, analysis_time=analysis_time, weekday=weekday
+        )
 
         base_score, base_reasons = self._build_base_score(indicators)
-        reasons = [f"Score base: {base_score}"] + base_reasons + [market_profile.get("reason", "Mercado em equilíbrio"), context_adj.get("reason", "Contexto neutro")]
+        reasons = [f"Score base: {base_score}"] + base_reasons + [
+            market_profile.get("reason", "Mercado em equilíbrio"),
+            context_adj.get("reason", "Contexto neutro")
+        ]
 
         base_candidates = [s for s in self.strategy_engine.evaluate_all(asset, indicators) if s.get("valid")]
         candidates = self._expand_candidates(asset, indicators, base_candidates)
@@ -184,7 +216,12 @@ class DecisionEngine:
         pattern_conf_shift = 0
         pattern_mode = "neutral"
         meta_conf_shift = 0
-        meta_data = {"market_narrative": "none", "trend_quality": "neutra", "breakout_quality": "ausente", "conflict_type": "neutro"}
+        meta_data = {
+            "market_narrative": "none",
+            "trend_quality": "neutra",
+            "breakout_quality": "ausente",
+            "conflict_type": "neutro"
+        }
         discernment_quality = "aceitavel"
         discernment_veto = False
         anti_pattern_risk = "unknown"
@@ -198,12 +235,19 @@ class DecisionEngine:
                     filtered.append(strategy_name)
                     reasons.append(f"Estratégia temporariamente enfraquecida: {strategy_name}")
                     continue
-                pattern_adj = self.context_pattern_engine.get_adjustment(asset=asset, regime=regime, strategy_name=strategy_name, analysis_time=analysis_time)
+                pattern_adj = self.context_pattern_engine.get_adjustment(
+                    asset=asset, regime=regime, strategy_name=strategy_name, analysis_time=analysis_time
+                )
                 final_weight = self._weight_by_regime(strategy_name, regime) * self.adaptive_engine.get_weight(strategy_name, regime)
                 fusion_total += (float(s.get("score", 0.0)) + pattern_adj.get("score_boost", 0.0)) * final_weight
                 used.append(strategy_name)
+
             adjusted_score += fusion_total
-            reasons.append(f"Contextos em competição: {', '.join(used[:3])}" if len(used) > 1 else (f"Estratégia líder: {used[0]}" if used else "Estratégias válidas sem força operacional suficiente"))
+            reasons.append(
+                f"Contextos em competição: {', '.join(used[:3])}"
+                if len(used) > 1 else
+                (f"Estratégia líder: {used[0]}" if used else "Estratégias válidas sem força operacional suficiente")
+            )
 
             leader = next((c for c in candidates if c.get("strategy") not in filtered), candidates[0])
             leader_name = leader.get("strategy", "none")
@@ -211,28 +255,39 @@ class DecisionEngine:
             reasons.extend(leader.get("reasons", []))
             reasons.append(f"Estratégias válidas: {len(candidates)}")
 
-            pattern_adj = self.context_pattern_engine.get_adjustment(asset=asset, regime=regime, strategy_name=leader_name, analysis_time=analysis_time)
+            pattern_adj = self.context_pattern_engine.get_adjustment(
+                asset=asset, regime=regime, strategy_name=leader_name, analysis_time=analysis_time
+            )
             adjusted_score += pattern_adj.get("score_boost", 0.0)
             reasons.append(pattern_adj.get("reason", "Context Pattern neutro"))
             pattern_conf_shift = pattern_adj.get("confidence_shift", 0)
             pattern_mode = pattern_adj.get("mode", "neutral")
 
-            meta_adj = self.meta_context_engine.get_adjustment(asset=asset, strategy_name=leader_name, indicators=indicators, analysis_time=analysis_time)
+            meta_adj = self.meta_context_engine.get_adjustment(
+                asset=asset, strategy_name=leader_name, indicators=indicators, analysis_time=analysis_time
+            )
             adjusted_score += meta_adj.get("score_boost", 0.0)
             meta_conf_shift = meta_adj.get("confidence_shift", 0)
             meta_data = meta_adj.get("meta_context", meta_data)
             reasons.extend(meta_adj.get("reasons", []))
 
             if leader_name != "none":
-                leader_setup_id = self.strategy_lab.register_setup(asset=asset, strategy_name=leader_name, indicators=indicators, signal=leader.get("direction"), analysis_time=analysis_time)
+                leader_setup_id = self.strategy_lab.register_setup(
+                    asset=asset, strategy_name=leader_name, indicators=indicators,
+                    signal=leader.get("direction"), analysis_time=analysis_time
+                )
                 setup_boost, setup_reason = self.strategy_lab.get_setup_boost(leader_setup_id)
                 adjusted_score += setup_boost
                 reasons.append(setup_reason)
                 reasons.append(self.adaptive_engine.get_reason(leader_name, regime))
-                leader_context_id = self.memory_engine.register_context(asset=asset, strategy_name=leader_name, indicators=indicators, analysis_time=analysis_time)
+
+                leader_context_id = self.memory_engine.register_context(
+                    asset=asset, strategy_name=leader_name, indicators=indicators, analysis_time=analysis_time
+                )
                 memory_boost, memory_reason = self.memory_engine.get_memory_boost(leader_context_id)
                 adjusted_score += memory_boost
                 reasons.append(memory_reason)
+
                 evo = self.strategy_evolution_engine.get_adjustment(asset, leader_name, indicators)
                 adjusted_score += evo.get("boost", 0.0)
                 evolution_variant = evo.get("variant", "base")
@@ -279,7 +334,14 @@ class DecisionEngine:
             base_confidence += 2
         base_confidence = int(max(50, min(95, base_confidence)))
 
-        discernment = self.veteran_discernment.evaluate(asset=asset, strategy_name=leader_name, indicators=indicators, current_score=adjusted_score, current_confidence=base_confidence, meta_context=meta_data)
+        discernment = self.veteran_discernment.evaluate(
+            asset=asset,
+            strategy_name=leader_name,
+            indicators=indicators,
+            current_score=adjusted_score,
+            current_confidence=base_confidence,
+            meta_context=meta_data,
+        )
         adjusted_score += discernment.get("score_boost", 0.0)
         base_confidence += discernment.get("confidence_shift", 0)
         reasons.extend(discernment.get("reasons", []))
@@ -287,29 +349,54 @@ class DecisionEngine:
         discernment_veto = discernment.get("veto", False)
         anti_pattern_risk = discernment.get("anti_pattern_risk", "unknown")
 
-        capital_plan = self.capital_mind_engine.get_plan(asset=asset, adjusted_score=adjusted_score, confidence=base_confidence, indicators=indicators)
+        environment = self._classify_environment(meta_data)
+        reasons.append(f"Ambiente operacional: {environment}")
+
+        if environment == "clean":
+            adjusted_score += 0.10
+            base_confidence += 2
+            reasons.append("Ambiente limpo: execução direta")
+        elif environment == "complex":
+            adjusted_score -= 0.05
+            reasons.append("Ambiente complexo: exige cautela")
+        elif environment == "structured_chaos":
+            adjusted_score += 0.03
+            base_confidence -= 1
+            reasons.append("Caos estruturado: oportunidade seletiva")
+        elif environment == "destructive":
+            adjusted_score -= 0.20
+            base_confidence -= 4
+            reasons.append("Ambiente destrutivo: risco elevado")
+
+        capital_plan = self.capital_mind_engine.get_plan(
+            asset=asset, adjusted_score=adjusted_score, confidence=base_confidence, indicators=indicators
+        )
         adjusted_score += capital_plan.get("score_shift", 0.0)
         reasons.append(capital_plan.get("reason", "Capital Mind neutro"))
 
-        if discernment_veto:
+        if discernment_veto or environment == "destructive":
             decision, direction = "NAO_OPERAR", None
-        elif regime == "chaotic" and adjusted_score < 2.3:
-            decision, direction = "NAO_OPERAR", None
-        elif adjusted_score >= 3.00 and discernment_quality in ("premium", "bom", "aceitavel"):
-            decision, direction = "ENTRADA_FORTE", final_direction
-        elif adjusted_score >= 1.90 and discernment_quality in ("premium", "bom", "aceitavel"):
-            decision, direction = "ENTRADA_CAUTELA", final_direction
-        elif adjusted_score >= 1.30 and discernment_quality in ("premium", "bom", "aceitavel"):
-            promote = len(active) >= 1 and market_profile.get("mode") != "defensive"
-            if evolution_variant == "promovida" and final_direction:
-                promote = True
-            if capital_plan.get("phase") == "defensive":
-                promote = False
-            if promote:
+        elif environment == "clean":
+            if adjusted_score >= 2.8:
+                decision, direction = "ENTRADA_FORTE", final_direction
+            elif adjusted_score >= 1.7:
                 decision, direction = "ENTRADA_CAUTELA", final_direction
-                reasons.append("OBSERVAR promovido para CAUTELA")
             else:
                 decision, direction = "OBSERVAR", final_direction
+        elif environment == "complex":
+            if adjusted_score >= 3.1 and discernment_quality in ("premium", "bom", "aceitavel"):
+                decision, direction = "ENTRADA_CAUTELA", final_direction
+            elif adjusted_score >= 2.2 and discernment_quality in ("premium", "bom", "aceitavel"):
+                decision, direction = "OBSERVAR", final_direction
+            else:
+                decision, direction = "NAO_OPERAR", None
+        elif environment == "structured_chaos":
+            if adjusted_score >= 3.3 and discernment_quality in ("premium", "bom", "aceitavel"):
+                decision, direction = "ENTRADA_CAUTELA", final_direction
+            elif adjusted_score >= 2.5 and discernment_quality in ("premium", "bom", "aceitavel"):
+                decision, direction = "OBSERVAR", final_direction
+            else:
+                decision, direction = "NAO_OPERAR", None
         else:
             decision, direction = "NAO_OPERAR", None
 
@@ -333,7 +420,7 @@ class DecisionEngine:
             f"Capital Mind: {capital_plan.get('phase', 'neutral')}",
             f"Stake sugerida: {capital_plan.get('stake_value', 0.0)}",
             f"Score ajustado: {round(adjusted_score, 2)}",
-            "Modo: v13 etapa 9 veteran discernment"
+            "Modo: v13 etapa 9 equilibrio operacional por ambiente"
         ])
 
         return {
@@ -356,6 +443,7 @@ class DecisionEngine:
             "conflict_type": meta_data.get("conflict_type", "neutro"),
             "discernment_quality": discernment_quality,
             "anti_pattern_risk": anti_pattern_risk,
+            "environment_type": environment,
             "capital_phase": capital_plan.get("phase", "neutral"),
             "suggested_stake": capital_plan.get("stake_value", 0.0),
             "risk_pct": capital_plan.get("risk_pct", 0.0),
