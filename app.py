@@ -34,12 +34,15 @@ from config import ASSETS, SCAN_INTERVAL_SECONDS
 
 app = Flask(__name__)
 
+START_TIME = time.time()
+
 @app.route("/health", methods=["GET"])
 def health():
     return {
         "status": "ok",
         "service": "alpha-hive",
-        "mode": "alive"
+        "alive": True,
+        "uptime_seconds": round(time.time() - START_TIME, 2)
     }, 200
 
 data_manager = DataManager()
