@@ -2,6 +2,7 @@ import json
 import os
 
 DATA_DIR = os.environ.get("ALPHA_HIVE_DATA_DIR", "/opt/render/project/src/data")
+os.makedirs(DATA_DIR, exist_ok=True)
 JOURNAL_FILE = os.path.join(DATA_DIR, "alpha_hive_journal.json")
 
 
