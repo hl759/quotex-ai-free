@@ -99,11 +99,33 @@ class EdgeAuditEngine:
             "gross_pnl": round(gross_pnl, 2),
             "gross_r": round(gross_r, 4),
             "breakeven_winrate": round(breakeven_winrate, 2),
+            "environment_type": signal.get("environment_type"),
+            "market_narrative": signal.get("market_narrative"),
+            "trend_quality": signal.get("trend_quality"),
+            "breakout_quality": signal.get("breakout_quality"),
+            "conflict_type": signal.get("conflict_type"),
+            "discernment_quality": signal.get("discernment_quality"),
+            "anti_pattern_risk": signal.get("anti_pattern_risk"),
+            "trend_m1": signal.get("trend_m1"),
+            "trend_m5": signal.get("trend_m5"),
+            "breakout": signal.get("breakout"),
+            "rejection": signal.get("rejection"),
+            "volatility": signal.get("volatility"),
+            "moved_too_fast": signal.get("moved_too_fast"),
+            "is_sideways": signal.get("is_sideways"),
+            "pattern": signal.get("pattern"),
+            "analysis_session": signal.get("analysis_session"),
+            "council_quality": signal.get("council_quality"),
+            "council_consensus_direction": signal.get("council_consensus_direction"),
+            "head_trader_action": signal.get("head_trader_action"),
         }
         return trade
 
     def _load_ledger(self):
         return self._load_json(self.ledger_file, [])
+
+    def load_ledger(self):
+        return self._load_ledger()
 
     def record_trade(self, signal, result_data):
         if not isinstance(signal, dict) or not isinstance(result_data, dict):
@@ -129,6 +151,32 @@ class EdgeAuditEngine:
         if payout <= 0:
             return 100.0
         return round((1.0 / (1.0 + payout)) * 100.0, 2)
+
+    def _posterior_prob_edge(self, wins, losses, breakeven_winrate_pct):
+        total = int(max(0, wins)) + int(max(0, losses))
+        if total <= 0:
+            return 0.0
+        threshold = max(0.0, min(1.0, self._safe_float(breakeven_winrate_pct, 0.0) / 100.0))
+        alpha = wins + 1.0
+        beta = losses + 1.0
+        mean_p = alpha / (alpha + beta)
+        variance = (alpha * beta) / (((alpha + beta) ** 2) * (alpha + beta + 1.0))
+        if variance <= 0:
+            return 1.0 if mean_p > threshold else 0.0
+        z = (mean_p - threshold) / math.sqrt(variance)
+        return round(0.5 * (1.0 + math.erf(z / math.sqrt(2.0))), 4)
+
+    def _wilson_lower_winrate(self, wins, total, z=1.96):
+        total = int(max(0, total))
+        wins = int(max(0, wins))
+        if total <= 0:
+            return 0.0
+        p = wins / total
+        denom = 1.0 + (z ** 2) / total
+        centre = p + (z ** 2) / (2.0 * total)
+        margin = z * math.sqrt((p * (1.0 - p) / total) + (z ** 2) / (4.0 * (total ** 2)))
+        lower = (centre - margin) / denom
+        return round(lower * 100.0, 2)
 
     def _drawdown(self, trades):
         equity = 0.0
@@ -163,11 +211,12 @@ class EdgeAuditEngine:
         pf = self._safe_float(stats.get("profit_factor"), 0.0)
         wr = self._safe_float(stats.get("winrate", 0.0), 0.0)
         be = self._safe_float(stats.get("breakeven_winrate", 100.0), 100.0)
+        prob = self._safe_float(stats.get("posterior_prob_edge", 0.0), 0.0)
         if total < max(30, EDGE_SEGMENT_MIN_TRADES):
             return "amostra_insuficiente"
         if total < EDGE_PROOF_MIN_TRADES:
-            return "em_validacao" if expectancy > 0 and pf > 1.0 and wr > be else "frágil"
-        if expectancy > 0 and pf >= 1.15 and wr > be:
+            return "em_validacao" if expectancy > 0 and pf > 1.0 and wr > be and prob >= 0.55 else "frágil"
+        if expectancy > 0 and pf >= 1.15 and wr > be and prob >= 0.80:
             return "edge_positivo"
         return "nao_comprovado"
 
@@ -185,6 +234,8 @@ class EdgeAuditEngine:
                 "avg_pnl": 0.0,
                 "expectancy_r": 0.0,
                 "profit_factor": 0.0,
+                "posterior_prob_edge": 0.0,
+                "wilson_lower_winrate": 0.0,
                 "max_drawdown": 0.0,
             }
         wins = sum(1 for t in valid if self._result_value(t) == "WIN")
@@ -197,17 +248,20 @@ class EdgeAuditEngine:
         gross_profit = sum(p for p in pnls if p > 0)
         gross_loss = abs(sum(p for p in pnls if p < 0))
         profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else (999.0 if gross_profit > 0 else 0.0)
+        breakeven = self._breakeven_for(avg_payout)
         stats = {
             "total": total,
             "wins": wins,
             "losses": losses,
             "winrate": round((wins / total) * 100.0, 2) if total else 0.0,
             "avg_payout": round(avg_payout, 4),
-            "breakeven_winrate": self._breakeven_for(avg_payout),
+            "breakeven_winrate": breakeven,
             "total_pnl": round(sum(pnls), 2),
             "avg_pnl": round(mean(pnls), 4) if pnls else 0.0,
             "expectancy_r": round(mean(rs), 4) if rs else 0.0,
             "profit_factor": round(profit_factor, 3),
+            "posterior_prob_edge": self._posterior_prob_edge(wins, losses, breakeven),
+            "wilson_lower_winrate": self._wilson_lower_winrate(wins, total),
             "max_drawdown": self._drawdown(valid),
         }
         stats["status"] = self._status(stats)
@@ -221,8 +275,15 @@ class EdgeAuditEngine:
         regimes = self._segment_stats(valid, "regime")
         strategies = self._segment_stats(valid, "strategy_name")
         hours = self._segment_stats(valid, "hour")
+        recent_20 = self._summary(valid[:20])
+        recent_50 = self._summary(valid[:50])
+        recent_100 = self._summary(valid[:100])
         return {
             "summary": summary,
+            "recent_20": recent_20,
+            "recent_50": recent_50,
+            "recent_100": recent_100,
+            "ledger_count": len(ledger),
             "top_assets": assets[:5],
             "weak_assets": list(reversed(assets[-5:])) if assets else [],
             "top_regimes": regimes[:5],

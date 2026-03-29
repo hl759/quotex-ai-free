@@ -15,6 +15,8 @@ from strategy_lab import StrategyLab
 from journal_manager import JournalManager
 from decision_engine import DecisionEngine
 from edge_audit import EdgeAuditEngine
+from edge_guard import EdgeGuardEngine
+from specialist_reputation_engine import SpecialistReputationEngine
 
 try:
     from adaptive_engine import AdaptiveEngine
@@ -48,6 +50,8 @@ memory_engine = MemoryEngine() if MemoryEngine else None
 market_profile_engine = MarketProfileEngine() if MarketProfileEngine else None
 journal = JournalManager()
 edge_audit = EdgeAuditEngine()
+edge_guard = EdgeGuardEngine()
+specialist_reputation = SpecialistReputationEngine()
 
 STATE_DIR = "/tmp/nexus_state"
 LATEST_SIGNALS_FILE = os.path.join(STATE_DIR, "latest_signals.json")
@@ -267,7 +271,29 @@ def decorate_decision(decision):
         "suggested_stake": decision.get("suggested_stake", 0.0),
         "risk_pct": decision.get("risk_pct", 0.0),
         "payout": DEFAULT_PAYOUT,
-        "date": analysis.strftime("%Y-%m-%d")
+        "date": analysis.strftime("%Y-%m-%d"),
+        "market_narrative": decision.get("market_narrative", "none"),
+        "trend_quality": decision.get("trend_quality", "neutra"),
+        "breakout_quality": decision.get("breakout_quality", "ausente"),
+        "conflict_type": decision.get("conflict_type", "neutro"),
+        "environment_type": decision.get("environment_type", "unknown"),
+        "discernment_quality": decision.get("discernment_quality", "aceitavel"),
+        "anti_pattern_risk": decision.get("anti_pattern_risk", "unknown"),
+        "trend_m1": decision.get("trend_m1", "neutral"),
+        "trend_m5": decision.get("trend_m5", "neutral"),
+        "breakout": decision.get("breakout", False),
+        "rejection": decision.get("rejection", False),
+        "volatility": decision.get("volatility", False),
+        "moved_too_fast": decision.get("moved_too_fast", False),
+        "is_sideways": decision.get("is_sideways", False),
+        "pattern": decision.get("pattern"),
+        "analysis_session": decision.get("analysis_session", analysis.strftime("%H:%M")),
+        "council_quality": decision.get("council_quality", "neutro"),
+        "council_consensus_direction": decision.get("council_consensus_direction"),
+        "head_trader_action": decision.get("head_trader_action", "none"),
+        "trader_council": decision.get("trader_council", {}),
+        "council_participants": decision.get("council_participants", []),
+        "case_memory": decision.get("case_memory", {}),
     }
 
 
@@ -304,6 +330,28 @@ def enqueue_pending_decision(current_decision, matched_market):
         "risk_pct": current_decision.get("risk_pct", 0.0),
         "payout": float(current_decision.get("payout", DEFAULT_PAYOUT) or DEFAULT_PAYOUT),
         "date": current_decision.get("date") or now_brazil().strftime("%Y-%m-%d"),
+        "market_narrative": current_decision.get("market_narrative", "none"),
+        "trend_quality": current_decision.get("trend_quality", "neutra"),
+        "breakout_quality": current_decision.get("breakout_quality", "ausente"),
+        "conflict_type": current_decision.get("conflict_type", "neutro"),
+        "environment_type": current_decision.get("environment_type", "unknown"),
+        "discernment_quality": current_decision.get("discernment_quality", "aceitavel"),
+        "anti_pattern_risk": current_decision.get("anti_pattern_risk", "unknown"),
+        "trend_m1": current_decision.get("trend_m1", "neutral"),
+        "trend_m5": current_decision.get("trend_m5", "neutral"),
+        "breakout": current_decision.get("breakout", False),
+        "rejection": current_decision.get("rejection", False),
+        "volatility": current_decision.get("volatility", False),
+        "moved_too_fast": current_decision.get("moved_too_fast", False),
+        "is_sideways": current_decision.get("is_sideways", False),
+        "pattern": current_decision.get("pattern"),
+        "analysis_session": current_decision.get("analysis_session"),
+        "council_quality": current_decision.get("council_quality", "neutro"),
+        "council_consensus_direction": current_decision.get("council_consensus_direction"),
+        "head_trader_action": current_decision.get("head_trader_action", "none"),
+        "trader_council": current_decision.get("trader_council", {}),
+        "council_participants": current_decision.get("council_participants", []),
+        "case_memory": current_decision.get("case_memory", {}),
     }
 
     if record["uid"] not in existing:
@@ -373,6 +421,25 @@ def register_all_learning_outputs(signal, result_data):
         "exit_candle_time": result_data.get("exit_candle_time"),
         "evaluation_mode": result_data.get("evaluation_mode", "candle_close"),
         "date": signal.get("date") or now_brazil().strftime("%Y-%m-%d"),
+        "market_narrative": signal.get("market_narrative"),
+        "trend_quality": signal.get("trend_quality"),
+        "breakout_quality": signal.get("breakout_quality"),
+        "conflict_type": signal.get("conflict_type"),
+        "environment_type": signal.get("environment_type"),
+        "discernment_quality": signal.get("discernment_quality"),
+        "anti_pattern_risk": signal.get("anti_pattern_risk"),
+        "trend_m1": signal.get("trend_m1"),
+        "trend_m5": signal.get("trend_m5"),
+        "breakout": signal.get("breakout"),
+        "rejection": signal.get("rejection"),
+        "volatility": signal.get("volatility"),
+        "moved_too_fast": signal.get("moved_too_fast"),
+        "is_sideways": signal.get("is_sideways"),
+        "pattern": signal.get("pattern"),
+        "analysis_session": signal.get("analysis_session"),
+        "council_quality": signal.get("council_quality"),
+        "council_consensus_direction": signal.get("council_consensus_direction"),
+        "head_trader_action": signal.get("head_trader_action"),
     }
 
     try:
@@ -384,6 +451,11 @@ def register_all_learning_outputs(signal, result_data):
         edge_audit.record_trade(signal, result_data)
     except Exception as e:
         print("Edge audit record error:", e, flush=True)
+
+    try:
+        specialist_reputation.register_trade(signal, result_data)
+    except Exception as e:
+        print("Specialist reputation register error:", e, flush=True)
 
 
 def process_pending_decisions(market):
@@ -447,6 +519,8 @@ def get_snapshot():
         "best_hours": journal.best_hours(),
         "capital_state": load_capital_state(),
         "edge_report": edge_audit.compute_report(),
+        "edge_guard": edge_guard.evaluate(asset="GLOBAL", regime="global", strategy_name="global", analysis_time=None, proposed_decision="OBSERVAR", proposed_score=0.0, proposed_confidence=50),
+        "specialist_leaders": specialist_reputation.snapshot(limit=12),
     }
 
 
@@ -872,7 +946,21 @@ def ping():
     return {"status": "ok"}
 
 
+
+@app.route("/edge-guard", methods=["GET"])
+def edge_guard_report():
+    return jsonify(edge_guard.evaluate(asset="GLOBAL", regime="global", strategy_name="global", analysis_time=None, proposed_decision="OBSERVAR", proposed_score=0.0, proposed_confidence=50))
+
+
+@app.route("/specialists", methods=["GET"])
+def specialists_report():
+    return jsonify({
+        "leaders": specialist_reputation.snapshot(limit=25),
+        "current_council": read_json(CURRENT_DECISION_FILE, {}).get("trader_council", {}),
+    })
+
 if __name__ == "__main__":
     ensure_scanner_started()
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
+

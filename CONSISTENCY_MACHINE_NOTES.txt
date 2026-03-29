@@ -1,0 +1,36 @@
+ALPHA HIVE CONSISTENCY MACHINE - APLICADO
+
+1) Edge Guard estatístico adicionado
+- Bloqueia ou rebaixa entradas quando o edge global ou recente degrada
+- Reduz stake automaticamente conforme prova estatística
+- Considera amostra global, ativo, regime, estratégia e horário
+
+2) Drift / kill-switch
+- Janela recente fraca reduz agressividade
+- Drift recente severo bloqueia ou rebaixa operação
+
+3) Stake condicionado à prova
+- Stake cheia só quando há confluência estatística suficiente
+- Em validação, ENTRADA_FORTE é rebaixada para cautela
+
+4) Métricas de prova adicionadas
+- posterior_prob_edge
+- wilson_lower_winrate
+- recent_20 / recent_50 / recent_100
+
+Variáveis novas:
+EDGE_GUARD_ACTIVE=1
+EDGE_MIN_PROFIT_FACTOR=1.10
+EDGE_SEGMENT_MIN_PROFIT_FACTOR=1.03
+EDGE_LIVE_MIN_PROB=0.80
+EDGE_VALIDATION_MIN_PROB=0.60
+EDGE_RECENT_WINDOW=20
+EDGE_RECENT_KILL_WINDOW=12
+EDGE_RECENT_KILL_EXPECTANCY_R=-0.08
+EDGE_RECENT_WARN_EXPECTANCY_R=-0.02
+
+Modos:
+ALPHA_HIVE_MODE=shadow|validation|live
+- shadow: nunca entra, só audita
+- validation: entra pequeno e rebaixa agressividade
+- live: exige prova estatística mais dura

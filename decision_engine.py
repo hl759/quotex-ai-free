@@ -1,6 +1,41 @@
 from strategy_engine import StrategyEngine
 
 try:
+    from edge_guard import EdgeGuardEngine
+except Exception:
+    class EdgeGuardEngine:
+        def evaluate(self, *args, **kwargs):
+            return {
+                "active": False,
+                "mode": "validation",
+                "decision_cap": None,
+                "stake_multiplier": 1.0,
+                "live_allowed": True,
+                "reasons": ["Edge Guard neutro"],
+                "report": {},
+            }
+
+try:
+    from trader_council_engine import TraderCouncilEngine
+except Exception:
+    class TraderCouncilEngine:
+        def evaluate(self, *args, **kwargs):
+            return {
+                "active": False,
+                "quality": "neutro",
+                "consensus_direction": None,
+                "score_boost": 0.0,
+                "confidence_shift": 0,
+                "decision_cap": None,
+                "direction_override": None,
+                "head_trader_action": "none",
+                "reasons": ["Trader Council neutro"],
+                "participants": [],
+                "memory": {"summary": {"total": 0, "wins": 0, "losses": 0, "winrate": 0.0, "expectancy_r": 0.0, "avg_payout": 0.8, "breakeven_winrate": 55.56}, "scar_tissue": ["Sem memória"]},
+                "summary": {},
+            }
+
+try:
     from strategy_variants_engine import StrategyVariantsEngine
 except Exception:
     StrategyVariantsEngine = None
@@ -277,6 +312,8 @@ class DecisionEngine:
         self.transition_engine = EnvironmentTransitionEngine()
         self.risk_dominance_engine = RiskDominanceEngine()
         self.behavioral_orchestration_engine = AdaptiveBehavioralOrchestrationEngine()
+        self.edge_guard_engine = EdgeGuardEngine()
+        self.trader_council_engine = TraderCouncilEngine()
 
     def _build_base_score(self, indicators):
         score = 0.0
@@ -423,6 +460,44 @@ class DecisionEngine:
             "vetado": 0,
         }
         return order.get(str(text), 0)
+
+    def _apply_edge_guard(self, decision, guard, final_direction, reasons):
+        cap = guard.get("decision_cap")
+        if not cap:
+            return decision, final_direction
+        if cap == "NAO_OPERAR":
+            reasons.append("Edge Guard final: bloqueio total")
+            return "NAO_OPERAR", None
+        if cap == "OBSERVAR" and decision in ("ENTRADA_FORTE", "ENTRADA_CAUTELA"):
+            reasons.append("Edge Guard final: entrada rebaixada para observação")
+            return "OBSERVAR", final_direction
+        if cap == "ENTRADA_CAUTELA" and decision == "ENTRADA_FORTE":
+            reasons.append("Edge Guard final: entrada forte rebaixada para cautela")
+            return "ENTRADA_CAUTELA", final_direction
+        return decision, final_direction
+
+
+    def _apply_council_cap(self, decision, council, final_direction, reasons):
+        cap = council.get("decision_cap")
+        if not cap:
+            return decision, final_direction
+        if cap == "NAO_OPERAR":
+            reasons.append("Trader Council final: bloqueio da mesa veterana")
+            return "NAO_OPERAR", None
+        if cap == "OBSERVAR" and decision in ("ENTRADA_FORTE", "ENTRADA_CAUTELA"):
+            reasons.append("Trader Council final: mesa rebaixou entrada para observação")
+            return "OBSERVAR", final_direction
+        if cap == "ENTRADA_CAUTELA" and decision == "ENTRADA_FORTE":
+            reasons.append("Trader Council final: mesa rebaixou entrada forte para cautela")
+            return "ENTRADA_CAUTELA", final_direction
+        return decision, final_direction
+
+    def _apply_stake_multiplier(self, capital_plan, multiplier):
+        mult = max(0.0, min(1.0, float(multiplier or 1.0)))
+        out = dict(capital_plan or {})
+        out["stake_value"] = round(float(out.get("stake_value", 0.0) or 0.0) * mult, 2)
+        out["risk_pct"] = round(float(out.get("risk_pct", 0.0) or 0.0) * mult, 4)
+        return out
 
     def decide(self, asset, indicators):
         regime = indicators.get("regime", "unknown")
@@ -662,6 +737,26 @@ class DecisionEngine:
         base_confidence += behavior.get("confidence_shift", 0)
         reasons.extend(behavior.get("reasons", []))
 
+        council = self.trader_council_engine.evaluate(
+            asset=asset,
+            indicators={**indicators, "environment_type": environment},
+            candidates=candidates,
+            leader_name=leader_name,
+            final_direction=final_direction,
+            current_score=adjusted_score,
+            current_confidence=base_confidence,
+            meta_context=meta_data,
+            environment_type=environment,
+            discernment_quality=discernment_quality,
+            anti_pattern_risk=anti_pattern_risk,
+        )
+        adjusted_score += council.get("score_boost", 0.0)
+        base_confidence += council.get("confidence_shift", 0)
+        reasons.extend(council.get("reasons", []))
+        if council.get("direction_override"):
+            final_direction = council.get("direction_override")
+            reasons.append(f"Trader Council: direção priorizada {final_direction}")
+
         capital_plan = self.capital_mind_engine.get_plan(
             asset=asset,
             adjusted_score=adjusted_score,
@@ -714,6 +809,8 @@ class DecisionEngine:
                 decision = "OBSERVAR"
                 reasons.append("Orquestração final: entrada rebaixada para observação")
 
+            decision, direction = self._apply_council_cap(decision, council, final_direction, reasons)
+
             floor_rank = self._quality_rank(behavior.get("acceptance_floor", "aceitavel"))
             current_rank = self._quality_rank(discernment_quality)
             if current_rank < floor_rank:
@@ -727,8 +824,25 @@ class DecisionEngine:
         confidence = base_confidence + capital_plan.get("confidence_shift", 0)
         confidence = int(max(50, min(95, confidence)))
 
+        edge_guard = self.edge_guard_engine.evaluate(
+            asset=asset,
+            regime=regime,
+            strategy_name=leader_name,
+            analysis_time=analysis_time,
+            proposed_decision=decision,
+            proposed_score=adjusted_score,
+            proposed_confidence=confidence,
+        )
+        decision, direction = self._apply_edge_guard(decision, edge_guard, final_direction, reasons)
+        capital_plan = self._apply_stake_multiplier(capital_plan, edge_guard.get("stake_multiplier", 1.0))
+        for r in edge_guard.get("reasons", []):
+            reasons.append(f"Edge Guard: {r}")
+
         reasons.extend([
             f"Regime final: {regime}",
+            f"Trader Council quality: {council.get('quality', 'neutro')}",
+            f"Trader Council consensus: {council.get('consensus_direction', 'none')}",
+            f"Head Trader action: {council.get('head_trader_action', 'none')}",
             f"Perfil de mercado: {market_profile.get('mode', 'neutral')}",
             f"Context Intelligence: {context_adj.get('mode', 'neutral')}",
             f"Context Pattern: {pattern_mode}",
@@ -785,4 +899,25 @@ class DecisionEngine:
             "risk_pct": capital_plan.get("risk_pct", 0.0),
             "target_value": capital_plan.get("target_value", 0.0),
             "stop_value": capital_plan.get("stop_value", 0.0),
+            "trader_council": council,
+            "council_quality": council.get("quality", "neutro"),
+            "council_consensus_direction": council.get("consensus_direction"),
+            "head_trader_action": council.get("head_trader_action", "none"),
+            "council_participants": council.get("participants", []),
+            "case_memory": council.get("memory", {}),
+            "edge_guard_mode": edge_guard.get("mode", "validation"),
+            "edge_guard_active": edge_guard.get("active", False),
+            "edge_guard_live_allowed": edge_guard.get("live_allowed", True),
+            "edge_guard_decision_cap": edge_guard.get("decision_cap"),
+            "edge_guard_stake_multiplier": edge_guard.get("stake_multiplier", 1.0),
+            "edge_guard_report": edge_guard.get("report", {}),
+            "trend_m1": indicators.get("trend_m1", indicators.get("trend", "neutral")),
+            "trend_m5": indicators.get("trend_m5", "neutral"),
+            "breakout": indicators.get("breakout", False),
+            "rejection": indicators.get("rejection", False),
+            "volatility": indicators.get("volatility", False),
+            "moved_too_fast": indicators.get("moved_too_fast", False),
+            "is_sideways": indicators.get("is_sideways", False),
+            "pattern": indicators.get("pattern"),
+            "analysis_session": analysis_time,
         }
