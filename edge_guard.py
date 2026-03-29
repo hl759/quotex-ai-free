@@ -2,6 +2,13 @@ import math
 
 from config import (
     ALPHA_HIVE_MODE,
+    BOOTSTRAP_ACTIVE,
+    BOOTSTRAP_MAX_TRADES,
+    BOOTSTRAP_MIN_CONFIDENCE,
+    BOOTSTRAP_MIN_SCORE,
+    BOOTSTRAP_STAKE_MULTIPLIER,
+    BOOTSTRAP_WARMUP_MAX_TRADES,
+    BOOTSTRAP_WARMUP_STAKE_MULTIPLIER,
     EDGE_GUARD_ACTIVE,
     EDGE_LIVE_MIN_PROB,
     EDGE_MIN_PROFIT_FACTOR,
@@ -68,6 +75,15 @@ class EdgeGuardEngine:
         prob = self._safe_float(row.get("posterior_prob_edge"), 0.0)
         return expectancy > 0 and pf >= EDGE_SEGMENT_MIN_PROFIT_FACTOR and wr > be and prob >= 0.52
 
+    def _bootstrap_ready(self, proposed_decision, proposed_score, proposed_confidence, kill_locked=False):
+        if not BOOTSTRAP_ACTIVE or kill_locked:
+            return False
+        if str(proposed_decision) not in ("ENTRADA_FORTE", "ENTRADA_CAUTELA"):
+            return False
+        confidence = self._safe_float(proposed_confidence, 0.0)
+        score = self._safe_float(proposed_score, 0.0)
+        return confidence >= BOOTSTRAP_MIN_CONFIDENCE and score >= BOOTSTRAP_MIN_SCORE
+
     def evaluate(self, asset, regime, strategy_name, analysis_time, proposed_decision, proposed_score, proposed_confidence):
         if not self.active:
             return {
@@ -111,11 +127,13 @@ class EdgeGuardEngine:
         kill_exp = self._safe_float(recent_kill.get("expectancy_r"), 0.0)
         kill_pf = self._safe_float(recent_kill.get("profit_factor"), 0.0)
         kill_prob = self._safe_float(recent_kill.get("posterior_prob_edge"), 0.0)
+        kill_locked = False
         if kill_total >= max(8, EDGE_RECENT_KILL_WINDOW):
             if kill_exp <= EDGE_RECENT_KILL_EXPECTANCY_R or kill_pf < 0.90 or kill_prob < 0.40:
                 decision_cap = self._merge_cap(decision_cap, "OBSERVAR" if self.mode == "validation" else "NAO_OPERAR")
                 stake_multiplier = min(stake_multiplier, 0.0 if self.mode == "live" else 0.15)
                 live_allowed = False if self.mode == "live" else live_allowed
+                kill_locked = True
                 reasons.append("Kill-switch recente: drift negativo detectado")
 
         recent_total = int(recent_short.get("total", 0) or 0)
@@ -128,16 +146,46 @@ class EdgeGuardEngine:
                 stake_multiplier = min(stake_multiplier, 0.45)
                 reasons.append("Janela recente fraca: reduzindo agressividade")
 
-        if global_total < max(30, EDGE_SEGMENT_MIN_TRADES):
-            decision_cap = self._merge_cap(decision_cap, "OBSERVAR")
-            stake_multiplier = min(stake_multiplier, 0.20)
-            live_allowed = False
-            reasons.append("Amostra global insuficiente: operar só como observação")
+        bootstrap_ready = self._bootstrap_ready(
+            proposed_decision=proposed_decision,
+            proposed_score=proposed_score,
+            proposed_confidence=proposed_confidence,
+            kill_locked=kill_locked,
+        )
+
+        if global_total < BOOTSTRAP_MAX_TRADES:
+            if bootstrap_ready:
+                decision_cap = self._merge_cap(decision_cap, "ENTRADA_CAUTELA")
+                stake_multiplier = min(stake_multiplier, BOOTSTRAP_STAKE_MULTIPLIER)
+                reasons.append("Bootstrap inteligente: consenso forte pode operar pequeno para construir amostra")
+            else:
+                decision_cap = self._merge_cap(decision_cap, "OBSERVAR")
+                stake_multiplier = min(stake_multiplier, max(0.08, BOOTSTRAP_STAKE_MULTIPLIER * 0.75))
+                live_allowed = False
+                reasons.append("Bootstrap: sem consenso forte suficiente, permanece em observação")
+        elif global_total < BOOTSTRAP_WARMUP_MAX_TRADES:
+            if bootstrap_ready:
+                decision_cap = self._merge_cap(decision_cap, "ENTRADA_CAUTELA")
+                stake_multiplier = min(stake_multiplier, BOOTSTRAP_WARMUP_STAKE_MULTIPLIER)
+                reasons.append("Warmup: amostra curta, mas consenso forte libera cautela")
+            elif global_expectancy > -0.03 and global_pf >= 0.95:
+                decision_cap = self._merge_cap(decision_cap, "ENTRADA_CAUTELA")
+                stake_multiplier = min(stake_multiplier, min(0.25, BOOTSTRAP_WARMUP_STAKE_MULTIPLIER))
+                reasons.append("Warmup defensivo: histórico ainda curto, porém sem degradação forte")
+            else:
+                decision_cap = self._merge_cap(decision_cap, "OBSERVAR")
+                stake_multiplier = min(stake_multiplier, 0.15)
+                live_allowed = False
+                reasons.append("Warmup: histórico curto e sem força suficiente para arriscar")
         elif global_total < EDGE_PROOF_MIN_TRADES:
             if global_expectancy > 0 and global_pf >= 1.0 and global_prob >= 0.55:
                 decision_cap = self._merge_cap(decision_cap, "ENTRADA_CAUTELA")
                 stake_multiplier = min(stake_multiplier, 0.40)
                 reasons.append("Edge ainda em validação: cautela e stake reduzida")
+            elif bootstrap_ready and recent_exp > EDGE_RECENT_WARN_EXPECTANCY_R:
+                decision_cap = self._merge_cap(decision_cap, "ENTRADA_CAUTELA")
+                stake_multiplier = min(stake_multiplier, min(0.22, BOOTSTRAP_WARMUP_STAKE_MULTIPLIER))
+                reasons.append("Validação inicial: consenso forte mantém entrada pequena enquanto prova amadurece")
             else:
                 decision_cap = self._merge_cap(decision_cap, "OBSERVAR")
                 stake_multiplier = min(stake_multiplier, 0.20)
@@ -190,14 +238,27 @@ class EdgeGuardEngine:
         if strong_segments >= 3 and global_total >= EDGE_PROOF_MIN_TRADES and global_expectancy > 0 and recent_exp > 0:
             stake_multiplier = min(1.0, max(stake_multiplier, 0.90))
             reasons.append("Confluência estatística forte: mantendo stake alta")
+        elif strong_segments >= 2 and global_total < EDGE_PROOF_MIN_TRADES and bootstrap_ready:
+            stake_multiplier = min(1.0, max(stake_multiplier, BOOTSTRAP_WARMUP_STAKE_MULTIPLIER))
+            reasons.append("Bootstrap com boa confluência segmentada: mantendo cautela operável")
 
         if proposed_decision == "ENTRADA_FORTE" and self.mode != "live" and global_total < EDGE_PROOF_MIN_TRADES:
             decision_cap = self._merge_cap(decision_cap, "ENTRADA_CAUTELA")
             reasons.append("Sem prova completa, ENTRADA_FORTE é rebaixada")
 
+        phase = "proven"
+        if global_total < BOOTSTRAP_MAX_TRADES:
+            phase = "bootstrap"
+        elif global_total < BOOTSTRAP_WARMUP_MAX_TRADES:
+            phase = "warmup"
+        elif global_total < EDGE_PROOF_MIN_TRADES:
+            phase = "validation"
+
         return {
             "active": True,
             "mode": self.mode,
+            "phase": phase,
+            "bootstrap_ready": bool(bootstrap_ready),
             "decision_cap": decision_cap,
             "stake_multiplier": round(max(0.0, min(1.0, stake_multiplier)), 2),
             "live_allowed": bool(live_allowed and (decision_cap != "NAO_OPERAR")),

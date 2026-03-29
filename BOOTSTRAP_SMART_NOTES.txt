@@ -1,0 +1,26 @@
+Alpha HIVE - Bootstrap Inteligente
+
+Objetivo:
+- reduzir o excesso de OBSERVAR no início
+- permitir ENTRADA_CAUTELA com stake mínima quando houver consenso forte
+- continuar rígido contra drift e contexto fraco
+
+Variáveis novas:
+- BOOTSTRAP_ACTIVE=1
+- BOOTSTRAP_MIN_CONFIDENCE=74
+- BOOTSTRAP_MIN_SCORE=2.35
+- BOOTSTRAP_MAX_TRADES=12
+- BOOTSTRAP_WARMUP_MAX_TRADES=40
+- BOOTSTRAP_STAKE_MULTIPLIER=0.12
+- BOOTSTRAP_WARMUP_STAKE_MULTIPLIER=0.20
+
+Fases:
+- bootstrap: 0 a 11 trades globais
+- warmup: 12 a 39 trades globais
+- validation: 40 até EDGE_PROOF_MIN_TRADES-1
+- proven: EDGE_PROOF_MIN_TRADES+
+
+Comportamento:
+- se houver ENTRADA_FORTE/ENTRADA_CAUTELA + score/confiança mínimos, o guard libera ENTRADA_CAUTELA pequena
+- se não houver força suficiente, continua OBSERVAR
+- kill-switch recente continua soberano
