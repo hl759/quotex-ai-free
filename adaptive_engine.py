@@ -1,6 +1,8 @@
 import json
 import os
 
+from config import ADAPTIVE_MIN_TRADES, ADAPTIVE_STRONG_MIN_TRADES, ADAPTIVE_PROVEN_MIN_TRADES
+
 DATA_DIR = os.environ.get("ALPHA_HIVE_DATA_DIR", "/opt/render/project/src/data")
 os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -64,21 +66,32 @@ class AdaptiveEngine:
         wins = int(profile["wins"])
         winrate = (wins / total) if total > 0 else 0.0
 
-        if total >= 10:
+        if total >= ADAPTIVE_PROVEN_MIN_TRADES:
             if winrate >= 0.66:
-                profile["weight"] = min(1.28, float(profile["weight"]) + 0.04)
+                profile["weight"] = min(1.20, float(profile["weight"]) + 0.02)
                 profile["status"] = "favored"
-            elif winrate >= 0.58:
-                profile["weight"] = min(1.18, float(profile["weight"]) + 0.02)
+            elif winrate >= 0.60:
+                profile["weight"] = min(1.12, float(profile["weight"]) + 0.01)
                 profile["status"] = "slightly_favored"
-            elif winrate <= 0.38:
-                profile["weight"] = max(0.72, float(profile["weight"]) - 0.05)
+            elif winrate <= 0.40:
+                profile["weight"] = max(0.82, float(profile["weight"]) - 0.03)
                 profile["status"] = "reduced"
             elif winrate <= 0.45:
-                profile["weight"] = max(0.84, float(profile["weight"]) - 0.02)
+                profile["weight"] = max(0.90, float(profile["weight"]) - 0.01)
                 profile["status"] = "slightly_reduced"
             else:
                 profile["status"] = "neutral"
+        elif total >= ADAPTIVE_STRONG_MIN_TRADES:
+            if winrate >= 0.66:
+                profile["weight"] = min(1.12, float(profile["weight"]) + 0.01)
+                profile["status"] = "slightly_favored"
+            elif winrate <= 0.40:
+                profile["weight"] = max(0.90, float(profile["weight"]) - 0.01)
+                profile["status"] = "slightly_reduced"
+            else:
+                profile["status"] = "neutral"
+        else:
+            profile["status"] = "neutral"
 
         self._save()
 
@@ -92,7 +105,7 @@ class AdaptiveEngine:
         wins = int(profile.get("wins", 0))
         status = profile.get("status", "neutral")
 
-        if total < 10:
+        if total < ADAPTIVE_MIN_TRADES:
             return "Peso adaptativo neutro"
 
         winrate = round((wins / total) * 100, 2) if total else 0.0
@@ -112,7 +125,7 @@ class AdaptiveEngine:
         total = int(profile.get("total", 0))
         loss = int(profile.get("loss", 0))
         wins = int(profile.get("wins", 0))
-        if total < 14:
+        if total < ADAPTIVE_STRONG_MIN_TRADES:
             return False
         winrate = (wins / total) if total else 0.0
-        return winrate <= 0.30 and loss >= 8
+        return total >= ADAPTIVE_PROVEN_MIN_TRADES and winrate <= 0.36 and loss >= max(25, int(total * 0.55))

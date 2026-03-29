@@ -1,6 +1,8 @@
 import json
 import os
 
+from config import ADAPTIVE_MIN_TRADES, ADAPTIVE_STRONG_MIN_TRADES, ADAPTIVE_PROVEN_MIN_TRADES
+
 DATA_DIR = os.environ.get("ALPHA_HIVE_DATA_DIR", "/opt/render/project/src/data")
 os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -122,20 +124,32 @@ class StrategyLab:
         total = stats.get("total", 0)
         winrate = stats.get("winrate", 0.0)
 
-        # Etapa 1: adaptação leve e conservadora
-        if total < 8:
+        if total < ADAPTIVE_MIN_TRADES:
             return 0.0, "Setup sem amostra suficiente"
 
-        if winrate >= 68:
-            return 0.35, "Setup muito forte"
-        if winrate >= 58:
-            return 0.18, "Setup favorável"
-        if winrate <= 38:
-            return -0.22, "Setup fraco"
+        if total >= ADAPTIVE_PROVEN_MIN_TRADES:
+            if winrate >= 70:
+                return 0.28, "Setup comprovadamente forte"
+            if winrate >= 62:
+                return 0.12, "Setup consistente"
+            if winrate <= 40:
+                return -0.18, "Setup comprovadamente fraco"
+        elif total >= ADAPTIVE_STRONG_MIN_TRADES:
+            if winrate >= 67:
+                return 0.18, "Setup forte"
+            if winrate >= 60:
+                return 0.08, "Setup favorável"
+            if winrate <= 42:
+                return -0.12, "Setup fraco"
+        else:
+            if winrate >= 64:
+                return 0.08, "Setup promissor"
+            if winrate <= 40:
+                return -0.08, "Setup cauteloso"
 
         return 0.0, "Setup neutro"
 
-    def top_setups(self, min_total=3, limit=10):
+    def top_setups(self, min_total=ADAPTIVE_MIN_TRADES, limit=10):
         rows = []
         for setup_id in self.data.keys():
             stats = self.setup_stats(setup_id)

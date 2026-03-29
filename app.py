@@ -14,6 +14,7 @@ from result_engine import ResultEngine
 from strategy_lab import StrategyLab
 from journal_manager import JournalManager
 from decision_engine import DecisionEngine
+from edge_audit import EdgeAuditEngine
 
 try:
     from adaptive_engine import AdaptiveEngine
@@ -30,7 +31,7 @@ try:
 except Exception:
     MarketProfileEngine = None
 
-from config import ASSETS, SCAN_INTERVAL_SECONDS
+from config import ASSETS, SCAN_INTERVAL_SECONDS, DEFAULT_PAYOUT
 
 app = Flask(__name__)
 
@@ -46,6 +47,7 @@ adaptive_engine = AdaptiveEngine() if AdaptiveEngine else None
 memory_engine = MemoryEngine() if MemoryEngine else None
 market_profile_engine = MarketProfileEngine() if MarketProfileEngine else None
 journal = JournalManager()
+edge_audit = EdgeAuditEngine()
 
 STATE_DIR = "/tmp/nexus_state"
 LATEST_SIGNALS_FILE = os.path.join(STATE_DIR, "latest_signals.json")
@@ -162,10 +164,22 @@ class CapitalAutoTracker:
     def _compute_daily_pnl(self, valid_trades, capital_current):
         today = self._today_key()
         todays = [t for t in valid_trades if self._trade_date_key(t) == today]
-        if not todays or capital_current <= 0:
+        if not todays:
             return 0.0
 
-        # aproximação neutra de risco diário
+        direct = []
+        for trade in todays:
+            try:
+                direct.append(float(trade.get("gross_pnl", 0.0) or 0.0))
+            except Exception:
+                direct.append(0.0)
+
+        if any(abs(v) > 0 for v in direct):
+            return round(sum(direct), 2)
+
+        if capital_current <= 0:
+            return 0.0
+
         unit_risk = max(1.0, round(capital_current * 0.01, 2))
         pnl = 0.0
         for trade in todays:
@@ -249,7 +263,11 @@ def decorate_decision(decision):
         "setup_id": decision.get("setup_id"),
         "context_id": decision.get("context_id"),
         "strategy_name": decision.get("strategy_name", "none"),
-        "evolution_variant": decision.get("evolution_variant", "base")
+        "evolution_variant": decision.get("evolution_variant", "base"),
+        "suggested_stake": decision.get("suggested_stake", 0.0),
+        "risk_pct": decision.get("risk_pct", 0.0),
+        "payout": DEFAULT_PAYOUT,
+        "date": analysis.strftime("%Y-%m-%d")
     }
 
 
@@ -282,6 +300,10 @@ def enqueue_pending_decision(current_decision, matched_market):
         "strategy_name": current_decision.get("strategy_name", "none"),
         "evolution_variant": current_decision.get("evolution_variant", "base"),
         "regime": current_decision.get("regime", "unknown"),
+        "stake_value": current_decision.get("suggested_stake", 0.0),
+        "risk_pct": current_decision.get("risk_pct", 0.0),
+        "payout": float(current_decision.get("payout", DEFAULT_PAYOUT) or DEFAULT_PAYOUT),
+        "date": current_decision.get("date") or now_brazil().strftime("%Y-%m-%d"),
     }
 
     if record["uid"] not in existing:
@@ -339,12 +361,29 @@ def register_all_learning_outputs(signal, result_data):
         "setup_id": setup_id,
         "context_id": context_id,
         "evolution_variant": signal.get("evolution_variant", "base"),
+        "stake": result_data.get("stake", signal.get("stake_value", 0.0)),
+        "risk_pct": signal.get("risk_pct", 0.0),
+        "payout": result_data.get("payout", signal.get("payout", DEFAULT_PAYOUT)),
+        "gross_pnl": result_data.get("gross_pnl", 0.0),
+        "gross_r": result_data.get("gross_r", 0.0),
+        "breakeven_winrate": result_data.get("breakeven_winrate", 0.0),
+        "entry_price": result_data.get("entry_price"),
+        "exit_price": result_data.get("exit_price"),
+        "entry_candle_time": result_data.get("entry_candle_time"),
+        "exit_candle_time": result_data.get("exit_candle_time"),
+        "evaluation_mode": result_data.get("evaluation_mode", "candle_close"),
+        "date": signal.get("date") or now_brazil().strftime("%Y-%m-%d"),
     }
 
     try:
         journal.add_trade(journal_payload)
     except Exception as e:
         print("Journal add_trade error:", e, flush=True)
+
+    try:
+        edge_audit.record_trade(signal, result_data)
+    except Exception as e:
+        print("Edge audit record error:", e, flush=True)
 
 
 def process_pending_decisions(market):
@@ -407,6 +446,7 @@ def get_snapshot():
         "best_assets": journal.best_assets(),
         "best_hours": journal.best_hours(),
         "capital_state": load_capital_state(),
+        "edge_report": edge_audit.compute_report(),
     }
 
 
@@ -797,6 +837,11 @@ def health():
         "alive": True,
         "uptime_seconds": round(time.time() - START_TIME, 2)
     }, 200
+
+
+@app.route("/edge-report", methods=["GET"])
+def edge_report_get():
+    return jsonify(edge_audit.compute_report())
 
 
 @app.route("/capital-state", methods=["GET"])

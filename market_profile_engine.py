@@ -1,6 +1,8 @@
 import json
 import os
 
+from config import ADAPTIVE_MIN_TRADES, ADAPTIVE_STRONG_MIN_TRADES
+
 DATA_DIR = os.environ.get("ALPHA_HIVE_DATA_DIR", "/opt/render/project/src/data")
 os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -58,13 +60,13 @@ class MarketProfileEngine:
             row = self.data[key]
             total = int(row.get("total", 0))
             wins = int(row.get("wins", 0))
-            if total < 10:
+            if total < ADAPTIVE_MIN_TRADES:
                 row["mode"] = "neutral"
                 continue
             winrate = wins / total if total else 0.0
-            if winrate >= 0.64:
+            if total >= ADAPTIVE_STRONG_MIN_TRADES and winrate >= 0.62:
                 row["mode"] = "aggressive"
-            elif winrate <= 0.42:
+            elif total >= ADAPTIVE_STRONG_MIN_TRADES and winrate <= 0.43:
                 row["mode"] = "defensive"
             else:
                 row["mode"] = "neutral"
@@ -74,26 +76,29 @@ class MarketProfileEngine:
     def _mode_for(self, regime):
         regime_key = str(regime or "unknown")
         row = self.data.get(regime_key)
-        if row and int(row.get("total", 0)) >= 10:
+        if row and int(row.get("total", 0)) >= ADAPTIVE_STRONG_MIN_TRADES:
             return row.get("mode", "neutral")
-        return self.data.get("global", {}).get("mode", "neutral")
+        global_row = self.data.get("global", {})
+        if int(global_row.get("total", 0)) >= ADAPTIVE_STRONG_MIN_TRADES:
+            return global_row.get("mode", "neutral")
+        return "neutral"
 
     def get_profile(self, regime):
         mode = self._mode_for(regime)
         if mode == "aggressive":
             return {
                 "mode": "aggressive",
-                "score_shift": -0.10,
-                "consensus_bonus": 0.06,
-                "confidence_shift": 2,
+                "score_shift": -0.06,
+                "consensus_bonus": 0.04,
+                "confidence_shift": 1,
                 "reason": "Mercado favorece execução"
             }
         if mode == "defensive":
             return {
                 "mode": "defensive",
-                "score_shift": 0.18,
-                "consensus_bonus": -0.04,
-                "confidence_shift": -3,
+                "score_shift": 0.10,
+                "consensus_bonus": -0.02,
+                "confidence_shift": -2,
                 "reason": "Mercado pede defesa"
             }
         return {

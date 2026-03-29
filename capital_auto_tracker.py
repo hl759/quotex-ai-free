@@ -1,4 +1,3 @@
-
 import json
 import os
 from datetime import datetime
@@ -52,6 +51,12 @@ class CapitalAutoTracker:
     def _result_value(self, trade):
         return str(trade.get("result", "")).upper()
 
+    def _safe_float(self, value, default=0.0):
+        try:
+            return float(value)
+        except Exception:
+            return float(default)
+
     def _today_key(self):
         return datetime.utcnow().strftime("%Y-%m-%d")
 
@@ -82,7 +87,12 @@ class CapitalAutoTracker:
     def _compute_daily_pnl(self, valid_trades, capital_current):
         today = self._today_key()
         todays = [t for t in valid_trades if self._trade_date_key(t) == today]
-        if not todays or capital_current <= 0:
+        if not todays:
+            return 0.0
+        direct = [self._safe_float(t.get("gross_pnl"), 0.0) for t in todays]
+        if any(abs(v) > 0 for v in direct):
+            return round(sum(direct), 2)
+        if capital_current <= 0:
             return 0.0
         unit_risk = max(1.0, round(capital_current * 0.01, 2))
         pnl = 0.0

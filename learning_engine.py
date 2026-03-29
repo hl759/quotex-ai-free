@@ -1,13 +1,15 @@
 import json
 import os
 
+from config import ADAPTIVE_MIN_TRADES, ADAPTIVE_STRONG_MIN_TRADES, ADAPTIVE_PROVEN_MIN_TRADES
+
 STATE_FILE = "/tmp/nexus_learning.json"
 
 
 class LearningEngine:
     def dynamic_signal_limit(self):
             return 5
-    
+
     def should_filter_asset(self, asset):
         asset = self._ensure_asset(asset)
         if not asset:
@@ -18,12 +20,12 @@ class LearningEngine:
         loss = int(data.get("loss", 0))
         total = wins + loss
 
-        if total < 8:
+        if total < ADAPTIVE_MIN_TRADES:
             return False
 
         winrate = wins / total if total else 0.0
-        return winrate < 0.35
-    
+        return winrate < 0.40 and loss >= max(12, total // 2)
+
     def __init__(self):
         self.memory = self._load()
 
@@ -77,11 +79,14 @@ class LearningEngine:
         data = self.memory.get(asset, {"wins": 0, "loss": 0})
         total = data["wins"] + data["loss"]
 
-        if total < 5:
+        if total < ADAPTIVE_MIN_TRADES:
             return 0.0
 
-        winrate = data["wins"] / total
-        return round((winrate - 0.5) * 2, 2)
+        winrate = data["wins"] / total if total else 0.0
+        sample_factor = min(1.0, total / float(ADAPTIVE_PROVEN_MIN_TRADES))
+        raw = (winrate - 0.5) * 1.4
+        boost = max(-0.22, min(0.22, raw * sample_factor))
+        return round(boost, 2)
 
     def get_calibration_profile(self, asset=None):
         if asset:
@@ -89,7 +94,7 @@ class LearningEngine:
             data = self.memory.get(asset, {"wins": 0, "loss": 0})
             total = data["wins"] + data["loss"]
 
-            if total < 5:
+            if total < ADAPTIVE_MIN_TRADES:
                 return {
                     "confidence_factor": 1.0,
                     "aggressiveness": 1.0,
@@ -99,25 +104,25 @@ class LearningEngine:
                 }
 
             winrate = data["wins"] / total
-            confidence_factor = 0.8 + (winrate * 0.4)
-            aggressiveness = 0.9 + (winrate * 0.3)
+            confidence_factor = 0.95 + ((winrate - 0.5) * 0.35)
+            aggressiveness = 0.95 + ((winrate - 0.5) * 0.20)
 
-            if winrate >= 0.65:
-                min_score = 2.8
-                max_signals = 3
+            if total >= ADAPTIVE_STRONG_MIN_TRADES and winrate >= 0.62:
+                min_score = 2.9
+                max_signals = 2
                 mode = "confiante"
-            elif winrate <= 0.40:
-                min_score = 3.4
+            elif total >= ADAPTIVE_STRONG_MIN_TRADES and winrate <= 0.43:
+                min_score = 3.3
                 max_signals = 1
                 mode = "cautela"
             else:
-                min_score = 3.0
+                min_score = 3.05
                 max_signals = 2
                 mode = "equilibrado"
 
             return {
-                "confidence_factor": round(confidence_factor, 2),
-                "aggressiveness": round(aggressiveness, 2),
+                "confidence_factor": round(max(0.88, min(1.12, confidence_factor)), 2),
+                "aggressiveness": round(max(0.88, min(1.08, aggressiveness)), 2),
                 "min_score": round(min_score, 2),
                 "max_signals": max_signals,
                 "mode": mode
@@ -130,7 +135,7 @@ class LearningEngine:
             total_loss += int(data.get("loss", 0))
 
         total = total_wins + total_loss
-        if total < 5:
+        if total < ADAPTIVE_MIN_TRADES:
             return {
                 "confidence_factor": 1.0,
                 "aggressiveness": 1.0,
@@ -139,26 +144,26 @@ class LearningEngine:
                 "mode": "base"
             }
 
-        winrate = total_wins / total
-        confidence_factor = 0.8 + (winrate * 0.4)
-        aggressiveness = 0.9 + (winrate * 0.3)
+        winrate = total_wins / total if total else 0.0
+        confidence_factor = 0.95 + ((winrate - 0.5) * 0.35)
+        aggressiveness = 0.95 + ((winrate - 0.5) * 0.20)
 
-        if winrate >= 0.65:
-            min_score = 2.8
-            max_signals = 3
+        if total >= ADAPTIVE_STRONG_MIN_TRADES and winrate >= 0.62:
+            min_score = 2.9
+            max_signals = 2
             mode = "confiante"
-        elif winrate <= 0.40:
-            min_score = 3.4
+        elif total >= ADAPTIVE_STRONG_MIN_TRADES and winrate <= 0.43:
+            min_score = 3.3
             max_signals = 1
             mode = "cautela"
         else:
-            min_score = 3.0
+            min_score = 3.05
             max_signals = 2
             mode = "equilibrado"
 
         return {
-            "confidence_factor": round(confidence_factor, 2),
-            "aggressiveness": round(aggressiveness, 2),
+            "confidence_factor": round(max(0.88, min(1.12, confidence_factor)), 2),
+            "aggressiveness": round(max(0.88, min(1.08, aggressiveness)), 2),
             "min_score": round(min_score, 2),
             "max_signals": max_signals,
             "mode": mode
@@ -170,9 +175,9 @@ class LearningEngine:
 
     def get_adaptive_bonus(self, asset, *args, **kwargs):
         boost = self.get_score_boost(asset)
-        if boost > 0.2:
+        if boost > 0.12:
             return boost, "Ativo favorável"
-        if boost < -0.2:
+        if boost < -0.12:
             return boost, "Ativo fraco"
         return boost, "Histórico insuficiente"
 
@@ -186,11 +191,11 @@ class LearningEngine:
         loss = int(data.get("loss", 0))
         total = wins + loss
 
-        if total < 6:
+        if total < ADAPTIVE_STRONG_MIN_TRADES:
             return False
 
         winrate = wins / total if total else 0.0
-        return loss >= 5 and winrate < 0.35
+        return loss >= max(20, int(total * 0.55)) and winrate < 0.40
 
     def get_rigor_penalty(self):
         total_wins = 0
@@ -200,15 +205,15 @@ class LearningEngine:
             total_loss += int(data.get("loss", 0))
 
         total = total_wins + total_loss
-        if total < 8:
+        if total < ADAPTIVE_MIN_TRADES:
             return 0.0
 
         winrate = total_wins / total if total else 0.0
 
-        if winrate < 0.40:
-            return 0.45
-        if winrate > 0.65:
-            return -0.10
+        if total >= ADAPTIVE_STRONG_MIN_TRADES and winrate < 0.43:
+            return 0.25
+        if total >= ADAPTIVE_STRONG_MIN_TRADES and winrate > 0.60:
+            return -0.05
         return 0.0
 
     def get_global_bias(self):
@@ -219,14 +224,14 @@ class LearningEngine:
             total_loss += int(data.get("loss", 0))
 
         total = total_wins + total_loss
-        if total < 8:
+        if total < ADAPTIVE_MIN_TRADES:
             return 0.0, "Sem memória global suficiente"
 
         winrate = total_wins / total if total else 0.0
-        if winrate >= 0.65:
-            return 0.2, "Fase global positiva"
-        if winrate <= 0.40:
-            return -0.2, "Fase global cautelosa"
+        if total >= ADAPTIVE_STRONG_MIN_TRADES and winrate >= 0.62:
+            return 0.08, "Fase global positiva"
+        if total >= ADAPTIVE_STRONG_MIN_TRADES and winrate <= 0.43:
+            return -0.10, "Fase global cautelosa"
         return 0.0, "Fase global neutra"
 
     def update_stats(self, signals):

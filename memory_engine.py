@@ -1,6 +1,8 @@
 import json
 import os
 
+from config import ADAPTIVE_MIN_TRADES, ADAPTIVE_STRONG_MIN_TRADES, ADAPTIVE_PROVEN_MIN_TRADES
+
 DATA_DIR = os.environ.get("ALPHA_HIVE_DATA_DIR", "/opt/render/project/src/data")
 os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -116,14 +118,23 @@ class MemoryEngine:
         total = stats.get("total", 0)
         winrate = stats.get("winrate", 0.0)
 
-        if total < 8:
+        if total < ADAPTIVE_MIN_TRADES:
             return 0.0, "Memória sem amostra suficiente"
-        if winrate >= 70:
-            return 0.28, "Memória muito favorável"
-        if winrate >= 60:
-            return 0.14, "Memória favorável"
-        if winrate <= 35:
-            return -0.20, "Memória desfavorável"
-        if winrate <= 42:
-            return -0.10, "Memória levemente desfavorável"
+        if total >= ADAPTIVE_PROVEN_MIN_TRADES:
+            if winrate >= 70:
+                return 0.20, "Memória comprovadamente favorável"
+            if winrate <= 40:
+                return -0.16, "Memória comprovadamente desfavorável"
+        elif total >= ADAPTIVE_STRONG_MIN_TRADES:
+            if winrate >= 66:
+                return 0.12, "Memória muito favorável"
+            if winrate >= 60:
+                return 0.06, "Memória favorável"
+            if winrate <= 42:
+                return -0.10, "Memória desfavorável"
+        else:
+            if winrate >= 64:
+                return 0.05, "Memória promissora"
+            if winrate <= 40:
+                return -0.06, "Memória cautelosa"
         return 0.0, "Memória neutra"

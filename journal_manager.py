@@ -1,6 +1,8 @@
 import json
 import os
 
+from config import DEFAULT_PAYOUT
+
 DATA_DIR = os.environ.get("ALPHA_HIVE_DATA_DIR", "/opt/render/project/src/data")
 os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -33,6 +35,12 @@ class JournalManager:
     def _valid_trades(self):
         return [t for t in self._load() if str(t.get("result", "")).upper() in ("WIN", "LOSS")]
 
+    def _safe_float(self, value, default=0.0):
+        try:
+            return float(value)
+        except Exception:
+            return float(default)
+
     def _extract_hour_bucket(self, trade):
         try:
             analysis_time = str(trade.get("analysis_time", "")).strip()
@@ -50,27 +58,52 @@ class JournalManager:
             if self._trade_id(item) == incoming:
                 return
         data.insert(0, trade)
-        if len(data) > 2000:
-            data = data[:2000]
+        if len(data) > 4000:
+            data = data[:4000]
         self._save(data)
+
+    def _economic_stats(self, valid):
+        if not valid:
+            return {
+                "total_pnl": 0.0,
+                "expectancy_r": 0.0,
+                "avg_payout": round(DEFAULT_PAYOUT, 4),
+                "breakeven_winrate": round((1 / (1 + DEFAULT_PAYOUT)) * 100, 2),
+                "profit_factor": 0.0,
+            }
+        pnls = [self._safe_float(t.get("gross_pnl"), 0.0) for t in valid]
+        rs = [self._safe_float(t.get("gross_r"), 0.0) for t in valid]
+        payouts = [max(0.0, self._safe_float(t.get("payout"), DEFAULT_PAYOUT)) for t in valid]
+        avg_payout = sum(payouts) / len(payouts) if payouts else DEFAULT_PAYOUT
+        gross_profit = sum(p for p in pnls if p > 0)
+        gross_loss = abs(sum(p for p in pnls if p < 0))
+        profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else (999.0 if gross_profit > 0 else 0.0)
+        return {
+            "total_pnl": round(sum(pnls), 2),
+            "expectancy_r": round(sum(rs) / len(rs), 4) if rs else 0.0,
+            "avg_payout": round(avg_payout, 4),
+            "breakeven_winrate": round((1 / (1 + avg_payout)) * 100, 2) if avg_payout > 0 else 100.0,
+            "profit_factor": round(profit_factor, 3),
+        }
 
     def stats(self):
         valid = self._valid_trades()
         if not valid:
-            return {"total": 0, "wins": 0, "loss": 0, "winrate": 0.0}
+            return {"total": 0, "wins": 0, "loss": 0, "winrate": 0.0, **self._economic_stats(valid)}
         wins = sum(1 for t in valid if str(t.get("result", "")).upper() == "WIN")
         total = len(valid)
         return {
             "total": total,
             "wins": wins,
             "loss": total - wins,
-            "winrate": round((wins / total) * 100, 2)
+            "winrate": round((wins / total) * 100, 2),
+            **self._economic_stats(valid)
         }
 
     def asset_stats(self, asset):
         valid = [t for t in self._valid_trades() if t.get("asset") == asset]
         if not valid:
-            return {"asset": asset, "total": 0, "wins": 0, "loss": 0, "winrate": 0.0}
+            return {"asset": asset, "total": 0, "wins": 0, "loss": 0, "winrate": 0.0, **self._economic_stats(valid)}
         wins = sum(1 for t in valid if str(t.get("result", "")).upper() == "WIN")
         total = len(valid)
         return {
@@ -78,37 +111,38 @@ class JournalManager:
             "total": total,
             "wins": wins,
             "loss": total - wins,
-            "winrate": round((wins / total) * 100, 2)
+            "winrate": round((wins / total) * 100, 2),
+            **self._economic_stats(valid)
         }
 
     def best_assets(self):
         grouped = {}
         for t in self._valid_trades():
             asset = t.get("asset", "N/A")
-            grouped.setdefault(asset, {"asset": asset, "total": 0, "wins": 0})
-            grouped[asset]["total"] += 1
-            if str(t.get("result", "")).upper() == "WIN":
-                grouped[asset]["wins"] += 1
+            grouped.setdefault(asset, [])
+            grouped[asset].append(t)
 
         result = []
-        for info in grouped.values():
-            if info["total"] == 0:
-                continue
-            result.append({
-                "asset": info["asset"],
-                "total": info["total"],
-                "wins": info["wins"],
-                "winrate": round((info["wins"] / info["total"]) * 100, 2)
-            })
+        for asset, rows in grouped.items():
+            total = len(rows)
+            wins = sum(1 for t in rows if str(t.get("result", "")).upper() == "WIN")
+            row = {
+                "asset": asset,
+                "total": total,
+                "wins": wins,
+                "winrate": round((wins / total) * 100, 2) if total else 0.0,
+                **self._economic_stats(rows)
+            }
+            result.append(row)
 
         result = [r for r in result if r["total"] >= 1]
-        result.sort(key=lambda x: (x["winrate"], x["total"]), reverse=True)
+        result.sort(key=lambda x: (x.get("expectancy_r", 0.0), x["winrate"], x["total"]), reverse=True)
         return result[:10]
 
     def hour_stats(self, hour_bucket):
         valid = [t for t in self._valid_trades() if self._extract_hour_bucket(t) == hour_bucket]
         if not valid:
-            return {"hour": hour_bucket, "total": 0, "wins": 0, "loss": 0, "winrate": 0.0}
+            return {"hour": hour_bucket, "total": 0, "wins": 0, "loss": 0, "winrate": 0.0, **self._economic_stats(valid)}
         wins = sum(1 for t in valid if str(t.get("result", "")).upper() == "WIN")
         total = len(valid)
         return {
@@ -116,7 +150,8 @@ class JournalManager:
             "total": total,
             "wins": wins,
             "loss": total - wins,
-            "winrate": round((wins / total) * 100, 2)
+            "winrate": round((wins / total) * 100, 2),
+            **self._economic_stats(valid)
         }
 
     def best_hours(self):
@@ -125,24 +160,24 @@ class JournalManager:
             hb = self._extract_hour_bucket(t)
             if not hb:
                 continue
-            grouped.setdefault(hb, {"hour": hb, "total": 0, "wins": 0})
-            grouped[hb]["total"] += 1
-            if str(t.get("result", "")).upper() == "WIN":
-                grouped[hb]["wins"] += 1
+            grouped.setdefault(hb, [])
+            grouped[hb].append(t)
 
         result = []
-        for info in grouped.values():
-            if info["total"] == 0:
-                continue
-            result.append({
-                "hour": info["hour"],
-                "total": info["total"],
-                "wins": info["wins"],
-                "winrate": round((info["wins"] / info["total"]) * 100, 2)
-            })
+        for hour, rows in grouped.items():
+            wins = sum(1 for t in rows if str(t.get("result", "")).upper() == "WIN")
+            total = len(rows)
+            row = {
+                "hour": hour,
+                "total": total,
+                "wins": wins,
+                "winrate": round((wins / total) * 100, 2) if total else 0.0,
+                **self._economic_stats(rows)
+            }
+            result.append(row)
 
         result = [r for r in result if r["total"] >= 1]
-        result.sort(key=lambda x: (x["winrate"], x["total"]), reverse=True)
+        result.sort(key=lambda x: (x.get("expectancy_r", 0.0), x["winrate"], x["total"]), reverse=True)
         return result[:10]
 
     def recent_asset_results(self, asset, limit=6):
