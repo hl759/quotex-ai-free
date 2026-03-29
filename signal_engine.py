@@ -112,6 +112,32 @@ class SignalEngine:
             "regime": regime,
         }
 
+    def generate_signals_from_decisions(self, decision_candidates):
+        if not decision_candidates:
+            return []
+
+        candidates = []
+        for asset_name, decision in [
+            (decision.get("asset", "N/A"), decision) if isinstance(decision, dict) else ("N/A", {})
+            for decision, _item in decision_candidates
+        ]:
+            if self._is_operable(decision):
+                candidates.append((asset_name, decision))
+
+        if not candidates:
+            return []
+
+        candidates.sort(
+            key=lambda x: (
+                float(x[1].get("score", 0.0)),
+                int(x[1].get("confidence", 0))
+            ),
+            reverse=True
+        )
+
+        best_asset, best_decision = candidates[0]
+        return [self._decision_to_signal(best_asset, best_decision)]
+
     def generate_signals(self, market_data):
         if not market_data:
             return []

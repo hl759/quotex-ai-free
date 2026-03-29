@@ -415,24 +415,26 @@ def scanner_loop():
     while True:
         try:
             market = scanner.scan_assets()
-            raw_signals = signal_engine.generate_signals(market)
-            signals = normalize_signals(raw_signals if raw_signals else [])
 
             process_pending_decisions(market)
             capital_auto_tracker.update()
 
             decision_candidates = []
             analysis_time = now_brazil().strftime("%H:%M")
+            current_weekday = now_brazil().weekday()
             capital_state = load_capital_state()
 
             for item in market:
                 indicators = dict(item.get("indicators", {}))
                 indicators["analysis_time"] = analysis_time
-                indicators["weekday"] = now_brazil().weekday()
+                indicators["weekday"] = current_weekday
                 indicators.update(capital_state)
                 decision = decision_engine.decide(item.get("asset"), indicators)
                 decision["provider"] = item.get("provider", "auto")
                 decision_candidates.append((decision, item))
+
+            raw_signals = signal_engine.generate_signals_from_decisions(decision_candidates)
+            signals = normalize_signals(raw_signals if raw_signals else [])
 
             if decision_candidates:
                 decision_candidates.sort(key=lambda x: (x[0].get("score", 0), x[0].get("confidence", 0)), reverse=True)
