@@ -2,6 +2,7 @@ import json
 import math
 import os
 from statistics import mean
+from json_safe import safe_dump, safe_dumps, to_jsonable
 
 from config import DEFAULT_PAYOUT, EDGE_PROOF_MIN_TRADES, EDGE_SEGMENT_MIN_TRADES
 
@@ -30,7 +31,7 @@ class EdgeAuditEngine:
     def _save_json(self, path, data):
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False)
+            safe_dump(data, f)
         os.replace(tmp, path)
 
     def _safe_float(self, value, default=0.0):

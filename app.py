@@ -4,6 +4,7 @@ import threading
 import time
 from datetime import datetime, timedelta
 from flask import Flask, jsonify, render_template_string, request
+from json_safe import safe_dump, safe_dumps, to_jsonable
 
 from scanner import MarketScanner
 from signal_engine import SignalEngine
@@ -79,7 +80,7 @@ def read_json(path, default):
 def write_json(path, data):
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False)
+        safe_dump(data, f)
     os.replace(tmp, path)
 
 
@@ -896,7 +897,7 @@ def _boot():
 @app.route("/")
 def home():
     ensure_scanner_started()
-    return render_template_string(HTML_PAGE, snapshot_json=json.dumps(get_snapshot(), ensure_ascii=False))
+    return render_template_string(HTML_PAGE, snapshot_json=safe_dumps(get_snapshot()))
 
 
 import time
@@ -915,14 +916,14 @@ def health():
 
 @app.route("/edge-report", methods=["GET"])
 def edge_report_get():
-    return jsonify(edge_audit.compute_report())
+    return jsonify(to_jsonable(edge_audit.compute_report()))
 
 
 @app.route("/capital-state", methods=["GET"])
 def capital_state_get():
     ensure_scanner_started()
     capital_auto_tracker.update()
-    return jsonify(load_capital_state())
+    return jsonify(to_jsonable(load_capital_state()))
 
 
 @app.route("/capital-state", methods=["POST"])
@@ -931,13 +932,13 @@ def capital_state_post():
     payload = request.get_json(silent=True) or {}
     save_capital_state(payload)
     capital_auto_tracker.update()
-    return jsonify(load_capital_state())
+    return jsonify(to_jsonable(load_capital_state()))
 
 
 @app.route("/snapshot")
 def snapshot():
     ensure_scanner_started()
-    return jsonify(get_snapshot())
+    return jsonify(to_jsonable(get_snapshot()))
 
 
 @app.route("/ping")
@@ -949,18 +950,17 @@ def ping():
 
 @app.route("/edge-guard", methods=["GET"])
 def edge_guard_report():
-    return jsonify(edge_guard.evaluate(asset="GLOBAL", regime="global", strategy_name="global", analysis_time=None, proposed_decision="OBSERVAR", proposed_score=0.0, proposed_confidence=50))
+    return jsonify(to_jsonable(edge_guard.evaluate(asset="GLOBAL", regime="global", strategy_name="global", analysis_time=None, proposed_decision="OBSERVAR", proposed_score=0.0, proposed_confidence=50)))
 
 
 @app.route("/specialists", methods=["GET"])
 def specialists_report():
-    return jsonify({
+    return jsonify(to_jsonable({
         "leaders": specialist_reputation.snapshot(limit=25),
         "current_council": read_json(CURRENT_DECISION_FILE, {}).get("trader_council", {}),
-    })
+    }))
 
 if __name__ == "__main__":
     ensure_scanner_started()
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
-

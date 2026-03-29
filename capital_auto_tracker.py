@@ -1,6 +1,7 @@
 import json
 import os
 from datetime import datetime
+from json_safe import safe_dump, safe_dumps, to_jsonable
 
 DATA_DIR = os.environ.get("ALPHA_HIVE_DATA_DIR", "/opt/render/project/src/data")
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -23,7 +24,7 @@ class CapitalAutoTracker:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False)
+            safe_dump(data, f)
         os.replace(tmp, path)
 
     def _default_capital_state(self):

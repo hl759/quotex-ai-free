@@ -1,5 +1,6 @@
 import json
 import os
+from json_safe import safe_dump, safe_dumps, to_jsonable
 
 from config import DEFAULT_PAYOUT
 
@@ -13,7 +14,7 @@ class JournalManager:
     def __init__(self):
         if not os.path.exists(JOURNAL_FILE):
             with open(JOURNAL_FILE, "w", encoding="utf-8") as f:
-                json.dump([], f)
+                safe_dump([], f)
 
     def _load(self):
         try:
@@ -26,7 +27,7 @@ class JournalManager:
     def _save(self, data):
         tmp = JOURNAL_FILE + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False)
+            safe_dump(data, f)
         os.replace(tmp, JOURNAL_FILE)
 
     def _trade_id(self, trade):

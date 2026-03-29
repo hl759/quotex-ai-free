@@ -1,5 +1,6 @@
 import json
 import os
+from json_safe import safe_dump, safe_dumps, to_jsonable
 
 DATA_DIR = os.environ.get("ALPHA_HIVE_DATA_DIR", "/opt/render/project/src/data")
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -23,7 +24,7 @@ class SpecialistReputationEngine:
     def _save(self, data):
         tmp = self.path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False)
+            safe_dump(data, f)
         os.replace(tmp, self.path)
 
     def _safe_float(self, value, default=0.0):

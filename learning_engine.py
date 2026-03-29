@@ -1,5 +1,6 @@
 import json
 import os
+from json_safe import safe_dump, safe_dumps, to_jsonable
 
 from config import ADAPTIVE_MIN_TRADES, ADAPTIVE_STRONG_MIN_TRADES, ADAPTIVE_PROVEN_MIN_TRADES
 
@@ -40,7 +41,7 @@ class LearningEngine:
 
     def _save(self):
         with open(STATE_FILE, "w", encoding="utf-8") as f:
-            json.dump(self.memory, f, ensure_ascii=False)
+            safe_dump(self.memory, f)
 
     def _ensure_asset(self, asset):
         if not asset:

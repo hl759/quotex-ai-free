@@ -1,5 +1,6 @@
 import json
 import os
+from json_safe import safe_dump, safe_dumps, to_jsonable
 
 from config import ADAPTIVE_MIN_TRADES, ADAPTIVE_STRONG_MIN_TRADES
 
@@ -33,7 +34,7 @@ class MarketProfileEngine:
     def _save(self):
         tmp = PROFILE_FILE + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(self.data, f, ensure_ascii=False)
+            safe_dump(self.data, f)
         os.replace(tmp, PROFILE_FILE)
 
     def register_result(self, regime, result):
