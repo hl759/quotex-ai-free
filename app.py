@@ -218,17 +218,140 @@ def now_brazil():
     return datetime.utcnow() - timedelta(hours=3)
 
 
+def _as_list(value):
+    if isinstance(value, list):
+        return [str(v) for v in value if str(v).strip()]
+    if value is None:
+        return []
+    text = str(value).strip()
+    return [text] if text else []
+
+
+def _reason_text(lines):
+    lines = _as_list(lines)
+    return "\n".join(["• " + str(r) for r in lines]) if lines else "Sem detalhes"
+
+
+def _clean_reason_line(line):
+    text = str(line or "").strip().replace("•", "")
+    return text[:1].upper() + text[1:] if text else ""
+
+
+def _pick_reason(lines, keywords=None, exclude_prefixes=None):
+    items = [_clean_reason_line(x) for x in _as_list(lines)]
+    if exclude_prefixes:
+        filtered = []
+        for item in items:
+            lower = item.lower()
+            if any(lower.startswith(prefix.lower()) for prefix in exclude_prefixes):
+                continue
+            filtered.append(item)
+        items = filtered or items
+    if keywords:
+        for item in items:
+            lower = item.lower()
+            if any(k.lower() in lower for k in keywords):
+                return item
+    return items[0] if items else ""
+
+
+def _compact_regime(regime):
+    value = str(regime or "unknown")
+    return value if value != "unknown" else "neutro"
+
+
+def _build_signal_summary(signal, reasons):
+    confidence = int(float(signal.get("confidence", 50) or 50))
+    regime = _compact_regime(signal.get("regime", "unknown"))
+    if confidence >= 85:
+        confidence_text = "confiança alta"
+    elif confidence >= 74:
+        confidence_text = "confiança moderada"
+    else:
+        confidence_text = "confiança em validação"
+
+    preferred = _pick_reason(
+        reasons,
+        keywords=["consenso", "contexto", "tendência", "romp", "revers", "mercado", "regime"],
+        exclude_prefixes=["boost", "stake", "modo:", "strategy score", "evolução:"]
+    )
+    main = preferred or f"Leitura {signal.get('signal', 'CALL')} com {confidence_text}."
+    points = [
+        f"Regime: {regime}",
+        f"Confiança: {confidence}%",
+    ]
+    return {
+        "summary_title": "Resumo operacional",
+        "summary_main": main,
+        "summary_points": points,
+    }
+
+
+def _build_decision_summary(decision, reasons):
+    action = str(decision.get("decision", "NAO_OPERAR") or "NAO_OPERAR")
+    direction = decision.get("direction")
+    regime = _compact_regime(decision.get("regime", "unknown"))
+    environment = str(decision.get("environment_type", "unknown") or "unknown")
+    council_quality = str(decision.get("council_quality", "neutro") or "neutro")
+    head_action = str(decision.get("head_trader_action", "none") or "none")
+    behavior_mode = str(decision.get("behavior_mode", "BALANCED") or "BALANCED")
+    capital_phase = str(decision.get("capital_phase", "neutral") or "neutral")
+    edge_mode = str(decision.get("edge_guard_mode", "validation") or "validation")
+    decision_cap = decision.get("edge_guard_decision_cap")
+    stake = float(decision.get("suggested_stake", 0.0) or 0.0)
+    trend_quality = str(decision.get("trend_quality", "neutra") or "neutra")
+    conflict_type = str(decision.get("conflict_type", "neutro") or "neutro")
+
+    if action == "ENTRADA_FORTE":
+        main = "Confluência forte liberou entrada com risco controlado."
+    elif action == "ENTRADA_CAUTELA":
+        main = "Entrada permitida em cautela para validar o contexto com proteção de capital."
+    elif action == "OBSERVAR":
+        main = "A mesa preferiu observar: contexto ainda não mereceu risco de patrimônio."
+    else:
+        main = "Entrada vetada para preservar capital diante de contexto fraco ou conflituoso."
+
+    preferred = _pick_reason(
+        reasons,
+        keywords=["head trader", "edge guard", "orquestração final", "risk dominance final", "discernimento final", "consenso", "contexto com pouca amostra", "nenhuma estratégia forte"],
+        exclude_prefixes=["boost", "strategy score", "stake sugerida", "score ajustado", "modo:"]
+    )
+    if preferred:
+        main = preferred
+
+    summary_points = [
+        f"Ambiente: {environment} • regime {regime} • tendência {trend_quality}",
+        f"Council: {council_quality} • Head Trader: {head_action or 'none'} • conflito {conflict_type}",
+        f"Risco: {behavior_mode} • capital {capital_phase} • stake {round(stake, 2)}",
+    ]
+    if decision_cap:
+        summary_points.append(f"Prova estatística: modo {edge_mode} com limite {decision_cap}")
+    else:
+        summary_points.append(f"Prova estatística: modo {edge_mode}")
+    if direction:
+        summary_points.insert(0, f"Direção preferida: {direction}")
+
+    title_map = {
+        "ENTRADA_FORTE": "Resumo da entrada forte",
+        "ENTRADA_CAUTELA": "Resumo da entrada em cautela",
+        "OBSERVAR": "Resumo da observação",
+        "NAO_OPERAR": "Resumo do veto",
+    }
+    return {
+        "summary_title": title_map.get(action, "Resumo operacional"),
+        "summary_main": main,
+        "summary_points": summary_points,
+    }
+
+
 def normalize_signals(signals):
     out = []
     for s in signals:
         analysis = now_brazil()
         entry = analysis + timedelta(minutes=1)
         expiration = entry + timedelta(minutes=1)
-        reason = s.get("reason", [])
-        if isinstance(reason, list):
-            reason_text = "\n".join(["• " + str(r) for r in reason]) if reason else "Sem detalhes"
-        else:
-            reason_text = str(reason)
+        reasons = _as_list(s.get("reason", []))
+        signal_summary = _build_signal_summary(s, reasons)
         out.append({
             "asset": s.get("asset", "N/A"),
             "signal": s.get("signal", "CALL"),
@@ -239,7 +362,11 @@ def normalize_signals(signals):
             "analysis_time": analysis.strftime("%H:%M"),
             "entry_time": entry.strftime("%H:%M"),
             "expiration": expiration.strftime("%H:%M"),
-            "reason_text": reason_text,
+            "reasons": reasons,
+            "reason_text": _reason_text(reasons),
+            "summary_title": signal_summary.get("summary_title", "Resumo operacional"),
+            "summary_main": signal_summary.get("summary_main", "Sem resumo"),
+            "summary_points": signal_summary.get("summary_points", []),
             "regime": s.get("regime", "unknown")
         })
     return out
@@ -249,11 +376,8 @@ def decorate_decision(decision):
     analysis = now_brazil()
     entry = analysis + timedelta(minutes=1)
     expiration = entry + timedelta(minutes=1)
-    reasons = decision.get("reasons", [])
-    if isinstance(reasons, list):
-        reason_text = "\n".join(["• " + str(r) for r in reasons]) if reasons else "Sem detalhes"
-    else:
-        reason_text = str(reasons)
+    reasons = _as_list(decision.get("reasons", []))
+    summary = _build_decision_summary(decision, reasons)
     return {
         "asset": decision.get("asset", "MERCADO"),
         "decision": decision.get("decision", "NAO_OPERAR"),
@@ -264,7 +388,11 @@ def decorate_decision(decision):
         "analysis_time": analysis.strftime("%H:%M"),
         "entry_time": entry.strftime("%H:%M"),
         "expiration": expiration.strftime("%H:%M"),
-        "reason_text": reason_text,
+        "reasons": reasons,
+        "reason_text": _reason_text(reasons),
+        "summary_title": summary.get("summary_title", "Resumo operacional"),
+        "summary_main": summary.get("summary_main", "Sem resumo"),
+        "summary_points": summary.get("summary_points", []),
         "setup_id": decision.get("setup_id"),
         "context_id": decision.get("context_id"),
         "strategy_name": decision.get("strategy_name", "none"),
@@ -280,6 +408,14 @@ def decorate_decision(decision):
         "environment_type": decision.get("environment_type", "unknown"),
         "discernment_quality": decision.get("discernment_quality", "aceitavel"),
         "anti_pattern_risk": decision.get("anti_pattern_risk", "unknown"),
+        "behavior_mode": decision.get("behavior_mode", "BALANCED"),
+        "behavior_aggressiveness": decision.get("behavior_aggressiveness", "normal"),
+        "capital_phase": decision.get("capital_phase", "neutral"),
+        "edge_guard_mode": decision.get("edge_guard_mode", "validation"),
+        "edge_guard_decision_cap": decision.get("edge_guard_decision_cap"),
+        "edge_guard_stake_multiplier": decision.get("edge_guard_stake_multiplier", 1.0),
+        "transition_probability": decision.get("transition_probability", "low"),
+        "next_environment": decision.get("next_environment", "unknown"),
         "trend_m1": decision.get("trend_m1", "neutral"),
         "trend_m5": decision.get("trend_m5", "neutral"),
         "breakout": decision.get("breakout", False),
@@ -620,7 +756,7 @@ body{margin:0;font-family:Arial,sans-serif;background:linear-gradient(180deg,#04
 .section-title{font-size:17px;font-weight:800;margin-bottom:8px}.status-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.status-item,.signal-card,.list-card,.decision-card{background:#132b49;border-radius:18px;padding:14px;margin-top:12px}
 .signal-head,.decision-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}.asset{font-size:22px;font-weight:900}
 .badge{padding:9px 14px;border-radius:999px;font-size:13px;font-weight:900}.call{background:linear-gradient(135deg,#25e6a0,#8affcc);color:#053324}.put{background:linear-gradient(135deg,#ff7a8a,#ffc0c8);color:#3f1119}.hold{background:linear-gradient(135deg,#8c95a6,#d2d7df);color:#20242b}
-.signal-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.mini{background:#0f223a;border-radius:14px;padding:12px}.mini-value{font-size:18px;font-weight:800}.reason{margin-top:14px;background:#0d1c31;border-radius:14px;padding:14px;color:#bdd0e8;line-height:1.6;white-space:normal}
+.signal-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.mini{background:#0f223a;border-radius:14px;padding:12px}.mini-value{font-size:18px;font-weight:800}.summary-box{margin-top:14px;background:#0d1c31;border-radius:18px;padding:16px}.summary-kicker{font-size:12px;letter-spacing:1.2px;text-transform:uppercase;color:#7fd8ff;margin-bottom:8px}.summary-main{font-size:16px;font-weight:800;line-height:1.45;color:#eef6ff}.summary-points{display:grid;gap:8px;margin-top:12px}.summary-point{display:flex;gap:8px;color:#bdd0e8;line-height:1.5}.summary-point-dot{color:#25e6c4;font-weight:900}.advanced-box{margin-top:12px;background:#0d1c31;border-radius:16px;border:1px solid rgba(127,216,255,.08);overflow:hidden}.advanced-box summary{list-style:none;cursor:pointer;padding:14px 16px;color:#9fe6ff;font-weight:800}.advanced-box summary::-webkit-details-marker{display:none}.advanced-box[open] summary{border-bottom:1px solid rgba(127,216,255,.08)}.reason{padding:14px 16px;color:#bdd0e8;line-height:1.6;white-space:normal}.advanced-tip{margin-top:8px;color:#8fa7c4;font-size:13px}
 .empty{text-align:center;color:#9bb2cf;padding:26px 10px}.panel{display:none}.panel.active{display:block}.list-title{font-size:18px;font-weight:800;margin-bottom:6px}
 .form-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.field{display:flex;flex-direction:column;gap:8px;background:#132b49;border-radius:16px;padding:12px}.field label{font-size:13px;color:#8fa7c4}.field input{width:100%;background:#0f223a;border:1px solid rgba(255,255,255,.08);border-radius:12px;color:#eef6ff;padding:12px;font-size:15px}.save-btn{margin-top:14px;border:none;border-radius:16px;padding:14px 16px;background:linear-gradient(180deg,#103153 0%,#153d66 100%);color:#25e6c4;font-size:15px;font-weight:800;cursor:pointer}.save-status{margin-top:10px;color:#8fa7c4;font-size:14px}
 @media(max-width:640px){.tabs{grid-template-columns:repeat(2,1fr)}.hero-top{align-items:flex-start}.right-box{min-width:120px}.form-grid{grid-template-columns:1fr}}
@@ -691,7 +827,21 @@ function escapeHtml(text){
 }
 
 function formatText(text){
-  return escapeHtml(text).replaceAll("\\n","<br>");
+  return escapeHtml(text).replaceAll("\n","<br>");
+}
+
+function renderSummaryBlock(title, main, points){
+  const safeTitle = escapeHtml(title || "Resumo operacional");
+  const safeMain = escapeHtml(main || "Sem resumo disponível.");
+  const rows = Array.isArray(points) ? points : [];
+  const pointsHtml = rows.length
+    ? `<div class="summary-points">${rows.map(p => `<div class="summary-point"><span class="summary-point-dot">•</span><span>${escapeHtml(p)}</span></div>`).join("")}</div>`
+    : "";
+  return `<div class="summary-box"><div class="summary-kicker">${safeTitle}</div><div class="summary-main">${safeMain}</div>${pointsHtml}</div>`;
+}
+
+function renderAdvancedDetails(reasonText){
+  return `<details class="advanced-box"><summary>Detalhes avançados</summary><div class="reason">${formatText(reasonText || "Sem detalhes")}</div></details>`;
 }
 
 function renderSignals(signals){
@@ -703,7 +853,7 @@ function renderSignals(signals){
   let h="";
   signals.forEach(s=>{
     const bc=s.signal==="CALL"?"call":"put";
-    h+=`<div class="signal-card"><div class="signal-head"><div class="asset">${escapeHtml(s.asset)}</div><div class="badge ${bc}">${escapeHtml(s.signal)}${s.confidence_label ? " • " + escapeHtml(s.confidence_label) : ""}</div></div><div class="signal-grid"><div class="mini"><div class="mini-label">Score</div><div class="mini-value">${escapeHtml(s.score)}</div></div><div class="mini"><div class="mini-label">Confiança</div><div class="mini-value">${escapeHtml(s.confidence)}%</div></div><div class="mini"><div class="mini-label">Análise</div><div class="mini-value">${escapeHtml(s.analysis_time)}</div></div><div class="mini"><div class="mini-label">Entrada</div><div class="mini-value">${escapeHtml(s.entry_time)}</div></div><div class="mini"><div class="mini-label">Expiração</div><div class="mini-value">${escapeHtml(s.expiration)}</div></div><div class="mini"><div class="mini-label">Regime</div><div class="mini-value">${escapeHtml(s.regime)}</div></div></div><div class="reason">${formatText(s.reason_text)}</div></div>`;
+    h+=`<div class="signal-card"><div class="signal-head"><div class="asset">${escapeHtml(s.asset)}</div><div class="badge ${bc}">${escapeHtml(s.signal)}${s.confidence_label ? " • " + escapeHtml(s.confidence_label) : ""}</div></div><div class="signal-grid"><div class="mini"><div class="mini-label">Score</div><div class="mini-value">${escapeHtml(s.score)}</div></div><div class="mini"><div class="mini-label">Confiança</div><div class="mini-value">${escapeHtml(s.confidence)}%</div></div><div class="mini"><div class="mini-label">Análise</div><div class="mini-value">${escapeHtml(s.analysis_time)}</div></div><div class="mini"><div class="mini-label">Entrada</div><div class="mini-value">${escapeHtml(s.entry_time)}</div></div><div class="mini"><div class="mini-label">Expiração</div><div class="mini-value">${escapeHtml(s.expiration)}</div></div><div class="mini"><div class="mini-label">Regime</div><div class="mini-value">${escapeHtml(s.regime)}</div></div></div>${renderSummaryBlock(s.summary_title, s.summary_main, s.summary_points)}${renderAdvancedDetails(s.reason_text)}</div>`;
   });
   c.innerHTML=h;
 }
@@ -724,7 +874,7 @@ function renderDecision(d){
   else if(d.decision==="ENTRADA_CAUTELA") badgeText=(d.direction||"CALL")+" • CAUTELA";
   else if(d.decision==="OBSERVAR") badgeText=(d.direction||"CALL")+" • OBSERVAR";
 
-  c.innerHTML=`<div class="decision-card"><div class="decision-head"><div class="asset">${escapeHtml(d.asset||"MERCADO")}</div><div class="badge ${badgeClass}">${escapeHtml(badgeText)}</div></div><div class="signal-grid"><div class="mini"><div class="mini-label">Score</div><div class="mini-value">${escapeHtml(d.score)}</div></div><div class="mini"><div class="mini-label">Confiança</div><div class="mini-value">${escapeHtml(d.confidence)}%</div></div><div class="mini"><div class="mini-label">Análise</div><div class="mini-value">${escapeHtml(d.analysis_time)}</div></div><div class="mini"><div class="mini-label">Entrada</div><div class="mini-value">${escapeHtml(d.entry_time)}</div></div><div class="mini"><div class="mini-label">Expiração</div><div class="mini-value">${escapeHtml(d.expiration)}</div></div><div class="mini"><div class="mini-label">Regime</div><div class="mini-value">${escapeHtml(d.regime)}</div></div></div><div class="reason">${formatText(d.reason_text)}</div></div>`;
+  c.innerHTML=`<div class="decision-card"><div class="decision-head"><div class="asset">${escapeHtml(d.asset||"MERCADO")}</div><div class="badge ${badgeClass}">${escapeHtml(badgeText)}</div></div><div class="signal-grid"><div class="mini"><div class="mini-label">Score</div><div class="mini-value">${escapeHtml(d.score)}</div></div><div class="mini"><div class="mini-label">Confiança</div><div class="mini-value">${escapeHtml(d.confidence)}%</div></div><div class="mini"><div class="mini-label">Análise</div><div class="mini-value">${escapeHtml(d.analysis_time)}</div></div><div class="mini"><div class="mini-label">Entrada</div><div class="mini-value">${escapeHtml(d.entry_time)}</div></div><div class="mini"><div class="mini-label">Expiração</div><div class="mini-value">${escapeHtml(d.expiration)}</div></div><div class="mini"><div class="mini-label">Regime</div><div class="mini-value">${escapeHtml(d.regime)}</div></div></div>${renderSummaryBlock(d.summary_title, d.summary_main, d.summary_points)}<div class="advanced-tip">A inteligência continua completa; aqui a interface mostra só o resumo operacional.</div>${renderAdvancedDetails(d.reason_text)}</div>`;
 }
 
 function renderHistory(history){
