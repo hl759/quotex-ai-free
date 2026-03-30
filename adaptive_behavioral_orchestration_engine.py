@@ -114,7 +114,7 @@ class AdaptiveBehavioralOrchestrationEngine:
         if winrate >= 60:
             mode_hint = "expand"
             reason = f"Memória comportamental favorece expansão ({winrate}%)"
-        elif winrate <= 42:
+        elif winrate <= 38:
             mode_hint = "protect"
             reason = f"Memória comportamental pede proteção ({winrate}%)"
         else:
@@ -239,23 +239,31 @@ class AdaptiveBehavioralOrchestrationEngine:
                 reasons.append("Orquestração: cautela rebaixa contexto marginal")
 
         else:  # SURVIVAL
-            score_boost -= 0.18
-            confidence_shift -= 5
-            frequency_limit = 0
+            score_boost -= 0.16
+            confidence_shift -= 4
+            frequency_limit = 1
             aggressiveness = "minimal"
             acceptance_floor = "premium"
             reasons.append("Modo comportamental: SURVIVAL")
 
-            # Sobrevivência veta a maioria, mas não bloqueia tudo sem pensar
+            # Sobrevivência continua defensiva, mas uma leitura excepcional pode passar em cautela.
             if (
-                current_score >= 4.8
+                current_score >= 4.5
                 and discernment_quality == "premium"
-                and anti_pattern_risk not in ("high",)
+                and anti_pattern_risk not in ("high", "critical")
                 and conflict_type != "destrutivo"
                 and transition_probability != "high"
             ):
+                downgrade = "CAUTELA"
+                reasons.append("Orquestração final: sobrevivência liberou cautela premium")
+            elif (
+                current_score >= 4.0
+                and discernment_quality in ("premium", "bom")
+                and anti_pattern_risk not in ("high", "critical")
+                and conflict_type != "destrutivo"
+            ):
                 downgrade = "OBSERVAR"
-                reasons.append("Orquestração final: sobrevivência permitiu só observação qualificada")
+                reasons.append("Orquestração final: sobrevivência permitiu observação qualificada")
             else:
                 veto = True
                 reasons.append("Orquestração final: sobrevivência vetou a entrada")
