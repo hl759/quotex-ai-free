@@ -900,7 +900,7 @@ function escapeHtml(text){
 }
 
 function formatText(text){
-  return escapeHtml(text).replaceAll("\n","<br>");
+  return escapeHtml(text).replaceAll("\\n","<br>");
 }
 
 function renderSummaryBlock(title, main, points){
