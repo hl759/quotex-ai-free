@@ -90,9 +90,22 @@ def read_json(path, default):
 
 def write_json(path, data):
     tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        safe_dump(data, f)
-    os.replace(tmp, path)
+    try:
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(tmp, "w", encoding="utf-8") as f:
+            safe_dump(data, f)
+        os.replace(tmp, path)
+        return True
+    except Exception as e:
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except Exception:
+            pass
+        print(f"write_json warning for {path}: {e}", flush=True)
+        return False
 
 
 def bootstrap_scan_count():
@@ -126,7 +139,11 @@ def ensure_capital_state():
         "daily_target_pct": 2.0,
         "daily_stop_pct": 3.0
     }
-    current = state_store.get_json("capital_state", None)
+    try:
+        current = state_store.get_json("capital_state", None)
+    except Exception as e:
+        print(f"ensure_capital_state store read warning: {e}", flush=True)
+        current = None
     if not isinstance(current, dict):
         current = read_json(CAPITAL_STATE_FILE, default_state)
     if not isinstance(current, dict):
@@ -136,7 +153,10 @@ def ensure_capital_state():
     if float(current.get("capital_peak", 0.0) or 0.0) < float(current.get("capital_current", 0.0) or 0.0):
         current["capital_peak"] = float(current.get("capital_current", 0.0) or 0.0)
     write_json(CAPITAL_STATE_FILE, current)
-    state_store.set_json("capital_state", current)
+    try:
+        state_store.set_json("capital_state", current)
+    except Exception as e:
+        print(f"ensure_capital_state store write warning: {e}", flush=True)
     return current
 
 
@@ -157,7 +177,10 @@ def save_capital_state(data):
     if merged["capital_peak"] < merged["capital_current"]:
         merged["capital_peak"] = merged["capital_current"]
     write_json(CAPITAL_STATE_FILE, merged)
-    state_store.set_json("capital_state", merged)
+    try:
+        state_store.set_json("capital_state", merged)
+    except Exception as e:
+        print(f"save_capital_state store write warning: {e}", flush=True)
     return merged
 
 
@@ -707,7 +730,22 @@ def load_state():
 
 def get_snapshot():
     signals, history, current_decision, meta = load_state()
-    capital_auto_tracker.update()
+    try:
+        capital_auto_tracker.update()
+    except Exception as e:
+        print(f"capital_auto_tracker.update warning: {e}", flush=True)
+    try:
+        capital_state = load_capital_state()
+    except Exception as e:
+        print(f"load_capital_state warning: {e}", flush=True)
+        capital_state = {
+            "capital_current": 0.0,
+            "capital_peak": 0.0,
+            "daily_pnl": 0.0,
+            "streak": 0,
+            "daily_target_pct": 2.0,
+            "daily_stop_pct": 3.0,
+        }
     return {
         "signals": signals,
         "history": history[:20],
@@ -728,7 +766,7 @@ def get_snapshot():
         "learning_stats": journal.stats(),
         "best_assets": journal.best_assets(),
         "best_hours": journal.best_hours(),
-        "capital_state": load_capital_state(),
+        "capital_state": capital_state,
         "edge_report": edge_audit.compute_report(),
         "edge_guard": edge_guard.evaluate(asset="GLOBAL", regime="global", strategy_name="global", analysis_time=None, proposed_decision="OBSERVAR", proposed_score=0.0, proposed_confidence=50),
         "specialist_leaders": specialist_reputation.snapshot(limit=12),
