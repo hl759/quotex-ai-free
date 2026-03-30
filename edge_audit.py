@@ -1,9 +1,11 @@
 import json
 import math
 import os
+from datetime import datetime
 from storage_paths import DATA_DIR, migrate_file
 from statistics import mean
-from json_safe import safe_dump, safe_dumps, to_jsonable
+from json_safe import safe_dump, to_jsonable
+from state_store import get_state_store
 
 from config import DEFAULT_PAYOUT, EDGE_PROOF_MIN_TRADES, EDGE_SEGMENT_MIN_TRADES
 
@@ -19,8 +21,42 @@ class EdgeAuditEngine:
     def __init__(self):
         self.ledger_file = LEDGER_FILE
         self.snapshot_file = SNAPSHOT_FILE
+        self.store = get_state_store()
+        self._bootstrap_store_from_file()
+
+    def _bootstrap_store_from_file(self):
+        if self.store.list_collection("trade_ledger", limit=1):
+            return
+        try:
+            if os.path.exists(self.ledger_file):
+                with open(self.ledger_file, "r", encoding="utf-8") as f:
+                    rows = json.load(f)
+            else:
+                rows = []
+        except Exception:
+            rows = []
+        if isinstance(rows, list):
+            for trade in reversed(rows[:10000]):
+                uid = str(trade.get("uid") or "")
+                if uid:
+                    self.store.append_unique_item("trade_ledger", uid, trade, created_at=str(trade.get("date") or ""))
+        if os.path.exists(self.snapshot_file):
+            try:
+                with open(self.snapshot_file, "r", encoding="utf-8") as f:
+                    snapshot = json.load(f)
+                self.store.set_json("edge_snapshot", snapshot)
+            except Exception:
+                pass
 
     def _load_json(self, path, default):
+        if path == self.ledger_file:
+            rows = self.store.list_collection("trade_ledger", limit=10000)
+            if isinstance(default, list) and rows:
+                return rows
+        elif path == self.snapshot_file:
+            stored = self.store.get_json("edge_snapshot", None)
+            if stored is not None:
+                return stored if isinstance(stored, type(default)) else default
         try:
             if os.path.exists(path):
                 with open(path, "r", encoding="utf-8") as f:
@@ -31,6 +67,8 @@ class EdgeAuditEngine:
         return default
 
     def _save_json(self, path, data):
+        if path == self.snapshot_file:
+            self.store.set_json("edge_snapshot", data)
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             safe_dump(data, f)
@@ -134,11 +172,10 @@ class EdgeAuditEngine:
         if not isinstance(signal, dict) or not isinstance(result_data, dict):
             return None
         trade = self._normalized_trade(signal, result_data)
-        ledger = self._load_ledger()
-        existing = {str(item.get("uid")) for item in ledger if isinstance(item, dict)}
-        if trade["uid"] in existing:
+        inserted = self.store.append_unique_item("trade_ledger", trade["uid"], trade, created_at=str(trade.get("date") or datetime.utcnow().isoformat()))
+        if not inserted:
             return trade
-        ledger.insert(0, trade)
+        ledger = self._load_ledger()
         if len(ledger) > 10000:
             ledger = ledger[:10000]
         self._save_json(self.ledger_file, ledger)

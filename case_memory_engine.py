@@ -1,6 +1,7 @@
 import json
 import os
 from storage_paths import DATA_DIR, migrate_file
+from state_store import get_state_store
 
 from config import DEFAULT_PAYOUT
 from trader_genome import asset_class_for, parse_session_bucket
@@ -13,8 +14,12 @@ migrate_file(LEDGER_FILE, [os.path.join("/opt/render/project/src/data", "alpha_h
 class CaseMemoryEngine:
     def __init__(self):
         self.ledger_file = LEDGER_FILE
+        self.store = get_state_store()
 
     def _load_ledger(self):
+        rows = self.store.list_collection("trade_ledger", limit=10000)
+        if rows:
+            return rows
         try:
             if os.path.exists(self.ledger_file):
                 with open(self.ledger_file, "r", encoding="utf-8") as f:

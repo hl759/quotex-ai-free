@@ -1,7 +1,8 @@
 import json
 import os
 from storage_paths import DATA_DIR, migrate_file
-from json_safe import safe_dump, safe_dumps, to_jsonable
+from json_safe import safe_dump
+from state_store import get_state_store
 
 from config import DEFAULT_PAYOUT
 
@@ -9,21 +10,42 @@ os.makedirs(DATA_DIR, exist_ok=True)
 
 JOURNAL_FILE = os.path.join(DATA_DIR, "alpha_hive_journal.json")
 migrate_file(JOURNAL_FILE, [os.path.join("/opt/render/project/src/data", "alpha_hive_journal.json")])
+COLLECTION_NAME = "journal_trades"
 
 
 class JournalManager:
     def __init__(self):
+        self.store = get_state_store()
         if not os.path.exists(JOURNAL_FILE):
             with open(JOURNAL_FILE, "w", encoding="utf-8") as f:
                 safe_dump([], f)
+        self._bootstrap_store_from_file()
+
+    def _bootstrap_store_from_file(self):
+        if self.store.list_collection(COLLECTION_NAME, limit=1):
+            return
+        try:
+            with open(JOURNAL_FILE, "r", encoding="utf-8") as f:
+                rows = json.load(f)
+        except Exception:
+            return
+        if not isinstance(rows, list):
+            return
+        for trade in reversed(rows[:4000]):
+            self.store.append_unique_item(COLLECTION_NAME, self._trade_id(trade), trade, created_at=str(trade.get("date") or ""))
 
     def _load(self):
+        rows = self.store.list_collection(COLLECTION_NAME, limit=4000)
+        if rows:
+            return rows
         try:
             with open(JOURNAL_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                return data if isinstance(data, list) else []
+                if isinstance(data, list):
+                    return data
         except Exception:
             return []
+        return []
 
     def _save(self, data):
         tmp = JOURNAL_FILE + ".tmp"
@@ -54,15 +76,13 @@ class JournalManager:
             return None
 
     def add_trade(self, trade):
-        data = self._load()
-        incoming = self._trade_id(trade)
-        for item in data:
-            if self._trade_id(item) == incoming:
-                return
-        data.insert(0, trade)
-        if len(data) > 4000:
-            data = data[:4000]
-        self._save(data)
+        trade_id = self._trade_id(trade)
+        inserted = self.store.append_unique_item(COLLECTION_NAME, trade_id, trade, created_at=str(trade.get("date") or ""))
+        if inserted:
+            data = self._load()
+            if len(data) > 4000:
+                data = data[:4000]
+            self._save(data)
 
     def _economic_stats(self, valid):
         if not valid:

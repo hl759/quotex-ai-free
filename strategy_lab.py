@@ -1,31 +1,40 @@
 import json
 import os
 from storage_paths import DATA_DIR, migrate_file
-from json_safe import safe_dump, safe_dumps, to_jsonable
+from json_safe import safe_dump
+from state_store import get_state_store
 
 from config import ADAPTIVE_MIN_TRADES, ADAPTIVE_STRONG_MIN_TRADES, ADAPTIVE_PROVEN_MIN_TRADES
 
 os.makedirs(DATA_DIR, exist_ok=True)
 
 STRATEGY_LAB_FILE = os.path.join(DATA_DIR, "alpha_hive_strategy_lab.json")
+STORE_KEY = "strategy_lab_store"
 migrate_file(STRATEGY_LAB_FILE, [os.path.join("/opt/render/project/src/data", "alpha_hive_strategy_lab.json")])
 
 
 class StrategyLab:
     def __init__(self):
+        self.store = get_state_store()
         self.data = self._load()
 
     def _load(self):
+        store_value = self.store.get_json(STORE_KEY, None)
+        if isinstance(store_value, dict) and store_value:
+            return store_value
         try:
             if os.path.exists(STRATEGY_LAB_FILE):
                 with open(STRATEGY_LAB_FILE, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                    return data if isinstance(data, dict) else {}
+                    if isinstance(data, dict):
+                        self.store.set_json(STORE_KEY, data)
+                        return data
         except Exception:
             pass
         return {}
 
     def _save(self):
+        self.store.set_json(STORE_KEY, self.data)
         tmp = STRATEGY_LAB_FILE + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             safe_dump(self.data, f)

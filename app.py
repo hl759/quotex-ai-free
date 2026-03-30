@@ -81,11 +81,21 @@ state_store = StateStore()
 
 
 def bootstrap_scan_count():
-    meta = read_json(META_FILE, {"scan_count": 0})
-    try:
-        return int(meta.get("scan_count", 0) or 0)
-    except Exception:
-        return 0
+    meta_file = read_json(META_FILE, {"scan_count": 0})
+    meta_store = state_store.get_json("meta", {"scan_count": 0}) or {"scan_count": 0}
+    candidates = [
+        meta_file.get("scan_count", 0) if isinstance(meta_file, dict) else 0,
+        meta_store.get("scan_count", 0) if isinstance(meta_store, dict) else 0,
+        state_store.get_int("scan_count", 0),
+        state_store.max_scan_count(),
+    ]
+    best = 0
+    for value in candidates:
+        try:
+            best = max(best, int(value or 0))
+        except Exception:
+            continue
+    return best
 
 scan_count = bootstrap_scan_count()
 scanner_started = False
@@ -116,7 +126,9 @@ def ensure_capital_state():
         "daily_target_pct": 2.0,
         "daily_stop_pct": 3.0
     }
-    current = read_json(CAPITAL_STATE_FILE, default_state)
+    current = state_store.get_json("capital_state", None)
+    if not isinstance(current, dict):
+        current = read_json(CAPITAL_STATE_FILE, default_state)
     if not isinstance(current, dict):
         current = dict(default_state)
     for key, value in default_state.items():
@@ -124,6 +136,7 @@ def ensure_capital_state():
     if float(current.get("capital_peak", 0.0) or 0.0) < float(current.get("capital_current", 0.0) or 0.0):
         current["capital_peak"] = float(current.get("capital_current", 0.0) or 0.0)
     write_json(CAPITAL_STATE_FILE, current)
+    state_store.set_json("capital_state", current)
     return current
 
 
@@ -144,6 +157,7 @@ def save_capital_state(data):
     if merged["capital_peak"] < merged["capital_current"]:
         merged["capital_peak"] = merged["capital_current"]
     write_json(CAPITAL_STATE_FILE, merged)
+    state_store.set_json("capital_state", merged)
     return merged
 
 
@@ -153,6 +167,9 @@ class CapitalAutoTracker:
         self.journal_file = os.path.join(self.data_dir, "alpha_hive_journal.json")
 
     def _load_journal(self):
+        data = state_store.list_collection("journal_trades", limit=4000)
+        if data:
+            return data if isinstance(data, list) else []
         data = read_json(self.journal_file, [])
         return data if isinstance(data, list) else []
 
@@ -657,6 +674,8 @@ def save_state(signals, history, current_decision, scans):
         "state_dir": STATE_DIR,
         "data_dir": DATA_DIR,
         "boot_restored_from": previous_meta.get("scan_count", 0),
+        "storage_backend": state_store.backend_name,
+        "storage_target": state_store.backend_target if state_store.backend_name == "sqlite" else "postgres",
     }
     write_json(META_FILE, meta_payload)
     state_store.set_json("meta", meta_payload)
@@ -701,6 +720,8 @@ def get_snapshot():
             "state_dir": meta.get("state_dir", STATE_DIR),
             "data_dir": meta.get("data_dir", DATA_DIR),
             "db_path": state_store.db_path,
+            "storage_backend": state_store.backend_name,
+            "storage_target": meta.get("storage_target", state_store.backend_target if state_store.backend_name == "sqlite" else "postgres"),
             "boot_restored_from": meta.get("boot_restored_from", 0),
         },
         "learning_stats": journal.stats(),

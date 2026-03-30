@@ -1,17 +1,50 @@
 import json
 import os
 from storage_paths import DATA_DIR, migrate_file
-from json_safe import safe_dump, safe_dumps, to_jsonable
+from json_safe import safe_dump
+from state_store import get_state_store
 
 from config import ADAPTIVE_MIN_TRADES, ADAPTIVE_STRONG_MIN_TRADES, ADAPTIVE_PROVEN_MIN_TRADES
 
 STATE_FILE = os.path.join(DATA_DIR, "alpha_hive_learning.json")
 migrate_file(STATE_FILE, ["/tmp/nexus_learning.json", os.path.join("/opt/render/project/src/data", "alpha_hive_learning.json")])
+STORE_KEY = "learning_memory"
 
 
 class LearningEngine:
     def dynamic_signal_limit(self):
-            return 5
+        return 5
+
+    def __init__(self):
+        self.store = get_state_store()
+        self.memory = self._load()
+
+    def _load(self):
+        store_value = self.store.get_json(STORE_KEY, None)
+        if isinstance(store_value, dict) and store_value:
+            return store_value
+        if os.path.exists(STATE_FILE):
+            try:
+                with open(STATE_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        self.store.set_json(STORE_KEY, data)
+                        return data
+            except Exception:
+                return {}
+        return {}
+
+    def _save(self):
+        self.store.set_json(STORE_KEY, self.memory)
+        with open(STATE_FILE, "w", encoding="utf-8") as f:
+            safe_dump(self.memory, f)
+
+    def _ensure_asset(self, asset):
+        if not asset:
+            return None
+        if asset not in self.memory:
+            self.memory[asset] = {"wins": 0, "loss": 0}
+        return asset
 
     def should_filter_asset(self, asset):
         asset = self._ensure_asset(asset)
@@ -28,29 +61,6 @@ class LearningEngine:
 
         winrate = wins / total if total else 0.0
         return winrate < 0.40 and loss >= max(12, total // 2)
-
-    def __init__(self):
-        self.memory = self._load()
-
-    def _load(self):
-        if os.path.exists(STATE_FILE):
-            try:
-                with open(STATE_FILE, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except Exception:
-                return {}
-        return {}
-
-    def _save(self):
-        with open(STATE_FILE, "w", encoding="utf-8") as f:
-            safe_dump(self.memory, f)
-
-    def _ensure_asset(self, asset):
-        if not asset:
-            return None
-        if asset not in self.memory:
-            self.memory[asset] = {"wins": 0, "loss": 0}
-        return asset
 
     def register_result(self, signal, result):
         asset = self._ensure_asset(signal.get("asset"))
@@ -218,24 +228,3 @@ class LearningEngine:
         if total >= ADAPTIVE_STRONG_MIN_TRADES and winrate > 0.60:
             return -0.05
         return 0.0
-
-    def get_global_bias(self):
-        total_wins = 0
-        total_loss = 0
-        for data in self.memory.values():
-            total_wins += int(data.get("wins", 0))
-            total_loss += int(data.get("loss", 0))
-
-        total = total_wins + total_loss
-        if total < ADAPTIVE_MIN_TRADES:
-            return 0.0, "Sem memória global suficiente"
-
-        winrate = total_wins / total if total else 0.0
-        if total >= ADAPTIVE_STRONG_MIN_TRADES and winrate >= 0.62:
-            return 0.08, "Fase global positiva"
-        if total >= ADAPTIVE_STRONG_MIN_TRADES and winrate <= 0.43:
-            return -0.10, "Fase global cautelosa"
-        return 0.0, "Fase global neutra"
-
-    def update_stats(self, signals):
-        return
