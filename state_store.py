@@ -22,28 +22,56 @@ DATABASE_URL = (
     or os.getenv("DATABASE_URL", "").strip()
 )
 USE_POSTGRES = bool(DATABASE_URL and DATABASE_URL.startswith(("postgres://", "postgresql://")) and psycopg2 is not None)
+PG_CONNECT_TIMEOUT = max(1, int(os.getenv("ALPHA_HIVE_PG_CONNECT_TIMEOUT", "5") or 5))
 
 
 class StateStore:
     def __init__(self, db_path=SQLITE_DB_PATH, database_url=DATABASE_URL):
         self.database_url = database_url.strip() if database_url else ""
-        self.use_postgres = bool(self.database_url and self.database_url.startswith(("postgres://", "postgresql://")) and psycopg2 is not None)
         self.db_path = db_path
+        ensure_parent(self.db_path)
+        self._lock = threading.Lock()
+        self.pg_connect_timeout = PG_CONNECT_TIMEOUT
+        self.requested_backend = "postgres" if (self.database_url and self.database_url.startswith(("postgres://", "postgresql://"))) else "sqlite"
+        self.fallback_reason = None
+        self.last_error = None
+        self.use_postgres = bool(self.requested_backend == "postgres" and psycopg2 is not None)
         self.backend_name = "postgres" if self.use_postgres else "sqlite"
         self.backend_target = self.database_url if self.use_postgres else self.db_path
-        self._lock = threading.Lock()
-        self._init_db()
+        try:
+            self._init_db()
+        except Exception as exc:
+            if self.use_postgres:
+                self._activate_sqlite_fallback("postgres_init_failed", exc)
+                self._init_db()
+            else:
+                raise
+
+    def _activate_sqlite_fallback(self, reason, exc=None):
+        self.use_postgres = False
+        self.backend_name = "sqlite"
+        self.backend_target = self.db_path
+        self.fallback_reason = reason
+        self.last_error = repr(exc) if exc is not None else None
+        ensure_parent(self.db_path)
+        try:
+            print(f"[StateStore] falling back to sqlite: reason={reason} error={self.last_error}")
+        except Exception:
+            pass
 
     @contextmanager
     def _connect(self):
         if self.use_postgres:
-            conn = psycopg2.connect(self.database_url)
-            conn.autocommit = True
             try:
-                yield conn
-            finally:
-                conn.close()
-            return
+                conn = psycopg2.connect(self.database_url, connect_timeout=self.pg_connect_timeout)
+                conn.autocommit = True
+                try:
+                    yield conn
+                finally:
+                    conn.close()
+                return
+            except Exception as exc:
+                self._activate_sqlite_fallback("postgres_connect_failed", exc)
 
         conn = sqlite3.connect(self.db_path, timeout=15, isolation_level=None, check_same_thread=False)
         conn.execute("PRAGMA journal_mode=WAL")
@@ -223,14 +251,22 @@ class StateStore:
                         "INSERT INTO scans(created_at, scan_count, signal_count, decision, asset, snapshot_json) VALUES(?,?,?,?,?,?)",
                         (created_at, int(scan_count), int(signal_count), decision, asset, payload),
                     )
-        self.set_int("scan_count", scan_count)
-        self.set_json("last_snapshot", data)
-        self.set_json("last_scan_at", created_at)
+        self.set_int("scan_count", int(scan_count))
+
+    def max_scan_count(self):
+        with self._connect() as conn:
+            if self.use_postgres:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT COALESCE(MAX(scan_count), 0) FROM scans")
+                    row = cur.fetchone()
+            else:
+                row = conn.execute("SELECT COALESCE(MAX(scan_count), 0) FROM scans").fetchone()
+        try:
+            return int(row[0]) if row and row[0] is not None else 0
+        except Exception:
+            return 0
 
     def last_snapshot(self):
-        snapshot = self.get_json("last_snapshot", None)
-        if snapshot:
-            return snapshot
         with self._connect() as conn:
             if self.use_postgres:
                 with conn.cursor() as cur:
@@ -238,20 +274,56 @@ class StateStore:
                     row = cur.fetchone()
             else:
                 row = conn.execute("SELECT snapshot_json FROM scans ORDER BY id DESC LIMIT 1").fetchone()
-        return self._json_row_value(row)
+        return self._json_row_value(row, 0) or {}
 
-    def max_scan_count(self):
+    def upsert_collection_item(self, collection_name, uid, payload):
+        created_at = datetime.utcnow().isoformat()
+        payload_json = self._json_param(payload)
+        with self._lock:
+            with self._connect() as conn:
+                if self.use_postgres:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            INSERT INTO collection_items(collection_name, uid, created_at, updated_at, payload_json)
+                            VALUES(%s,%s,%s,%s,%s)
+                            ON CONFLICT(collection_name, uid)
+                            DO UPDATE SET payload_json=EXCLUDED.payload_json, updated_at=EXCLUDED.updated_at
+                            """,
+                            (str(collection_name), str(uid), created_at, created_at, payload_json),
+                        )
+                else:
+                    conn.execute(
+                        """
+                        INSERT INTO collection_items(collection_name, uid, created_at, updated_at, payload_json)
+                        VALUES(?,?,?,?,?)
+                        ON CONFLICT(collection_name, uid)
+                        DO UPDATE SET payload_json=excluded.payload_json, updated_at=excluded.updated_at
+                        """,
+                        (str(collection_name), str(uid), created_at, created_at, payload_json),
+                    )
+
+    def list_collection(self, collection_name, limit=200):
+        limit = max(1, int(limit or 200))
         with self._connect() as conn:
             if self.use_postgres:
                 with conn.cursor() as cur:
-                    cur.execute("SELECT MAX(scan_count) FROM scans")
-                    row = cur.fetchone()
+                    cur.execute(
+                        "SELECT payload_json FROM collection_items WHERE collection_name=%s ORDER BY updated_at DESC LIMIT %s",
+                        (str(collection_name), limit),
+                    )
+                    rows = cur.fetchall()
             else:
-                row = conn.execute("SELECT MAX(scan_count) FROM scans").fetchone()
-        try:
-            return int((row or [0])[0] or 0)
-        except Exception:
-            return 0
+                rows = conn.execute(
+                    "SELECT payload_json FROM collection_items WHERE collection_name=? ORDER BY updated_at DESC LIMIT ?",
+                    (str(collection_name), limit),
+                ).fetchall()
+        out = []
+        for row in rows or []:
+            value = self._json_row_value(row, 0)
+            if value is not None:
+                out.append(value)
+        return out
 
     def get_collection_item(self, collection_name, uid, default=None):
         with self._connect() as conn:
@@ -267,84 +339,9 @@ class StateStore:
                     "SELECT payload_json FROM collection_items WHERE collection_name=? AND uid=?",
                     (str(collection_name), str(uid)),
                 ).fetchone()
-        value = self._json_row_value(row)
+        value = self._json_row_value(row, 0)
         return default if value is None else value
-
-    def set_collection_item(self, collection_name, uid, payload, created_at=None):
-        now = datetime.utcnow().isoformat()
-        created_at = created_at or now
-        payload_json = self._json_param(payload)
-        with self._lock:
-            with self._connect() as conn:
-                if self.use_postgres:
-                    with conn.cursor() as cur:
-                        cur.execute(
-                            """
-                            INSERT INTO collection_items(collection_name, uid, created_at, updated_at, payload_json)
-                            VALUES(%s,%s,%s,%s,%s)
-                            ON CONFLICT(collection_name, uid)
-                            DO UPDATE SET payload_json=EXCLUDED.payload_json, updated_at=EXCLUDED.updated_at
-                            """,
-                            (str(collection_name), str(uid), created_at, now, payload_json),
-                        )
-                else:
-                    conn.execute(
-                        """
-                        INSERT INTO collection_items(collection_name, uid, created_at, updated_at, payload_json)
-                        VALUES(?,?,?,?,?)
-                        ON CONFLICT(collection_name, uid)
-                        DO UPDATE SET payload_json=excluded.payload_json, updated_at=excluded.updated_at
-                        """,
-                        (str(collection_name), str(uid), created_at, now, payload_json),
-                    )
-
-    def append_unique_item(self, collection_name, uid, payload, created_at=None):
-        existing = self.get_collection_item(collection_name, uid, default=None)
-        if existing is not None:
-            return False
-        self.set_collection_item(collection_name, uid, payload, created_at=created_at)
-        return True
-
-    def list_collection(self, collection_name, limit=None):
-        limit_value = max(1, int(limit)) if limit else None
-        with self._connect() as conn:
-            if self.use_postgres:
-                with conn.cursor() as cur:
-                    if limit_value:
-                        cur.execute(
-                            "SELECT payload_json FROM collection_items WHERE collection_name=%s ORDER BY created_at DESC LIMIT %s",
-                            (str(collection_name), limit_value),
-                        )
-                    else:
-                        cur.execute(
-                            "SELECT payload_json FROM collection_items WHERE collection_name=%s ORDER BY created_at DESC",
-                            (str(collection_name),),
-                        )
-                    rows = cur.fetchall()
-            else:
-                if limit_value:
-                    rows = conn.execute(
-                        "SELECT payload_json FROM collection_items WHERE collection_name=? ORDER BY created_at DESC LIMIT ?",
-                        (str(collection_name), limit_value),
-                    ).fetchall()
-                else:
-                    rows = conn.execute(
-                        "SELECT payload_json FROM collection_items WHERE collection_name=? ORDER BY created_at DESC",
-                        (str(collection_name),),
-                    ).fetchall()
-        output = []
-        for row in rows or []:
-            value = self._json_row_value(row)
-            if value is not None:
-                output.append(value)
-        return output
-
-
-_STATE_STORE_SINGLETON = None
 
 
 def get_state_store():
-    global _STATE_STORE_SINGLETON
-    if _STATE_STORE_SINGLETON is None:
-        _STATE_STORE_SINGLETON = StateStore()
-    return _STATE_STORE_SINGLETON
+    return StateStore()

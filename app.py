@@ -785,10 +785,13 @@ def memory_integrity_status():
         "runtime_scan_count": int(scan_count or 0),
     }
     active_backend = state_store.backend_name
+    requested_backend = getattr(state_store, "requested_backend", active_backend)
     has_postgres = active_backend == "postgres"
     render_service = bool(os.environ.get("RENDER") or os.environ.get("RENDER_SERVICE_ID") or os.environ.get("RENDER_EXTERNAL_URL"))
     durable_ready = has_postgres
     warnings = []
+    if requested_backend == "postgres" and active_backend != "postgres":
+        warnings.append("postgres_requested_but_fell_back_to_sqlite")
     if active_backend != "postgres":
         warnings.append("storage_backend_is_not_postgres")
     if render_service and active_backend != "postgres":
@@ -800,14 +803,20 @@ def memory_integrity_status():
     return {
         "durable_ready": durable_ready,
         "backend": active_backend,
+        "requested_backend": requested_backend,
         "backend_target": state_store.backend_target if active_backend == "sqlite" else "postgres",
         "database_url_configured": bool(os.getenv("ALPHA_HIVE_DATABASE_URL") or os.getenv("DATABASE_URL")),
+        "postgres_fallback_reason": getattr(state_store, "fallback_reason", None),
+        "postgres_last_error": getattr(state_store, "last_error", None),
         "render_environment_detected": render_service,
         "scan_sources": scan_sources,
         "last_snapshot_present": bool(snapshot),
         "warning_count": len(warnings),
         "warnings": warnings,
-        "recommended_action": "Configure ALPHA_HIVE_DATABASE_URL / DATABASE_URL to a Postgres database" if not durable_ready else "Persistence looks durable",
+        "recommended_action": (
+            "Postgres requested but unavailable; app fell back to sqlite safely" if requested_backend == "postgres" and active_backend != "postgres"
+            else ("Configure ALPHA_HIVE_DATABASE_URL / DATABASE_URL to a Postgres database" if not durable_ready else "Persistence looks durable")
+        ),
     }
 
 
