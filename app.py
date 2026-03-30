@@ -128,6 +128,9 @@ def bootstrap_scan_count():
 scan_count = bootstrap_scan_count()
 scanner_started = False
 scanner_lock = threading.Lock()
+ui_cache = {}
+ui_cache_ts = 0.0
+UI_CACHE_TTL_SECONDS = max(5, int(os.environ.get("ALPHA_HIVE_UI_CACHE_TTL", "20") or 20))
 
 
 def ensure_capital_state():
@@ -161,11 +164,32 @@ def ensure_capital_state():
 
 
 def load_capital_state():
-    return ensure_capital_state()
+    default_state = {
+        "capital_current": 0.0,
+        "capital_peak": 0.0,
+        "daily_pnl": 0.0,
+        "streak": 0,
+        "daily_target_pct": 2.0,
+        "daily_stop_pct": 3.0,
+    }
+    try:
+        current = state_store.get_json("capital_state", None)
+    except Exception as e:
+        print(f"load_capital_state store read warning: {e}", flush=True)
+        current = None
+    if not isinstance(current, dict):
+        current = read_json(CAPITAL_STATE_FILE, default_state)
+    if not isinstance(current, dict):
+        current = dict(default_state)
+    for key, value in default_state.items():
+        current.setdefault(key, value)
+    if float(current.get("capital_peak", 0.0) or 0.0) < float(current.get("capital_current", 0.0) or 0.0):
+        current["capital_peak"] = float(current.get("capital_current", 0.0) or 0.0)
+    return current
 
 
 def save_capital_state(data):
-    current = ensure_capital_state()
+    current = load_capital_state()
     merged = {
         "capital_current": float(data.get("capital_current", current.get("capital_current", 0.0)) or 0.0),
         "capital_peak": float(data.get("capital_peak", current.get("capital_peak", 0.0)) or 0.0),
@@ -176,7 +200,10 @@ def save_capital_state(data):
     }
     if merged["capital_peak"] < merged["capital_current"]:
         merged["capital_peak"] = merged["capital_current"]
-    write_json(CAPITAL_STATE_FILE, merged)
+    try:
+        write_json(CAPITAL_STATE_FILE, merged)
+    except Exception as e:
+        print(f"save_capital_state local write warning: {e}", flush=True)
     try:
         state_store.set_json("capital_state", merged)
     except Exception as e:
@@ -269,7 +296,7 @@ class CapitalAutoTracker:
             capital_peak = capital_current
         state["capital_peak"] = round(capital_peak, 2)
 
-        write_json(CAPITAL_STATE_FILE, state)
+        save_capital_state(state)
         return state
 
 
@@ -728,25 +755,50 @@ def load_state():
     return signals, history, current_decision, meta
 
 
-def get_snapshot():
+def get_ui_cache(force=False):
+    global ui_cache, ui_cache_ts
+    now_ts = time.time()
+    if not force and ui_cache and (now_ts - ui_cache_ts) < UI_CACHE_TTL_SECONDS:
+        return ui_cache
+    cached = state_store.get_json("ui_cache", {}) if not force else {}
+    if not force and isinstance(cached, dict) and cached and (now_ts - ui_cache_ts) < (UI_CACHE_TTL_SECONDS * 2):
+        ui_cache = cached
+        return ui_cache
+    data = {}
+    try:
+        data["learning_stats"] = journal.stats()
+    except Exception as e:
+        print(f"ui_cache learning_stats warning: {e}", flush=True)
+        data["learning_stats"] = {"total": 0, "wins": 0, "loss": 0, "winrate": 0.0}
+    try:
+        data["best_assets"] = journal.best_assets()
+    except Exception as e:
+        print(f"ui_cache best_assets warning: {e}", flush=True)
+        data["best_assets"] = []
+    try:
+        data["best_hours"] = journal.best_hours()
+    except Exception as e:
+        print(f"ui_cache best_hours warning: {e}", flush=True)
+        data["best_hours"] = []
+    try:
+        data["specialist_leaders"] = specialist_reputation.snapshot(limit=12)
+    except Exception as e:
+        print(f"ui_cache specialist_leaders warning: {e}", flush=True)
+        data["specialist_leaders"] = []
+    ui_cache = data
+    ui_cache_ts = now_ts
+    try:
+        state_store.set_json("ui_cache", data)
+    except Exception as e:
+        print(f"ui_cache store warning: {e}", flush=True)
+    return data
+
+
+def get_snapshot(light=True):
     signals, history, current_decision, meta = load_state()
-    try:
-        capital_auto_tracker.update()
-    except Exception as e:
-        print(f"capital_auto_tracker.update warning: {e}", flush=True)
-    try:
-        capital_state = load_capital_state()
-    except Exception as e:
-        print(f"load_capital_state warning: {e}", flush=True)
-        capital_state = {
-            "capital_current": 0.0,
-            "capital_peak": 0.0,
-            "daily_pnl": 0.0,
-            "streak": 0,
-            "daily_target_pct": 2.0,
-            "daily_stop_pct": 3.0,
-        }
-    return {
+    capital_state = load_capital_state()
+    cached = get_ui_cache(force=False)
+    snapshot = {
         "signals": signals,
         "history": history[:20],
         "current_decision": current_decision,
@@ -763,14 +815,23 @@ def get_snapshot():
             "boot_restored_from": meta.get("boot_restored_from", 0),
             "durable_ready": memory_integrity_status().get("durable_ready", False),
         },
-        "learning_stats": journal.stats(),
-        "best_assets": journal.best_assets(),
-        "best_hours": journal.best_hours(),
+        "learning_stats": cached.get("learning_stats", {"total": 0, "wins": 0, "loss": 0, "winrate": 0.0}),
+        "best_assets": cached.get("best_assets", []),
+        "best_hours": cached.get("best_hours", []),
         "capital_state": capital_state,
-        "edge_report": edge_audit.compute_report(),
-        "edge_guard": edge_guard.evaluate(asset="GLOBAL", regime="global", strategy_name="global", analysis_time=None, proposed_decision="OBSERVAR", proposed_score=0.0, proposed_confidence=50),
-        "specialist_leaders": specialist_reputation.snapshot(limit=12),
+        "specialist_leaders": cached.get("specialist_leaders", []),
     }
+    if not light:
+        try:
+            snapshot["edge_report"] = edge_audit.compute_report()
+        except Exception as e:
+            snapshot["edge_report"] = {"error": str(e)}
+        try:
+            snapshot["edge_guard"] = edge_guard.evaluate(asset="GLOBAL", regime="global", strategy_name="global", analysis_time=None, proposed_decision="OBSERVAR", proposed_score=0.0, proposed_confidence=50)
+        except Exception as e:
+            snapshot["edge_guard"] = {"error": str(e)}
+    return snapshot
+
 
 
 def memory_integrity_status():
@@ -871,6 +932,11 @@ def scanner_loop():
 
             scan_count += 1
             save_state(signals, history, current_decision, scan_count)
+            try:
+                if scan_count <= 3 or scan_count % 3 == 0:
+                    get_ui_cache(force=True)
+            except Exception as e:
+                print(f"ui_cache refresh warning: {e}", flush=True)
 
             print(
                 f"Scan #{scan_count} | Signals: {len(signals)} | Decision: {current_decision['decision']} | Asset: {current_decision['asset']}",
@@ -1131,19 +1197,24 @@ async function refreshSnapshot(){
   const btn = document.getElementById("refreshBtn");
   btn.disabled = true;
   btn.textContent = "Atualizando...";
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 4500);
   try{
-    const r = await fetch("/snapshot", {cache:"no-store"});
+    const r = await fetch("/snapshot?v=" + Date.now(), {cache:"no-store", signal: controller.signal});
+    if(!r.ok){ throw new Error("HTTP " + r.status); }
     const d = await r.json();
     applySnapshot(d);
     btn.textContent = "✓ Atualizado";
   }catch(e){
     console.error("snapshot error", e);
-    btn.textContent = "Erro ao atualizar";
+    btn.textContent = e && e.name === "AbortError" ? "Demorou demais" : "Erro ao atualizar";
+  }finally{
+    clearTimeout(timeout);
+    setTimeout(()=>{
+      btn.disabled = false;
+      btn.textContent = "↻ Atualizar agora";
+    },1200);
   }
-  setTimeout(()=>{
-    btn.disabled = false;
-    btn.textContent = "↻ Atualizar agora";
-  },1200);
 }
 
 async function saveCapitalState(){
@@ -1206,7 +1277,7 @@ def _boot():
 @app.route("/")
 def home():
     ensure_scanner_started()
-    return render_template_string(HTML_PAGE, snapshot_json=safe_dumps(get_snapshot()))
+    return render_template_string(HTML_PAGE, snapshot_json=safe_dumps(get_snapshot(light=True)))
 
 
 import time
@@ -1247,13 +1318,31 @@ def capital_state_post():
 @app.route("/snapshot")
 def snapshot():
     ensure_scanner_started()
-    return jsonify(to_jsonable(get_snapshot()))
+    try:
+        return jsonify(to_jsonable(get_snapshot(light=True)))
+    except Exception as e:
+        print(f"snapshot route warning: {e}", flush=True)
+        signals, history, current_decision, meta = load_state()
+        return jsonify(to_jsonable({
+            "signals": signals,
+            "history": history[:20],
+            "current_decision": current_decision,
+            "meta": {
+                "last_scan": (meta or {}).get("last_scan", "--"),
+                "scan_count": (meta or {}).get("scan_count", 0),
+                "signal_count": len(signals),
+                "asset_count": len(ASSETS),
+            },
+            "learning_stats": {"total": 0, "wins": 0, "loss": 0, "winrate": 0.0},
+            "best_assets": [],
+            "best_hours": [],
+            "capital_state": load_capital_state(),
+        }))
 
 
 @app.route("/ping")
 def ping():
-    ensure_scanner_started()
-    return {"status": "ok"}
+    return {"status": "ok", "backend": state_store.backend_name}
 
 
 
