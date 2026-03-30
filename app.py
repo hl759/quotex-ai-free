@@ -723,6 +723,7 @@ def get_snapshot():
             "storage_backend": state_store.backend_name,
             "storage_target": meta.get("storage_target", state_store.backend_target if state_store.backend_name == "sqlite" else "postgres"),
             "boot_restored_from": meta.get("boot_restored_from", 0),
+            "durable_ready": memory_integrity_status().get("durable_ready", False),
         },
         "learning_stats": journal.stats(),
         "best_assets": journal.best_assets(),
@@ -731,6 +732,44 @@ def get_snapshot():
         "edge_report": edge_audit.compute_report(),
         "edge_guard": edge_guard.evaluate(asset="GLOBAL", regime="global", strategy_name="global", analysis_time=None, proposed_decision="OBSERVAR", proposed_score=0.0, proposed_confidence=50),
         "specialist_leaders": specialist_reputation.snapshot(limit=12),
+    }
+
+
+def memory_integrity_status():
+    meta_file = read_json(META_FILE, {"scan_count": 0})
+    meta_store = state_store.get_json("meta", {"scan_count": 0}) or {"scan_count": 0}
+    snapshot = state_store.last_snapshot() or {}
+    scan_sources = {
+        "meta_file_scan_count": int((meta_file or {}).get("scan_count", 0) or 0) if isinstance(meta_file, dict) else 0,
+        "meta_store_scan_count": int((meta_store or {}).get("scan_count", 0) or 0) if isinstance(meta_store, dict) else 0,
+        "kv_scan_count": int(state_store.get_int("scan_count", 0) or 0),
+        "max_scan_count": int(state_store.max_scan_count() or 0),
+        "runtime_scan_count": int(scan_count or 0),
+    }
+    active_backend = state_store.backend_name
+    has_postgres = active_backend == "postgres"
+    render_service = bool(os.environ.get("RENDER") or os.environ.get("RENDER_SERVICE_ID") or os.environ.get("RENDER_EXTERNAL_URL"))
+    durable_ready = has_postgres
+    warnings = []
+    if active_backend != "postgres":
+        warnings.append("storage_backend_is_not_postgres")
+    if render_service and active_backend != "postgres":
+        warnings.append("render_local_filesystem_is_ephemeral")
+    if os.path.exists(os.path.join(DATA_DIR, "alpha_hive_state.db")):
+        warnings.append("local_sqlite_file_present")
+    if os.path.exists(os.path.join(DATA_DIR, "alpha_hive_journal.json")):
+        warnings.append("local_json_journal_present")
+    return {
+        "durable_ready": durable_ready,
+        "backend": active_backend,
+        "backend_target": state_store.backend_target if active_backend == "sqlite" else "postgres",
+        "database_url_configured": bool(os.getenv("ALPHA_HIVE_DATABASE_URL") or os.getenv("DATABASE_URL")),
+        "render_environment_detected": render_service,
+        "scan_sources": scan_sources,
+        "last_snapshot_present": bool(snapshot),
+        "warning_count": len(warnings),
+        "warnings": warnings,
+        "recommended_action": "Configure ALPHA_HIVE_DATABASE_URL / DATABASE_URL to a Postgres database" if not durable_ready else "Persistence looks durable",
     }
 
 
@@ -1182,6 +1221,12 @@ def specialists_report():
         "leaders": specialist_reputation.snapshot(limit=25),
         "current_council": read_json(CURRENT_DECISION_FILE, {}).get("trader_council", {}),
     }))
+
+@app.route("/memory-integrity", methods=["GET"])
+def memory_integrity():
+    ensure_scanner_started()
+    return jsonify(to_jsonable(memory_integrity_status()))
+
 
 if __name__ == "__main__":
     ensure_scanner_started()
