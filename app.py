@@ -80,6 +80,21 @@ for _name, _dest in {
 state_store = StateStore()
 
 
+def read_json(path, default):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+
+def write_json(path, data):
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        safe_dump(data, f)
+    os.replace(tmp, path)
+
+
 def bootstrap_scan_count():
     meta_file = read_json(META_FILE, {"scan_count": 0})
     meta_store = state_store.get_json("meta", {"scan_count": 0}) or {"scan_count": 0}
@@ -100,21 +115,6 @@ def bootstrap_scan_count():
 scan_count = bootstrap_scan_count()
 scanner_started = False
 scanner_lock = threading.Lock()
-
-
-def read_json(path, default):
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return default
-
-
-def write_json(path, data):
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        safe_dump(data, f)
-    os.replace(tmp, path)
 
 
 def ensure_capital_state():
