@@ -1,13 +1,17 @@
 import json
 import os
+from storage_paths import DATA_DIR, STATE_DIR, migrate_file
+from storage_paths import DATA_DIR, migrate_file
 from datetime import datetime
 from json_safe import safe_dump, safe_dumps, to_jsonable
 
-DATA_DIR = os.environ.get("ALPHA_HIVE_DATA_DIR", "/opt/render/project/src/data")
 os.makedirs(DATA_DIR, exist_ok=True)
 
 JOURNAL_FILE = os.path.join(DATA_DIR, "alpha_hive_journal.json")
-CAPITAL_STATE_FILE = os.path.join("/tmp/nexus_state", "capital_state.json")
+migrate_file(JOURNAL_FILE, [os.path.join("/opt/render/project/src/data", "alpha_hive_journal.json")])
+migrate_file(JOURNAL_FILE, [os.path.join("/opt/render/project/src/data", "alpha_hive_journal.json")])
+CAPITAL_STATE_FILE = os.path.join(STATE_DIR, "capital_state.json")
+migrate_file(CAPITAL_STATE_FILE, [os.path.join("/tmp/nexus_state", "capital_state.json")])
 
 
 class CapitalAutoTracker:

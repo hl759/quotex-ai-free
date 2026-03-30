@@ -1,16 +1,18 @@
 import json
 import math
 import os
+from storage_paths import DATA_DIR, migrate_file
 from statistics import mean
 from json_safe import safe_dump, safe_dumps, to_jsonable
 
 from config import DEFAULT_PAYOUT, EDGE_PROOF_MIN_TRADES, EDGE_SEGMENT_MIN_TRADES
 
-DATA_DIR = os.environ.get("ALPHA_HIVE_DATA_DIR", "/opt/render/project/src/data")
 os.makedirs(DATA_DIR, exist_ok=True)
 
 LEDGER_FILE = os.path.join(DATA_DIR, "alpha_hive_trade_ledger.json")
+migrate_file(LEDGER_FILE, [os.path.join("/opt/render/project/src/data", "alpha_hive_trade_ledger.json")])
 SNAPSHOT_FILE = os.path.join(DATA_DIR, "alpha_hive_edge_snapshot.json")
+migrate_file(SNAPSHOT_FILE, [os.path.join("/opt/render/project/src/data", "alpha_hive_edge_snapshot.json")])
 
 
 class EdgeAuditEngine:

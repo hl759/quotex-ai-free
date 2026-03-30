@@ -5,6 +5,8 @@ import time
 from datetime import datetime, timedelta
 from flask import Flask, jsonify, render_template_string, request
 from json_safe import safe_dump, safe_dumps, to_jsonable
+from storage_paths import DATA_DIR, STATE_DIR, migrate_file
+from state_store import StateStore
 
 from scanner import MarketScanner
 from signal_engine import SignalEngine
@@ -54,7 +56,6 @@ edge_audit = EdgeAuditEngine()
 edge_guard = EdgeGuardEngine()
 specialist_reputation = SpecialistReputationEngine()
 
-STATE_DIR = "/tmp/nexus_state"
 LATEST_SIGNALS_FILE = os.path.join(STATE_DIR, "latest_signals.json")
 SIGNAL_HISTORY_FILE = os.path.join(STATE_DIR, "history.json")
 META_FILE = os.path.join(STATE_DIR, "meta.json")
@@ -62,9 +63,31 @@ CURRENT_DECISION_FILE = os.path.join(STATE_DIR, "current_decision.json")
 PENDING_DECISIONS_FILE = os.path.join(STATE_DIR, "pending_decisions.json")
 CAPITAL_STATE_FILE = os.path.join(STATE_DIR, "capital_state.json")
 
-os.makedirs(STATE_DIR, exist_ok=True)
+LEGACY_STATE_DIRS = [
+    os.path.join(os.getcwd(), "nexus_state"),
+    "/tmp/nexus_state",
+]
+for _name, _dest in {
+    "latest_signals.json": LATEST_SIGNALS_FILE,
+    "history.json": SIGNAL_HISTORY_FILE,
+    "meta.json": META_FILE,
+    "current_decision.json": CURRENT_DECISION_FILE,
+    "pending_decisions.json": PENDING_DECISIONS_FILE,
+    "capital_state.json": CAPITAL_STATE_FILE,
+}.items():
+    migrate_file(_dest, [os.path.join(base, _name) for base in LEGACY_STATE_DIRS])
 
-scan_count = 0
+state_store = StateStore()
+
+
+def bootstrap_scan_count():
+    meta = read_json(META_FILE, {"scan_count": 0})
+    try:
+        return int(meta.get("scan_count", 0) or 0)
+    except Exception:
+        return 0
+
+scan_count = bootstrap_scan_count()
 scanner_started = False
 scanner_lock = threading.Lock()
 
@@ -627,7 +650,22 @@ def save_state(signals, history, current_decision, scans):
     write_json(LATEST_SIGNALS_FILE, signals)
     write_json(SIGNAL_HISTORY_FILE, history[:50])
     write_json(CURRENT_DECISION_FILE, current_decision)
-    write_json(META_FILE, {"last_scan": now_brazil().strftime("%H:%M:%S"), "scan_count": scans})
+    previous_meta = read_json(META_FILE, {})
+    meta_payload = {
+        "last_scan": now_brazil().strftime("%H:%M:%S"),
+        "scan_count": scans,
+        "state_dir": STATE_DIR,
+        "data_dir": DATA_DIR,
+        "boot_restored_from": previous_meta.get("scan_count", 0),
+    }
+    write_json(META_FILE, meta_payload)
+    state_store.set_json("meta", meta_payload)
+    state_store.append_scan({
+        "signals": signals,
+        "history": history[:50],
+        "current_decision": current_decision,
+        "meta": meta_payload,
+    }, scans)
 
 
 def load_state():
@@ -635,6 +673,16 @@ def load_state():
     history = read_json(SIGNAL_HISTORY_FILE, [])
     current_decision = read_json(CURRENT_DECISION_FILE, {})
     meta = read_json(META_FILE, {"last_scan": "--", "scan_count": 0})
+    if signals or history or current_decision:
+        return signals, history, current_decision, meta
+    recovered = state_store.last_snapshot() or {}
+    if isinstance(recovered, dict):
+        return (
+            recovered.get("signals", []),
+            recovered.get("history", []),
+            recovered.get("current_decision", {}),
+            recovered.get("meta", meta),
+        )
     return signals, history, current_decision, meta
 
 
@@ -650,6 +698,10 @@ def get_snapshot():
             "scan_count": meta.get("scan_count", 0),
             "signal_count": len(signals),
             "asset_count": len(ASSETS),
+            "state_dir": meta.get("state_dir", STATE_DIR),
+            "data_dir": meta.get("data_dir", DATA_DIR),
+            "db_path": state_store.db_path,
+            "boot_restored_from": meta.get("boot_restored_from", 0),
         },
         "learning_stats": journal.stats(),
         "best_assets": journal.best_assets(),

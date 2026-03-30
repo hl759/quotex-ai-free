@@ -1,9 +1,10 @@
 import json
 import os
+from storage_paths import DATA_DIR, migrate_file
 
-DATA_DIR = os.environ.get("ALPHA_HIVE_DATA_DIR", "/opt/render/project/src/data")
 os.makedirs(DATA_DIR, exist_ok=True)
 JOURNAL_FILE = os.path.join(DATA_DIR, "alpha_hive_journal.json")
+migrate_file(JOURNAL_FILE, [os.path.join("/opt/render/project/src/data", "alpha_hive_journal.json")])
 
 
 class AdaptiveBehavioralOrchestrationEngine:

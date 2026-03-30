@@ -1,13 +1,14 @@
 import json
 import os
+from storage_paths import DATA_DIR, migrate_file
 from json_safe import safe_dump, safe_dumps, to_jsonable
 
 from config import ADAPTIVE_MIN_TRADES, ADAPTIVE_STRONG_MIN_TRADES, ADAPTIVE_PROVEN_MIN_TRADES
 
-DATA_DIR = os.environ.get("ALPHA_HIVE_DATA_DIR", "/opt/render/project/src/data")
 os.makedirs(DATA_DIR, exist_ok=True)
 
 STRATEGY_LAB_FILE = os.path.join(DATA_DIR, "alpha_hive_strategy_lab.json")
+migrate_file(STRATEGY_LAB_FILE, [os.path.join("/opt/render/project/src/data", "alpha_hive_strategy_lab.json")])
 
 
 class StrategyLab:

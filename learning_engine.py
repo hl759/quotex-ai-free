@@ -1,10 +1,12 @@
 import json
 import os
+from storage_paths import DATA_DIR, migrate_file
 from json_safe import safe_dump, safe_dumps, to_jsonable
 
 from config import ADAPTIVE_MIN_TRADES, ADAPTIVE_STRONG_MIN_TRADES, ADAPTIVE_PROVEN_MIN_TRADES
 
-STATE_FILE = "/tmp/nexus_learning.json"
+STATE_FILE = os.path.join(DATA_DIR, "alpha_hive_learning.json")
+migrate_file(STATE_FILE, ["/tmp/nexus_learning.json", os.path.join("/opt/render/project/src/data", "alpha_hive_learning.json")])
 
 
 class LearningEngine:
