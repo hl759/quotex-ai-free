@@ -303,6 +303,37 @@ class StateStore:
                         (str(collection_name), str(uid), created_at, created_at, payload_json),
                     )
 
+
+    def append_unique_item(self, collection_name, uid, payload, created_at=None):
+        existing = self.get_collection_item(collection_name, uid, default=None)
+        if existing is not None:
+            return False
+        created_at_value = str(created_at or datetime.utcnow().isoformat())
+        payload_json = self._json_param(payload)
+        with self._lock:
+            with self._connect() as conn:
+                if self.use_postgres:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            INSERT INTO collection_items(collection_name, uid, created_at, updated_at, payload_json)
+                            VALUES(%s,%s,%s,%s,%s)
+                            ON CONFLICT(collection_name, uid) DO NOTHING
+                            """,
+                            (str(collection_name), str(uid), created_at_value, created_at_value, payload_json),
+                        )
+                        return cur.rowcount > 0
+                else:
+                    cur = conn.execute(
+                        """
+                        INSERT INTO collection_items(collection_name, uid, created_at, updated_at, payload_json)
+                        VALUES(?,?,?,?,?)
+                        ON CONFLICT(collection_name, uid) DO NOTHING
+                        """,
+                        (str(collection_name), str(uid), created_at_value, created_at_value, payload_json),
+                    )
+                    return (cur.rowcount or 0) > 0
+
     def list_collection(self, collection_name, limit=200):
         limit = max(1, int(limit or 200))
         with self._connect() as conn:
