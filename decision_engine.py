@@ -1,3 +1,4 @@
+from config import DEFAULT_PAYOUT, META_LABEL_MIN_EDGE_R
 from strategy_engine import StrategyEngine
 
 try:
@@ -33,6 +34,25 @@ except Exception:
                 "participants": [],
                 "memory": {"summary": {"total": 0, "wins": 0, "losses": 0, "winrate": 0.0, "expectancy_r": 0.0, "avg_payout": 0.8, "breakeven_winrate": 55.56}, "scar_tissue": ["Sem memória"]},
                 "summary": {},
+            }
+
+
+try:
+    from confidence_calibration_engine import ConfidenceCalibrationEngine
+except Exception:
+    class ConfidenceCalibrationEngine:
+        def estimate(self, confidence, *args, **kwargs):
+            p = max(0.01, min(0.99, float(confidence or 50.0) / 100.0))
+            payout = DEFAULT_PAYOUT
+            return {
+                "probability": round(p, 4),
+                "raw_probability": round(p, 4),
+                "source": "fallback",
+                "sample": 0,
+                "bucket": int(round(float(confidence or 50))),
+                "breakeven_probability": round((1.0 / (1.0 + payout)), 4),
+                "expectancy_r": round(p * payout - (1.0 - p), 4),
+                "global_probability": round(p, 4),
             }
 
 try:
@@ -314,6 +334,7 @@ class DecisionEngine:
         self.behavioral_orchestration_engine = AdaptiveBehavioralOrchestrationEngine()
         self.edge_guard_engine = EdgeGuardEngine()
         self.trader_council_engine = TraderCouncilEngine()
+        self.confidence_calibration_engine = ConfidenceCalibrationEngine()
 
     def _build_base_score(self, indicators):
         score = 0.0
@@ -824,6 +845,37 @@ class DecisionEngine:
         confidence = base_confidence + capital_plan.get("confidence_shift", 0)
         confidence = int(max(50, min(95, confidence)))
 
+        calibration = self.confidence_calibration_engine.estimate(
+            confidence=confidence,
+            asset=asset,
+            regime=regime,
+            strategy_name=leader_name,
+            environment_type=environment,
+            payout=DEFAULT_PAYOUT,
+        )
+        calibrated_prob = float(calibration.get("probability", confidence / 100.0))
+        calibrated_edge_r = float(calibration.get("expectancy_r", 0.0))
+        calibrated_sample = int(calibration.get("sample", 0) or 0)
+        breakeven_probability = float(calibration.get("breakeven_probability", 1.0))
+        reasons.append(
+            f"Calibração: {round(calibrated_prob * 100, 2)}% | break-even {round(breakeven_probability * 100, 2)}% | fonte {calibration.get('source', 'none')} | amostra {calibrated_sample}"
+        )
+
+        if decision in ("ENTRADA_FORTE", "ENTRADA_CAUTELA"):
+            if calibrated_sample >= 8 and calibrated_edge_r <= 0:
+                if decision == "ENTRADA_FORTE":
+                    decision = "ENTRADA_CAUTELA"
+                    reasons.append("Meta-label: edge calibrado não pagou entrada forte")
+                else:
+                    decision, direction = "OBSERVAR", final_direction
+                    reasons.append("Meta-label: edge calibrado não superou break-even")
+            elif calibrated_sample >= 8 and calibrated_edge_r < META_LABEL_MIN_EDGE_R and decision == "ENTRADA_FORTE":
+                decision = "ENTRADA_CAUTELA"
+                reasons.append("Meta-label: vantagem calibrada pequena demais para agressão")
+            elif calibrated_sample < 8 and decision == "ENTRADA_FORTE":
+                decision = "ENTRADA_CAUTELA"
+                reasons.append("Meta-label: pouca amostra para sustentar entrada forte")
+
         edge_guard = self.edge_guard_engine.evaluate(
             asset=asset,
             regime=regime,
@@ -898,6 +950,10 @@ class DecisionEngine:
             "suggested_stake": capital_plan.get("stake_value", 0.0),
             "risk_pct": capital_plan.get("risk_pct", 0.0),
             "target_value": capital_plan.get("target_value", 0.0),
+            "calibrated_probability": round(calibrated_prob, 4),
+            "calibrated_expectancy_r": round(calibrated_edge_r, 4),
+            "calibration_source": calibration.get("source", "none"),
+            "calibration_sample": calibrated_sample,
             "stop_value": capital_plan.get("stop_value", 0.0),
             "trader_council": council,
             "council_quality": council.get("quality", "neutro"),

@@ -36,11 +36,7 @@ try:
 except Exception:
     MarketProfileEngine = None
 
-from config import (
-    ASSETS, SCAN_INTERVAL_SECONDS, DEFAULT_PAYOUT, SIGNAL_HISTORY_LIMIT,
-    SNAPSHOT_HISTORY_LIMIT, JOURNAL_MAX_TRADES, CAPITAL_REFRESH_EVERY_SCANS,
-    UI_AUTO_REFRESH_ON_LOAD,
-)
+from config import ASSETS, SCAN_INTERVAL_SECONDS, DEFAULT_PAYOUT
 
 app = Flask(__name__)
 
@@ -221,7 +217,7 @@ class CapitalAutoTracker:
         self.journal_file = os.path.join(self.data_dir, "alpha_hive_journal.json")
 
     def _load_journal(self):
-        data = state_store.list_collection("journal_trades", limit=JOURNAL_MAX_TRADES)
+        data = state_store.list_collection("journal_trades", limit=4000)
         if data:
             return data if isinstance(data, list) else []
         data = read_json(self.journal_file, [])
@@ -692,9 +688,7 @@ def register_all_learning_outputs(signal, result_data):
 def process_pending_decisions(market):
     pending = read_json(PENDING_DECISIONS_FILE, [])
     if not pending:
-        return 0
-
-    processed = 0
+        return
 
     now_str = now_brazil().strftime("%H:%M")
     still_pending = []
@@ -713,17 +707,15 @@ def process_pending_decisions(market):
         result_data = result_engine.evaluate_expired_signal(signal, matched_asset.get("candles", []))
         if result_data:
             register_all_learning_outputs(signal, result_data)
-            processed += 1
         else:
             still_pending.append(signal)
 
     write_json(PENDING_DECISIONS_FILE, still_pending)
-    return processed
 
 
 def save_state(signals, history, current_decision, scans):
     write_json(LATEST_SIGNALS_FILE, signals)
-    write_json(SIGNAL_HISTORY_FILE, history[:SIGNAL_HISTORY_LIMIT])
+    write_json(SIGNAL_HISTORY_FILE, history[:50])
     write_json(CURRENT_DECISION_FILE, current_decision)
     previous_meta = read_json(META_FILE, {})
     meta_payload = {
@@ -739,7 +731,7 @@ def save_state(signals, history, current_decision, scans):
     state_store.set_json("meta", meta_payload)
     state_store.append_scan({
         "signals": signals,
-        "history": history[:SNAPSHOT_HISTORY_LIMIT],
+        "history": history[:50],
         "current_decision": current_decision,
         "meta": meta_payload,
     }, scans)
@@ -895,9 +887,8 @@ def scanner_loop():
         try:
             market = scanner.scan_assets()
 
-            processed_results = process_pending_decisions(market)
-            if processed_results or scan_count == 0 or ((scan_count + 1) % max(1, CAPITAL_REFRESH_EVERY_SCANS) == 0):
-                capital_auto_tracker.update()
+            process_pending_decisions(market)
+            capital_auto_tracker.update()
 
             decision_candidates = []
             analysis_time = now_brazil().strftime("%H:%M")
@@ -942,7 +933,7 @@ def scanner_loop():
             scan_count += 1
             save_state(signals, history, current_decision, scan_count)
             try:
-                if processed_results or scan_count <= 2 or scan_count % 5 == 0:
+                if scan_count <= 3 or scan_count % 3 == 0:
                     get_ui_cache(force=True)
             except Exception as e:
                 print(f"ui_cache refresh warning: {e}", flush=True)
@@ -1042,7 +1033,6 @@ body{margin:0;font-family:Arial,sans-serif;background:linear-gradient(180deg,#04
 
 <script>
 const initialSnapshot = {{ snapshot_json|safe }} || null;
-const UI_AUTO_REFRESH_ON_LOAD = {{ ui_auto_refresh_on_load|safe }};
 
 function showTab(tabId, btn){
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
@@ -1271,7 +1261,7 @@ document.addEventListener("DOMContentLoaded", function(){
     console.error("initial snapshot error", e);
     applySnapshot(null);
   }
-  if(UI_AUTO_REFRESH_ON_LOAD){ setTimeout(refreshSnapshot, 3000); }
+  setTimeout(refreshSnapshot, 400);
 });
 </script>
 </body>
@@ -1287,8 +1277,10 @@ def _boot():
 @app.route("/")
 def home():
     ensure_scanner_started()
-    return render_template_string(HTML_PAGE, snapshot_json=safe_dumps(get_snapshot(light=True)), ui_auto_refresh_on_load=("true" if UI_AUTO_REFRESH_ON_LOAD else "false"))
+    return render_template_string(HTML_PAGE, snapshot_json=safe_dumps(get_snapshot(light=True)))
 
+
+import time
 
 START_TIME = time.time()
 

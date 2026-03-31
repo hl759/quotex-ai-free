@@ -7,7 +7,7 @@ from statistics import mean
 from json_safe import safe_dump, to_jsonable
 from state_store import get_state_store
 
-from config import DEFAULT_PAYOUT, EDGE_PROOF_MIN_TRADES, EDGE_SEGMENT_MIN_TRADES, EDGE_LEDGER_MAX_TRADES
+from config import DEFAULT_PAYOUT, EDGE_PROOF_MIN_TRADES, EDGE_SEGMENT_MIN_TRADES
 
 os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -36,7 +36,7 @@ class EdgeAuditEngine:
         except Exception:
             rows = []
         if isinstance(rows, list):
-            for trade in reversed(rows[:EDGE_LEDGER_MAX_TRADES]):
+            for trade in reversed(rows[:10000]):
                 uid = str(trade.get("uid") or "")
                 if uid:
                     self.store.append_unique_item("trade_ledger", uid, trade, created_at=str(trade.get("date") or ""))
@@ -50,7 +50,7 @@ class EdgeAuditEngine:
 
     def _load_json(self, path, default):
         if path == self.ledger_file:
-            rows = self.store.list_collection("trade_ledger", limit=EDGE_LEDGER_MAX_TRADES)
+            rows = self.store.list_collection("trade_ledger", limit=10000)
             if isinstance(default, list) and rows:
                 return rows
         elif path == self.snapshot_file:
@@ -176,8 +176,8 @@ class EdgeAuditEngine:
         if not inserted:
             return trade
         ledger = self._load_ledger()
-        if len(ledger) > EDGE_LEDGER_MAX_TRADES:
-            ledger = ledger[:EDGE_LEDGER_MAX_TRADES]
+        if len(ledger) > 10000:
+            ledger = ledger[:10000]
         self._save_json(self.ledger_file, ledger)
         snapshot = self.compute_report(ledger)
         self._save_json(self.snapshot_file, snapshot)

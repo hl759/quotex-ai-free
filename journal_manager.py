@@ -4,7 +4,7 @@ from storage_paths import DATA_DIR, migrate_file
 from json_safe import safe_dump
 from state_store import get_state_store
 
-from config import DEFAULT_PAYOUT, JOURNAL_MAX_TRADES
+from config import DEFAULT_PAYOUT
 
 os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -31,11 +31,11 @@ class JournalManager:
             return
         if not isinstance(rows, list):
             return
-        for trade in reversed(rows[:JOURNAL_MAX_TRADES]):
+        for trade in reversed(rows[:4000]):
             self.store.append_unique_item(COLLECTION_NAME, self._trade_id(trade), trade, created_at=str(trade.get("date") or ""))
 
     def _load(self):
-        rows = self.store.list_collection(COLLECTION_NAME, limit=JOURNAL_MAX_TRADES)
+        rows = self.store.list_collection(COLLECTION_NAME, limit=4000)
         if rows:
             return rows
         try:
@@ -80,8 +80,8 @@ class JournalManager:
         inserted = self.store.append_unique_item(COLLECTION_NAME, trade_id, trade, created_at=str(trade.get("date") or ""))
         if inserted:
             data = self._load()
-            if len(data) > JOURNAL_MAX_TRADES:
-                data = data[:JOURNAL_MAX_TRADES]
+            if len(data) > 4000:
+                data = data[:4000]
             self._save(data)
 
     def _economic_stats(self, valid):

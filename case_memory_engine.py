@@ -3,7 +3,7 @@ import os
 from storage_paths import DATA_DIR, migrate_file
 from state_store import get_state_store
 
-from config import DEFAULT_PAYOUT, EDGE_LEDGER_MAX_TRADES
+from config import DEFAULT_PAYOUT
 from trader_genome import asset_class_for, parse_session_bucket
 
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -17,7 +17,7 @@ class CaseMemoryEngine:
         self.store = get_state_store()
 
     def _load_ledger(self):
-        rows = self.store.list_collection("trade_ledger", limit=EDGE_LEDGER_MAX_TRADES)
+        rows = self.store.list_collection("trade_ledger", limit=10000)
         if rows:
             return rows
         try:

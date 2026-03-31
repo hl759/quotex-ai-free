@@ -1,4 +1,6 @@
 from config import (
+    COUNCIL_MIN_SUPPORT_ROLES,
+    COUNCIL_ROLE_CONCENTRATION_LIMIT,
     DEFAULT_PAYOUT,
     EDGE_SEGMENT_MIN_TRADES,
     TRADER_COUNCIL_ACTIVE,
@@ -192,6 +194,30 @@ class TraderCouncilEngine:
             "reasons": opinion.get("reasons", [])[:3],
         }
 
+    def _role_mix(self, participants, consensus_direction):
+        support_roles = {}
+        caution_roles = {}
+        veto_roles = {}
+        for item in participants:
+            role = item.get("role", "unknown")
+            stance = item.get("stance")
+            weight = self._safe_float(item.get("weight"), 0.0)
+            if stance == "support" and item.get("direction") == consensus_direction:
+                support_roles[role] = support_roles.get(role, 0.0) + weight
+            elif stance == "caution":
+                caution_roles[role] = caution_roles.get(role, 0.0) + weight
+            elif stance == "veto":
+                veto_roles[role] = veto_roles.get(role, 0.0) + weight
+        return support_roles, caution_roles, veto_roles
+
+    def _role_concentration(self, mapping):
+        if not mapping:
+            return 0.0
+        total = sum(mapping.values())
+        if total <= 0:
+            return 0.0
+        return max(mapping.values()) / total
+
     def evaluate(self, asset, indicators, candidates, leader_name, final_direction, current_score, current_confidence, meta_context, environment_type, discernment_quality, anti_pattern_risk):
         if not TRADER_COUNCIL_ACTIVE:
             return {
@@ -298,6 +324,25 @@ class TraderCouncilEngine:
         support_weight = call_weight if consensus_direction == "CALL" else put_weight if consensus_direction == "PUT" else 0.0
         opposition_weight = put_weight if consensus_direction == "CALL" else call_weight if consensus_direction == "PUT" else 0.0
 
+        support_roles, caution_roles, veto_roles = self._role_mix(participants, consensus_direction)
+        support_role_count = len(support_roles)
+        caution_role_count = len(caution_roles)
+        veto_role_count = len(veto_roles)
+        role_concentration = self._role_concentration(support_roles)
+
+        diversity_multiplier = 1.0
+        if support_role_count >= 4:
+            diversity_multiplier += 0.08
+        elif support_role_count >= 3:
+            diversity_multiplier += 0.04
+        elif support_role_count <= 1 and support_weight > 0:
+            diversity_multiplier -= 0.12
+
+        if role_concentration >= COUNCIL_ROLE_CONCENTRATION_LIMIT and support_weight > 0:
+            diversity_multiplier -= 0.10
+
+        support_weight *= max(0.70, diversity_multiplier)
+
         decision_cap = None
         head_action = "observe"
         score_boost = 0.0
@@ -320,6 +365,15 @@ class TraderCouncilEngine:
             reasons.append(f"Bloco cauteloso somou {round(caution_weight, 2)}")
         if veto_weight > 0:
             reasons.append(f"Vetos fortes somaram {round(veto_weight, 2)}")
+        if support_role_count > 0:
+            reasons.append(f"Diversidade de suporte: {support_role_count} papéis | concentração {round(role_concentration, 2)}")
+        if caution_role_count > 0:
+            reasons.append(f"Diversidade cautelosa: {caution_role_count} papéis")
+        if veto_role_count > 0:
+            reasons.append(f"Diversidade de veto: {veto_role_count} papéis")
+
+        if support_role_count < COUNCIL_MIN_SUPPORT_ROLES and support_weight > 0:
+            reasons.append("Mesa com suporte pouco diverso: parece mais eco do que consenso")
 
         if senior_veto >= 5.5 or veto_weight >= max(8.0, support_weight * 0.95):
             decision_cap = "NAO_OPERAR"
@@ -328,7 +382,7 @@ class TraderCouncilEngine:
             confidence_shift = -8
             council_quality = "capital_first"
             reasons.append("Head Trader: vetos seniores dominaram a mesa")
-        elif support_weight <= 0 or (caution_weight + veto_weight) > (support_weight * 1.30):
+        elif support_weight <= 0 or support_role_count < COUNCIL_MIN_SUPPORT_ROLES or (caution_weight + veto_weight) > (support_weight * 1.28):
             decision_cap = "OBSERVAR"
             head_action = "observe"
             score_boost = -0.12
@@ -341,7 +395,7 @@ class TraderCouncilEngine:
             score_boost = -0.10
             confidence_shift = -2
             reasons.append("Head Trader: direção original conflita com a mesa")
-        elif support_weight >= max(6.4, opposition_weight * 1.7) and veto_weight <= 2.8 and senior_support >= 2.8:
+        elif support_weight >= max(6.0, opposition_weight * 1.6) and veto_weight <= 3.0 and senior_support >= 2.4 and support_role_count >= 3 and role_concentration < 0.72:
             decision_cap = "ENTRADA_FORTE"
             head_action = "press"
             score_boost = 0.24
@@ -407,5 +461,7 @@ class TraderCouncilEngine:
                 "quality": council_quality,
                 "head_trader_action": head_action,
                 "avg_payout_reference": round(DEFAULT_PAYOUT, 4),
+                "support_role_count": support_role_count,
+                "role_concentration": round(role_concentration, 4),
             },
         }
