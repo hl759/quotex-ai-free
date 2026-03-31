@@ -1,0 +1,7 @@
+Interface atualizada para mostrar resumo operacional + botão "Detalhes avançados".
+
+O que mudou:
+- A aba Decisão agora mostra um resumo curto da leitura, com os pontos mais importantes.
+- Os detalhes completos continuam disponíveis via botão/área expansível "Detalhes avançados".
+- A aba Sinais também recebeu o mesmo padrão para evitar poluição visual.
+- A inteligência do motor não foi reduzida; apenas a apresentação foi condensada.
