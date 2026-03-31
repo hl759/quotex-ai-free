@@ -543,6 +543,38 @@ def _decision_uid(item):
     return f"{item.get('asset','N/A')}-{item.get('direction','N/A')}-{item.get('analysis_time','--:--')}-{item.get('entry_time','--:--')}-{item.get('expiration','--:--')}"
 
 
+def _decision_sort_key(decision):
+    if not isinstance(decision, dict):
+        return (0.0, 0, 0.0)
+    decision_kind = str(decision.get("decision", "")).upper()
+    trade_bonus = 2 if decision_kind == "ENTRADA_FORTE" else 1 if decision_kind == "ENTRADA_CAUTELA" else 0
+    return (
+        trade_bonus,
+        float(decision.get("score", 0.0) or 0.0),
+        int(decision.get("confidence", 0) or 0),
+    )
+
+
+def _is_tradeable_decision(decision):
+    if not isinstance(decision, dict):
+        return False
+    return str(decision.get("decision", "")).upper() in ("ENTRADA_FORTE", "ENTRADA_CAUTELA") and str(decision.get("direction", "")).upper() in ("CALL", "PUT")
+
+
+def _pick_best_candidate(decision_candidates, tradeable_only=False):
+    if not decision_candidates:
+        return None, None
+    filtered = []
+    for decision, item in decision_candidates:
+        if tradeable_only and not _is_tradeable_decision(decision):
+            continue
+        filtered.append((decision, item))
+    if not filtered:
+        return None, None
+    filtered.sort(key=lambda x: _decision_sort_key(x[0]), reverse=True)
+    return filtered[0]
+
+
 def enqueue_pending_decision(current_decision, matched_market):
     if not current_decision:
         return
@@ -981,9 +1013,13 @@ def run_scan_once(trigger="loop"):
         raw_signals = signal_engine.generate_signals_from_decisions(decision_candidates)
         signals = normalize_signals(raw_signals if raw_signals else [])
 
-        if decision_candidates:
-            decision_candidates.sort(key=lambda x: (x[0].get("score", 0), x[0].get("confidence", 0)), reverse=True)
-            best_decision_raw, matched_market = decision_candidates[0]
+        best_tradeable_raw, best_tradeable_market = _pick_best_candidate(decision_candidates, tradeable_only=True)
+        best_display_raw, best_display_market = _pick_best_candidate(decision_candidates, tradeable_only=False)
+
+        if best_tradeable_raw is not None:
+            best_decision_raw, matched_market = best_tradeable_raw, best_tradeable_market
+        elif best_display_raw is not None:
+            best_decision_raw, matched_market = best_display_raw, best_display_market
         else:
             best_decision_raw, matched_market = {
                 "asset": "MERCADO",
@@ -1017,7 +1053,7 @@ def run_scan_once(trigger="loop"):
             print(f"ui_cache refresh warning: {e}", flush=True)
 
         print(
-            f"Scan #{scan_count} | Signals: {len(signals)} | Decision: {current_decision['decision']} | Asset: {current_decision['asset']} | Trigger: {trigger} | Took: {last_scan_duration_ms}ms",
+            f"Scan #{scan_count} | Signals: {len(signals)} | Decision: {current_decision['decision']} | Asset: {current_decision['asset']} | Tradeable: {'yes' if _is_tradeable_decision(best_decision_raw) else 'no'} | Trigger: {trigger} | Took: {last_scan_duration_ms}ms",
             flush=True
         )
         return {

@@ -31,7 +31,7 @@ class SignalEngine:
 
     def _is_operable(self, decision):
         return (
-            str(decision.get("decision", "")).upper() in ("ENTRADA_FORTE", "ENTRADA_CAUTELA", "OBSERVAR")
+            str(decision.get("decision", "")).upper() in ("ENTRADA_FORTE", "ENTRADA_CAUTELA")
             and str(decision.get("direction", "")).upper() in ("CALL", "PUT")
         )
 
