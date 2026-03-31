@@ -1,0 +1,332 @@
+import json
+import math
+import os
+from datetime import datetime
+from storage_paths import DATA_DIR, migrate_file
+from statistics import mean
+from json_safe import safe_dump, to_jsonable
+from state_store import get_state_store
+
+from config import DEFAULT_PAYOUT, EDGE_PROOF_MIN_TRADES, EDGE_SEGMENT_MIN_TRADES
+
+os.makedirs(DATA_DIR, exist_ok=True)
+
+LEDGER_FILE = os.path.join(DATA_DIR, "alpha_hive_trade_ledger.json")
+migrate_file(LEDGER_FILE, [os.path.join("/opt/render/project/src/data", "alpha_hive_trade_ledger.json")])
+SNAPSHOT_FILE = os.path.join(DATA_DIR, "alpha_hive_edge_snapshot.json")
+migrate_file(SNAPSHOT_FILE, [os.path.join("/opt/render/project/src/data", "alpha_hive_edge_snapshot.json")])
+
+
+class EdgeAuditEngine:
+    def __init__(self):
+        self.ledger_file = LEDGER_FILE
+        self.snapshot_file = SNAPSHOT_FILE
+        self.store = get_state_store()
+        self._bootstrap_store_from_file()
+
+    def _bootstrap_store_from_file(self):
+        if self.store.list_collection("trade_ledger", limit=1):
+            return
+        try:
+            if os.path.exists(self.ledger_file):
+                with open(self.ledger_file, "r", encoding="utf-8") as f:
+                    rows = json.load(f)
+            else:
+                rows = []
+        except Exception:
+            rows = []
+        if isinstance(rows, list):
+            for trade in reversed(rows[:10000]):
+                uid = str(trade.get("uid") or "")
+                if uid:
+                    self.store.append_unique_item("trade_ledger", uid, trade, created_at=str(trade.get("date") or ""))
+        if os.path.exists(self.snapshot_file):
+            try:
+                with open(self.snapshot_file, "r", encoding="utf-8") as f:
+                    snapshot = json.load(f)
+                self.store.set_json("edge_snapshot", snapshot)
+            except Exception:
+                pass
+
+    def _load_json(self, path, default):
+        if path == self.ledger_file:
+            rows = self.store.list_collection("trade_ledger", limit=10000)
+            if isinstance(default, list) and rows:
+                return rows
+        elif path == self.snapshot_file:
+            stored = self.store.get_json("edge_snapshot", None)
+            if stored is not None:
+                return stored if isinstance(stored, type(default)) else default
+        try:
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    return data if isinstance(data, type(default)) else default
+        except Exception:
+            pass
+        return default
+
+    def _save_json(self, path, data):
+        if path == self.snapshot_file:
+            self.store.set_json("edge_snapshot", data)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            safe_dump(data, f)
+        os.replace(tmp, path)
+
+    def _safe_float(self, value, default=0.0):
+        try:
+            return float(value)
+        except Exception:
+            return float(default)
+
+    def _result_value(self, trade):
+        return str(trade.get("result", "")).upper()
+
+    def _hour_bucket(self, trade):
+        try:
+            text = str(trade.get("analysis_time", "")).strip()
+            if ":" not in text:
+                return "unknown"
+            hour = int(text.split(":")[0])
+            return f"{hour:02d}:00" if 0 <= hour <= 23 else "unknown"
+        except Exception:
+            return "unknown"
+
+    def _trade_uid(self, signal, result_data):
+        explicit = signal.get("uid") or result_data.get("uid")
+        if explicit:
+            return str(explicit)
+        return "-".join([
+            str(signal.get("asset", "N/A")),
+            str(signal.get("signal", "N/A")),
+            str(signal.get("analysis_time", "--:--")),
+            str(signal.get("entry_time", "--:--")),
+            str(signal.get("expiration", "--:--")),
+        ])
+
+    def _normalized_trade(self, signal, result_data):
+        payout = max(0.0, self._safe_float(result_data.get("payout", signal.get("payout", DEFAULT_PAYOUT)), DEFAULT_PAYOUT))
+        stake = max(0.0, self._safe_float(result_data.get("stake", signal.get("stake_value", signal.get("suggested_stake", signal.get("stake", 0.0)))), 0.0))
+        gross_pnl = self._safe_float(result_data.get("gross_pnl"), 0.0)
+        gross_r = self._safe_float(result_data.get("gross_r"), 0.0)
+        breakeven_winrate = self._safe_float(result_data.get("breakeven_winrate"), 0.0)
+        trade = {
+            "uid": self._trade_uid(signal, result_data),
+            "date": signal.get("date"),
+            "asset": signal.get("asset"),
+            "signal": str(signal.get("signal", "")).upper(),
+            "strategy_name": signal.get("strategy_name", "none"),
+            "regime": signal.get("regime", "unknown"),
+            "analysis_time": signal.get("analysis_time"),
+            "entry_time": signal.get("entry_time"),
+            "expiration": signal.get("expiration"),
+            "score": self._safe_float(signal.get("score"), 0.0),
+            "confidence": int(self._safe_float(signal.get("confidence"), 0)),
+            "setup_id": signal.get("setup_id"),
+            "context_id": signal.get("context_id"),
+            "evolution_variant": signal.get("evolution_variant", "base"),
+            "risk_pct": self._safe_float(signal.get("risk_pct"), 0.0),
+            "stake": round(stake, 2),
+            "payout": round(payout, 4),
+            "result": self._result_value(result_data),
+            "win": bool(result_data.get("win", False)),
+            "entry_price": result_data.get("entry_price"),
+            "exit_price": result_data.get("exit_price"),
+            "entry_candle_time": result_data.get("entry_candle_time"),
+            "exit_candle_time": result_data.get("exit_candle_time"),
+            "evaluation_mode": result_data.get("evaluation_mode", "candle_close"),
+            "execution_delay_candles": int(self._safe_float(result_data.get("execution_delay_candles"), 0)),
+            "gross_pnl": round(gross_pnl, 2),
+            "gross_r": round(gross_r, 4),
+            "breakeven_winrate": round(breakeven_winrate, 2),
+            "environment_type": signal.get("environment_type"),
+            "market_narrative": signal.get("market_narrative"),
+            "trend_quality": signal.get("trend_quality"),
+            "breakout_quality": signal.get("breakout_quality"),
+            "conflict_type": signal.get("conflict_type"),
+            "discernment_quality": signal.get("discernment_quality"),
+            "anti_pattern_risk": signal.get("anti_pattern_risk"),
+            "trend_m1": signal.get("trend_m1"),
+            "trend_m5": signal.get("trend_m5"),
+            "breakout": signal.get("breakout"),
+            "rejection": signal.get("rejection"),
+            "volatility": signal.get("volatility"),
+            "moved_too_fast": signal.get("moved_too_fast"),
+            "is_sideways": signal.get("is_sideways"),
+            "pattern": signal.get("pattern"),
+            "analysis_session": signal.get("analysis_session"),
+            "council_quality": signal.get("council_quality"),
+            "council_consensus_direction": signal.get("council_consensus_direction"),
+            "head_trader_action": signal.get("head_trader_action"),
+        }
+        return trade
+
+    def _load_ledger(self):
+        return self._load_json(self.ledger_file, [])
+
+    def load_ledger(self):
+        return self._load_ledger()
+
+    def record_trade(self, signal, result_data):
+        if not isinstance(signal, dict) or not isinstance(result_data, dict):
+            return None
+        trade = self._normalized_trade(signal, result_data)
+        inserted = self.store.append_unique_item("trade_ledger", trade["uid"], trade, created_at=str(trade.get("date") or datetime.utcnow().isoformat()))
+        if not inserted:
+            return trade
+        ledger = self._load_ledger()
+        if len(ledger) > 10000:
+            ledger = ledger[:10000]
+        self._save_json(self.ledger_file, ledger)
+        snapshot = self.compute_report(ledger)
+        self._save_json(self.snapshot_file, snapshot)
+        return trade
+
+    def _valid(self, trades):
+        return [t for t in trades if self._result_value(t) in ("WIN", "LOSS")]
+
+    def _breakeven_for(self, payout):
+        payout = max(0.0, self._safe_float(payout, DEFAULT_PAYOUT))
+        if payout <= 0:
+            return 100.0
+        return round((1.0 / (1.0 + payout)) * 100.0, 2)
+
+    def _posterior_prob_edge(self, wins, losses, breakeven_winrate_pct):
+        total = int(max(0, wins)) + int(max(0, losses))
+        if total <= 0:
+            return 0.0
+        threshold = max(0.0, min(1.0, self._safe_float(breakeven_winrate_pct, 0.0) / 100.0))
+        alpha = wins + 1.0
+        beta = losses + 1.0
+        mean_p = alpha / (alpha + beta)
+        variance = (alpha * beta) / (((alpha + beta) ** 2) * (alpha + beta + 1.0))
+        if variance <= 0:
+            return 1.0 if mean_p > threshold else 0.0
+        z = (mean_p - threshold) / math.sqrt(variance)
+        return round(0.5 * (1.0 + math.erf(z / math.sqrt(2.0))), 4)
+
+    def _wilson_lower_winrate(self, wins, total, z=1.96):
+        total = int(max(0, total))
+        wins = int(max(0, wins))
+        if total <= 0:
+            return 0.0
+        p = wins / total
+        denom = 1.0 + (z ** 2) / total
+        centre = p + (z ** 2) / (2.0 * total)
+        margin = z * math.sqrt((p * (1.0 - p) / total) + (z ** 2) / (4.0 * (total ** 2)))
+        lower = (centre - margin) / denom
+        return round(lower * 100.0, 2)
+
+    def _drawdown(self, trades):
+        equity = 0.0
+        peak = 0.0
+        max_dd = 0.0
+        for trade in reversed(trades):
+            equity += self._safe_float(trade.get("gross_pnl"), 0.0)
+            peak = max(peak, equity)
+            max_dd = max(max_dd, peak - equity)
+        return round(max_dd, 2)
+
+    def _segment_stats(self, trades, key):
+        groups = {}
+        for trade in trades:
+            if key == "hour":
+                bucket = self._hour_bucket(trade)
+            else:
+                bucket = str(trade.get(key, "unknown") or "unknown")
+            groups.setdefault(bucket, []).append(trade)
+        rows = []
+        for bucket, rows_trades in groups.items():
+            stats = self._summary(rows_trades)
+            stats[key] = bucket
+            rows.append(stats)
+        rows = [r for r in rows if r.get("total", 0) >= EDGE_SEGMENT_MIN_TRADES]
+        rows.sort(key=lambda x: (x.get("expectancy_r", 0.0), x.get("profit_factor", 0.0), x.get("total", 0)), reverse=True)
+        return rows
+
+    def _status(self, stats):
+        total = int(stats.get("total", 0))
+        expectancy = self._safe_float(stats.get("expectancy_r"), 0.0)
+        pf = self._safe_float(stats.get("profit_factor"), 0.0)
+        wr = self._safe_float(stats.get("winrate", 0.0), 0.0)
+        be = self._safe_float(stats.get("breakeven_winrate", 100.0), 100.0)
+        prob = self._safe_float(stats.get("posterior_prob_edge", 0.0), 0.0)
+        if total < max(30, EDGE_SEGMENT_MIN_TRADES):
+            return "amostra_insuficiente"
+        if total < EDGE_PROOF_MIN_TRADES:
+            return "em_validacao" if expectancy > 0 and pf > 1.0 and wr > be and prob >= 0.55 else "frágil"
+        if expectancy > 0 and pf >= 1.15 and wr > be and prob >= 0.80:
+            return "edge_positivo"
+        return "nao_comprovado"
+
+    def _summary(self, trades):
+        valid = self._valid(trades)
+        if not valid:
+            return {
+                "total": 0,
+                "wins": 0,
+                "losses": 0,
+                "winrate": 0.0,
+                "avg_payout": round(DEFAULT_PAYOUT, 4),
+                "breakeven_winrate": self._breakeven_for(DEFAULT_PAYOUT),
+                "total_pnl": 0.0,
+                "avg_pnl": 0.0,
+                "expectancy_r": 0.0,
+                "profit_factor": 0.0,
+                "posterior_prob_edge": 0.0,
+                "wilson_lower_winrate": 0.0,
+                "max_drawdown": 0.0,
+            }
+        wins = sum(1 for t in valid if self._result_value(t) == "WIN")
+        losses = sum(1 for t in valid if self._result_value(t) == "LOSS")
+        total = len(valid)
+        payouts = [max(0.0, self._safe_float(t.get("payout"), DEFAULT_PAYOUT)) for t in valid]
+        pnls = [self._safe_float(t.get("gross_pnl"), 0.0) for t in valid]
+        rs = [self._safe_float(t.get("gross_r"), 0.0) for t in valid]
+        avg_payout = mean(payouts) if payouts else DEFAULT_PAYOUT
+        gross_profit = sum(p for p in pnls if p > 0)
+        gross_loss = abs(sum(p for p in pnls if p < 0))
+        profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else (999.0 if gross_profit > 0 else 0.0)
+        breakeven = self._breakeven_for(avg_payout)
+        stats = {
+            "total": total,
+            "wins": wins,
+            "losses": losses,
+            "winrate": round((wins / total) * 100.0, 2) if total else 0.0,
+            "avg_payout": round(avg_payout, 4),
+            "breakeven_winrate": breakeven,
+            "total_pnl": round(sum(pnls), 2),
+            "avg_pnl": round(mean(pnls), 4) if pnls else 0.0,
+            "expectancy_r": round(mean(rs), 4) if rs else 0.0,
+            "profit_factor": round(profit_factor, 3),
+            "posterior_prob_edge": self._posterior_prob_edge(wins, losses, breakeven),
+            "wilson_lower_winrate": self._wilson_lower_winrate(wins, total),
+            "max_drawdown": self._drawdown(valid),
+        }
+        stats["status"] = self._status(stats)
+        return stats
+
+    def compute_report(self, trades=None):
+        ledger = trades if isinstance(trades, list) else self._load_ledger()
+        valid = self._valid(ledger)
+        summary = self._summary(valid)
+        assets = self._segment_stats(valid, "asset")
+        regimes = self._segment_stats(valid, "regime")
+        strategies = self._segment_stats(valid, "strategy_name")
+        hours = self._segment_stats(valid, "hour")
+        recent_20 = self._summary(valid[:20])
+        recent_50 = self._summary(valid[:50])
+        recent_100 = self._summary(valid[:100])
+        return {
+            "summary": summary,
+            "recent_20": recent_20,
+            "recent_50": recent_50,
+            "recent_100": recent_100,
+            "ledger_count": len(ledger),
+            "top_assets": assets[:5],
+            "weak_assets": list(reversed(assets[-5:])) if assets else [],
+            "top_regimes": regimes[:5],
+            "top_strategies": strategies[:5],
+            "top_hours": hours[:5],
+        }
