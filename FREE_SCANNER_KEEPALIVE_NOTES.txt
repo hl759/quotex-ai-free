@@ -1,6 +1,0 @@
-Alpha Hive Free Scanner Notes
-
-- O scanner agora tem rota /run-scan para execução manual ou por scheduler externo.
-- No Render Free, para manter scan por minuto mesmo sem usuário no site, use um cron externo chamando /run-scan a cada 1 minuto.
-- Se definir SCAN_TRIGGER_TOKEN, envie o token por query string (?token=...) ou header X-Scan-Token.
-- A interface agora se autoatualiza sozinha e tenta forçar scan quando detectar atraso grande.
