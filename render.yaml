@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: nexus-ai-v10-3
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --workers 1 --threads 1 --bind 0.0.0.0:$PORT app:app
+    plan: free
