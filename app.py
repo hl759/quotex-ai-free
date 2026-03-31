@@ -20,6 +20,7 @@ from decision_engine import DecisionEngine
 from edge_audit import EdgeAuditEngine
 from edge_guard import EdgeGuardEngine
 from specialist_reputation_engine import SpecialistReputationEngine
+from storage_governance_engine import StorageGovernanceEngine
 
 try:
     from adaptive_engine import AdaptiveEngine
@@ -60,6 +61,7 @@ journal = JournalManager()
 edge_audit = EdgeAuditEngine()
 edge_guard = EdgeGuardEngine()
 specialist_reputation = SpecialistReputationEngine()
+storage_governance = StorageGovernanceEngine(state_store=state_store)
 
 LATEST_SIGNALS_FILE = os.path.join(STATE_DIR, "latest_signals.json")
 SIGNAL_HISTORY_FILE = os.path.join(STATE_DIR, "history.json")
@@ -317,6 +319,10 @@ class CapitalAutoTracker:
 
 capital_auto_tracker = CapitalAutoTracker()
 ensure_capital_state()
+try:
+    storage_governance.maybe_run_maintenance(scan_count=scan_count, force=False)
+except Exception as e:
+    print(f"storage governance bootstrap warning: {e}", flush=True)
 
 
 def now_brazil():
@@ -1024,6 +1030,10 @@ def run_scan_once(trigger="loop"):
         next_scan_due_ts = _compute_next_scan_due(finished_ts, immediate=False)
         save_state(signals, history, display_decision, scan_count)
         try:
+            storage_governance.maybe_run_maintenance(scan_count=scan_count)
+        except Exception as e:
+            print(f"storage governance warning: {e}", flush=True)
+        try:
             if _should_refresh_ui_cache_after_scan():
                 get_ui_cache(force=True)
         except Exception as e:
@@ -1597,6 +1607,17 @@ def specialists_report():
 def memory_integrity():
     ensure_scanner_started()
     return jsonify(to_jsonable(memory_integrity_status()))
+
+
+@app.route("/storage-health", methods=["GET"])
+def storage_health():
+    ensure_scanner_started()
+    force = str(request.args.get('force', '')).lower() in ('1','true','yes')
+    if force:
+        report = storage_governance.maybe_run_maintenance(scan_count=scan_count, force=True)
+    else:
+        report = storage_governance.collect_report()
+    return jsonify(to_jsonable(report))
 
 
 if __name__ == "__main__":
