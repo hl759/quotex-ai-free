@@ -61,7 +61,6 @@ journal = JournalManager()
 edge_audit = EdgeAuditEngine()
 edge_guard = EdgeGuardEngine()
 specialist_reputation = SpecialistReputationEngine()
-storage_governance = StorageGovernanceEngine(state_store=state_store)
 
 LATEST_SIGNALS_FILE = os.path.join(STATE_DIR, "latest_signals.json")
 SIGNAL_HISTORY_FILE = os.path.join(STATE_DIR, "history.json")
@@ -85,6 +84,7 @@ for _name, _dest in {
     migrate_file(_dest, [os.path.join(base, _name) for base in LEGACY_STATE_DIRS])
 
 state_store = StateStore()
+storage_governance = StorageGovernanceEngine(state_store=state_store)
 
 
 def read_json(path, default):
