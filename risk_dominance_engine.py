@@ -33,16 +33,16 @@ class RiskDominanceEngine:
             reasons.append("Risk dominance: caos estruturado exige operação seletiva")
 
         elif environment_type == "complex":
-            score_boost -= 0.08
-            confidence_shift -= 2
+            score_boost -= 0.05
+            confidence_shift -= 1
             reasons.append("Risk dominance: ambiente complexo reduz autoridade do setup")
 
         elif environment_type == "clean":
             reasons.append("Risk dominance: ambiente limpo sem penalização estrutural")
 
         if transition_probability == "high":
-            score_boost -= 0.18
-            confidence_shift -= 4
+            score_boost -= 0.12
+            confidence_shift -= 3
             reasons.append(f"Risk dominance: transição alta para {next_environment}")
         elif transition_probability == "medium":
             score_boost -= 0.08
@@ -50,32 +50,32 @@ class RiskDominanceEngine:
             reasons.append(f"Risk dominance: transição média para {next_environment}")
 
         if conflict_type == "destrutivo":
-            score_boost -= 0.18
-            confidence_shift -= 4
+            score_boost -= 0.14
+            confidence_shift -= 3
             reasons.append("Risk dominance: conflito destrutivo tem prioridade")
         elif conflict_type == "transicional":
             score_boost -= 0.04
             reasons.append("Risk dominance: conflito transicional pede cautela")
 
         if breakout_quality == "armadilha":
-            score_boost -= 0.18
-            confidence_shift -= 4
+            score_boost -= 0.16
+            confidence_shift -= 3
             reasons.append("Risk dominance: breakout armadilha derruba convicção")
         elif breakout_quality == "duvidoso":
             score_boost -= 0.06
             reasons.append("Risk dominance: breakout duvidoso enfraquece o contexto")
 
         if trend_quality == "exausta":
-            score_boost -= 0.14
-            confidence_shift -= 3
+            score_boost -= 0.10
+            confidence_shift -= 2
             reasons.append("Risk dominance: tendência exausta pesa contra")
         elif trend_quality == "fragil":
             score_boost -= 0.05
             reasons.append("Risk dominance: tendência frágil reduz convicção")
 
         if narrative in ("distribuicao", "exaustao"):
-            score_boost -= 0.12
-            confidence_shift -= 3
+            score_boost -= 0.08
+            confidence_shift -= 2
             reasons.append(f"Risk dominance: narrativa de {narrative} é tóxica")
         elif narrative == "compressao_pre_breakout":
             reasons.append("Risk dominance: compressão não é veto, mas exige confirmação")
@@ -90,7 +90,7 @@ class RiskDominanceEngine:
         elif conflict_type == "destrutivo" and breakout_quality == "armadilha":
             veto = True
             reasons.append("Risk dominance final: veto por armadilha estrutural")
-        elif projected_score < 2.0 and projected_confidence < 65:
+        elif projected_score < 1.7 and projected_confidence < 62:
             veto = True
             reasons.append("Risk dominance final: veto por perda de edge")
 
@@ -99,7 +99,7 @@ class RiskDominanceEngine:
             if transition_probability == "high" or environment_type in ("complex", "structured_chaos"):
                 downgrade = "CAUTELA"
                 reasons.append("Risk dominance final: oportunidade rebaixada para cautela")
-            if projected_score < 2.4:
+            if projected_score < 2.1:
                 downgrade = "OBSERVAR"
                 reasons.append("Risk dominance final: oportunidade rebaixada para observação")
 

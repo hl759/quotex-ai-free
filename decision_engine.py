@@ -772,23 +772,23 @@ class DecisionEngine:
             if environment == "destructive":
                 decision, direction = "NAO_OPERAR", None
             elif environment == "clean":
-                if adjusted_score >= 2.6:
+                if adjusted_score >= 2.45:
                     decision, direction = "ENTRADA_FORTE", final_direction
-                elif adjusted_score >= 1.55:
+                elif adjusted_score >= 1.40:
                     decision, direction = "ENTRADA_CAUTELA", final_direction
                 else:
                     decision, direction = "OBSERVAR", final_direction
             elif environment == "complex":
-                if adjusted_score >= 2.8 and discernment_quality in ("premium", "bom", "aceitavel"):
+                if adjusted_score >= 2.55 and discernment_quality in ("premium", "bom", "aceitavel"):
                     decision, direction = "ENTRADA_CAUTELA", final_direction
-                elif adjusted_score >= 2.0 and discernment_quality in ("premium", "bom", "aceitavel"):
+                elif adjusted_score >= 1.85 and discernment_quality in ("premium", "bom", "aceitavel"):
                     decision, direction = "OBSERVAR", final_direction
                 else:
                     decision, direction = "NAO_OPERAR", None
             elif environment == "structured_chaos":
-                if adjusted_score >= 3.0 and discernment_quality in ("premium", "bom", "aceitavel"):
+                if adjusted_score >= 2.75 and discernment_quality in ("premium", "bom", "aceitavel"):
                     decision, direction = "ENTRADA_CAUTELA", final_direction
-                elif adjusted_score >= 2.25 and discernment_quality in ("premium", "bom", "aceitavel"):
+                elif adjusted_score >= 2.0 and discernment_quality in ("premium", "bom", "aceitavel"):
                     decision, direction = "OBSERVAR", final_direction
                 else:
                     decision, direction = "NAO_OPERAR", None

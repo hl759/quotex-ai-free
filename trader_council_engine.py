@@ -321,14 +321,14 @@ class TraderCouncilEngine:
         if veto_weight > 0:
             reasons.append(f"Vetos fortes somaram {round(veto_weight, 2)}")
 
-        if senior_veto >= 5.5 or veto_weight >= max(8.0, support_weight * 0.95):
+        if senior_veto >= 6.2 or veto_weight >= max(8.5, support_weight * 1.05):
             decision_cap = "NAO_OPERAR"
             head_action = "block"
             score_boost = -0.35
             confidence_shift = -8
             council_quality = "capital_first"
             reasons.append("Head Trader: vetos seniores dominaram a mesa")
-        elif support_weight <= 0 or (caution_weight + veto_weight) > (support_weight * 1.30):
+        elif support_weight <= 0 or (caution_weight + veto_weight) > (support_weight * 1.45):
             decision_cap = "OBSERVAR"
             head_action = "observe"
             score_boost = -0.12
@@ -341,7 +341,7 @@ class TraderCouncilEngine:
             score_boost = -0.10
             confidence_shift = -2
             reasons.append("Head Trader: direção original conflita com a mesa")
-        elif support_weight >= max(6.4, opposition_weight * 1.7) and veto_weight <= 2.8 and senior_support >= 2.8:
+        elif support_weight >= max(5.8, opposition_weight * 1.55) and veto_weight <= 3.2 and senior_support >= 2.4:
             decision_cap = "ENTRADA_FORTE"
             head_action = "press"
             score_boost = 0.24

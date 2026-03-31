@@ -227,7 +227,7 @@ class AdaptiveBehavioralOrchestrationEngine:
 
             # Cautela não é bloqueio cego: permite edge imperfeito válido
             if (
-                current_score >= 4.0
+                current_score >= 3.5
                 and discernment_quality in ("premium", "bom")
                 and conflict_type != "destrutivo"
                 and anti_pattern_risk not in ("high",)
@@ -239,31 +239,30 @@ class AdaptiveBehavioralOrchestrationEngine:
                 reasons.append("Orquestração: cautela rebaixa contexto marginal")
 
         else:  # SURVIVAL
-            score_boost -= 0.16
-            confidence_shift -= 4
+            score_boost -= 0.08
+            confidence_shift -= 2
             frequency_limit = 1
             aggressiveness = "minimal"
-            acceptance_floor = "premium"
+            acceptance_floor = "bom"
             reasons.append("Modo comportamental: SURVIVAL")
 
             # Sobrevivência continua defensiva, mas uma leitura excepcional pode passar em cautela.
             if (
-                current_score >= 4.5
-                and discernment_quality == "premium"
+                current_score >= 3.5
+                and discernment_quality in ("premium", "bom")
                 and anti_pattern_risk not in ("high", "critical")
                 and conflict_type != "destrutivo"
-                and transition_probability != "high"
             ):
                 downgrade = "CAUTELA"
                 reasons.append("Orquestração final: sobrevivência liberou cautela premium")
             elif (
-                current_score >= 4.0
+                current_score >= 3.5
                 and discernment_quality in ("premium", "bom")
                 and anti_pattern_risk not in ("high", "critical")
                 and conflict_type != "destrutivo"
             ):
                 downgrade = "OBSERVAR"
-                reasons.append("Orquestração final: sobrevivência permitiu observação qualificada")
+                reasons.append("Orquestração final: sobrevivência preservou edge em observação qualificada")
             else:
                 veto = True
                 reasons.append("Orquestração final: sobrevivência vetou a entrada")
