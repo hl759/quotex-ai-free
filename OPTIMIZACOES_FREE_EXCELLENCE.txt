@@ -1,7 +1,0 @@
-Ajustes aplicados para rodar mais liso no free sem amputar a lógica central:
-- removidos arquivos de estado, cache compilado e módulos órfãos do pacote
-- retenção reduzida e configurável para journal/ledger
-- snapshot salvo mais leve
-- refresh automático da home desligado por padrão
-- atualização de capital e cache da UI menos frequente
-- .gitignore incluído para evitar subir lixo operacional ao GitHub
