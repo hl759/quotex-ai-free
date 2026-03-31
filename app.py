@@ -1144,7 +1144,7 @@ body{margin:0;font-family:Arial,sans-serif;background:linear-gradient(180deg,#04
 </div>
 </div>
 
-<div id='signals' class='panel active'><div class='card'><div class='section-title'>Sinais atuais</div><div class='section-sub'>Fluxo original preservado</div><div id='signals_container'></div></div></div>
+<div id='signals' class='panel active'><div class='card'><div class='section-title'>Sinais atuais</div><div class='section-sub'>Sinais coerentes com a decisão dominante</div><div id='signals_container'></div></div></div>
 <div id='decision' class='panel'><div class='card'><div class='section-title'>Decisão do momento</div><div class='section-sub'>Alpha Hive AI • motor inteligente de decisão</div><div id='decision_container'></div></div></div>
 <div id='history' class='panel'><div class='card'><div class='section-title'>Histórico recente</div><div class='section-sub'>Últimos sinais salvos</div><div id='history_container'></div></div></div>
 <div id='stats' class='panel'><div class='card'><div class='section-title'>Aprendizado</div><div class='section-sub'>Acompanhamento do motor adaptativo</div><div class='status-grid'><div class='status-item'>Total avaliadas<br><b id='stats_total'></b></div><div class='status-item'>Win rate<br><b id='stats_winrate'></b></div><div class='status-item'>Wins<br><b id='stats_wins'></b></div><div class='status-item'>Loss<br><b id='stats_loss'></b></div></div></div></div>
