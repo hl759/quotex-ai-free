@@ -130,9 +130,9 @@ class EdgeGuardEngine:
         kill_locked = False
         if kill_total >= max(8, EDGE_RECENT_KILL_WINDOW):
             if kill_exp <= EDGE_RECENT_KILL_EXPECTANCY_R or kill_pf < 0.90 or kill_prob < 0.40:
-                decision_cap = self._merge_cap(decision_cap, "ENTRADA_CAUTELA" if self.mode == "validation" else "OBSERVAR")
+                decision_cap = self._merge_cap(decision_cap, "ENTRADA_CAUTELA")
                 stake_multiplier = min(stake_multiplier, 0.0 if self.mode == "live" else 0.22)
-                live_allowed = False if self.mode == "live" else True
+                live_allowed = False if self.mode == "live" and stake_multiplier <= 0.05 else True
                 kill_locked = True
                 reasons.append("Kill-switch recente: drift negativo detectado")
 
@@ -185,7 +185,7 @@ class EdgeGuardEngine:
             elif bootstrap_ready and recent_exp > EDGE_RECENT_WARN_EXPECTANCY_R:
                 decision_cap = self._merge_cap(decision_cap, "ENTRADA_CAUTELA")
                 stake_multiplier = min(stake_multiplier, min(0.34, BOOTSTRAP_WARMUP_STAKE_MULTIPLIER))
-                reasons.append("Validação inicial: consenso forte mantém entrada pequena enquanto prova amadurece")
+                reasons.append("Bootstrap inicial: consenso forte mantém entrada pequena enquanto a edge amadurece")
             else:
                 decision_cap = self._merge_cap(decision_cap, "OBSERVAR")
                 stake_multiplier = min(stake_multiplier, 0.28)
@@ -256,11 +256,11 @@ class EdgeGuardEngine:
 
         if proposed_decision == "ENTRADA_FORTE" and self.mode != "live" and global_total < EDGE_PROOF_MIN_TRADES:
             decision_cap = self._merge_cap(decision_cap, "ENTRADA_CAUTELA")
-            reasons.append("Sem prova completa, ENTRADA_FORTE é rebaixada")
+            reasons.append("Sem prova completa, ENTRADA_FORTE é rebaixada para cautela operável")
 
         if proposed_decision == "ENTRADA_CAUTELA" and global_total < EDGE_PROOF_MIN_TRADES and bootstrap_ready and recent_exp > -0.03:
             stake_multiplier = min(1.0, max(stake_multiplier, 0.34))
-            reasons.append("Validação equilibrada: cautela mantida com stake profissional reduzida")
+            reasons.append("Cautela mantida com stake profissional reduzida")
 
         phase = "proven"
         if global_total < BOOTSTRAP_MAX_TRADES:
@@ -268,7 +268,7 @@ class EdgeGuardEngine:
         elif global_total < BOOTSTRAP_WARMUP_MAX_TRADES:
             phase = "warmup"
         elif global_total < EDGE_PROOF_MIN_TRADES:
-            phase = "validation"
+            phase = "warmup"
 
         return {
             "active": True,

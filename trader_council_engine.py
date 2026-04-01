@@ -321,27 +321,27 @@ class TraderCouncilEngine:
         if veto_weight > 0:
             reasons.append(f"Vetos fortes somaram {round(veto_weight, 2)}")
 
-        if senior_veto >= 8.4 or veto_weight >= max(11.8, support_weight * 1.45):
+        if senior_veto >= 9.2 or veto_weight >= max(13.2, support_weight * 1.70):
             decision_cap = "NAO_OPERAR"
             head_action = "block"
             score_boost = -0.35
             confidence_shift = -8
             council_quality = "capital_first"
-            reasons.append("Head Trader: vetos seniores dominaram a mesa")
-        elif support_weight <= 0 or (caution_weight + veto_weight) > (support_weight * 2.10):
+            reasons.append("Head Trader: hard block real da mesa veterana")
+        elif support_weight <= 0 or (caution_weight + veto_weight) > (support_weight * 2.60):
             decision_cap = "OBSERVAR"
             head_action = "observe"
             score_boost = -0.12
             confidence_shift = -3
             council_quality = "fragile"
-            reasons.append("Head Trader: consenso insuficiente para arriscar patrimônio")
-        elif direction and consensus_direction and direction != consensus_direction and directional_gap >= 3.4:
+            reasons.append("Head Trader: consenso insuficiente para agressão, mas não para cautela")
+        elif direction and consensus_direction and direction != consensus_direction and directional_gap >= 3.8:
             decision_cap = "OBSERVAR"
             head_action = "reconcile"
             score_boost = -0.10
             confidence_shift = -2
             reasons.append("Head Trader: direção original conflita com a mesa")
-        elif support_weight >= max(4.8, opposition_weight * 1.22) and veto_weight <= 4.8 and senior_support >= 1.8:
+        elif support_weight >= max(4.2, opposition_weight * 1.15) and veto_weight <= 5.2 and senior_support >= 1.6:
             decision_cap = "ENTRADA_FORTE"
             head_action = "press"
             score_boost = 0.24
@@ -354,17 +354,17 @@ class TraderCouncilEngine:
             score_boost = 0.10
             confidence_shift = 2
             council_quality = "measured"
-            reasons.append("Head Trader: entrada permitida, mas em modo profissional")
+            reasons.append("Head Trader: entrada permitida em modo profissional")
 
         memory_total = int(memory_summary.get("total", 0) or 0)
         memory_expectancy = self._safe_float(memory_summary.get("expectancy_r"), 0.0)
-        if memory_total >= 24 and memory_expectancy <= -0.10:
+        if memory_total >= 28 and memory_expectancy <= -0.12:
             score_boost -= 0.10
             confidence_shift -= 2
             if decision_cap == "ENTRADA_FORTE":
                 decision_cap = "ENTRADA_CAUTELA"
             reasons.append("CRO interno: memória local negativa relevante reduziu agressividade")
-        elif memory_total >= 14 and memory_expectancy <= -0.03:
+        elif memory_total >= 18 and memory_expectancy <= -0.05:
             score_boost -= 0.04
             confidence_shift -= 1
             if decision_cap == "ENTRADA_FORTE":

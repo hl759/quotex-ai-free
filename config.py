@@ -62,7 +62,7 @@ ADAPTIVE_PROVEN_MIN_TRADES = int(os.getenv("ADAPTIVE_PROVEN_MIN_TRADES", "100"))
 
 # FIX: modo shadow → validation → live
 # Começa em validation para gerar sinais desde o início
-ALPHA_HIVE_MODE = os.getenv("ALPHA_HIVE_MODE", "validation").strip().lower()
+ALPHA_HIVE_MODE = os.getenv("ALPHA_HIVE_MODE", "live").strip().lower()
 
 EDGE_GUARD_ACTIVE              = os.getenv("EDGE_GUARD_ACTIVE", "1").strip().lower() not in ("0", "false", "no")
 EDGE_MIN_PROFIT_FACTOR         = float(os.getenv("EDGE_MIN_PROFIT_FACTOR", "1.02"))       # FIX: era 1.03

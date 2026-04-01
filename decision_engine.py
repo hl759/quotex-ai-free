@@ -465,22 +465,30 @@ class DecisionEngine:
         cap = guard.get("decision_cap")
         if not cap:
             return decision, final_direction
-        if cap == "NAO_OPERAR":
-            reasons.append("Edge Guard final: bloqueio total")
+
+        stake_multiplier = float(guard.get("stake_multiplier", 1.0) or 1.0)
+        severe_guard_block = (
+            cap == "NAO_OPERAR"
+            and not bool(guard.get("live_allowed", True))
+            and stake_multiplier <= 0.05
+        )
+
+        # Edge Guard deixa de ser juiz final da operação.
+        # Ele passa a modular execução/stake e só bloqueia em hard kill real.
+        if severe_guard_block:
+            reasons.append("Edge Guard final: hard kill real bloqueou operação")
             return "NAO_OPERAR", None
-        if cap == "OBSERVAR" and decision in ("ENTRADA_FORTE", "ENTRADA_CAUTELA"):
-            if (
-                decision == "ENTRADA_CAUTELA"
-                and bool(guard.get("live_allowed", True))
-                and float(guard.get("stake_multiplier", 0.0) or 0.0) >= 0.32
-            ):
-                reasons.append("Edge Guard final: observação convertida em cautela reduzida")
+
+        if decision == "ENTRADA_FORTE":
+            if cap in ("NAO_OPERAR", "OBSERVAR", "ENTRADA_CAUTELA"):
+                reasons.append("Edge Guard final: entrada forte rebaixada para cautela operacional")
                 return "ENTRADA_CAUTELA", final_direction
-            reasons.append("Edge Guard final: entrada rebaixada para observação")
-            return "OBSERVAR", final_direction
-        if cap == "ENTRADA_CAUTELA" and decision == "ENTRADA_FORTE":
-            reasons.append("Edge Guard final: entrada forte rebaixada para cautela")
+            return decision, final_direction
+
+        if decision == "ENTRADA_CAUTELA":
+            reasons.append("Edge Guard final: cautela preservada como operável")
             return "ENTRADA_CAUTELA", final_direction
+
         return decision, final_direction
 
 
@@ -488,23 +496,44 @@ class DecisionEngine:
         cap = council.get("decision_cap")
         if not cap:
             return decision, final_direction
-        if cap == "NAO_OPERAR":
-            reasons.append("Trader Council final: bloqueio da mesa veterana")
+
+        quality = str(council.get("quality", "neutro"))
+        head_action = str(council.get("head_trader_action", "none"))
+        support_weight = float(council.get("support_weight", 0.0) or 0.0)
+        opposition_weight = float(council.get("opposition_weight", 0.0) or 0.0)
+        veto_weight = float(council.get("veto_weight", 0.0) or 0.0)
+        senior_veto_weight = float(council.get("senior_veto_weight", 0.0) or 0.0)
+
+        hard_block = (
+            cap == "NAO_OPERAR"
+            and quality == "capital_first"
+            and head_action == "block"
+            and senior_veto_weight >= 9.0
+            and veto_weight >= max(12.0, support_weight * 1.60)
+        )
+
+        # Trader Council deixa de sufocar entradas boas-imperfeitas.
+        # Só bloqueia em hard block real de mesa.
+        if hard_block:
+            reasons.append("Trader Council final: hard block real da mesa veterana")
             return "NAO_OPERAR", None
-        if cap == "OBSERVAR" and decision in ("ENTRADA_FORTE", "ENTRADA_CAUTELA"):
-            if (
-                decision == "ENTRADA_CAUTELA"
-                and council.get("quality") in ("measured", "prime")
-                and council.get("head_trader_action") in ("probe", "observe", "press")
-                and float(council.get("support_weight", 0.0) or 0.0) >= max(2.8, float(council.get("opposition_weight", 0.0) or 0.0) * 1.02)
-            ):
+
+        if decision == "ENTRADA_FORTE":
+            if cap in ("NAO_OPERAR", "OBSERVAR", "ENTRADA_CAUTELA"):
+                reasons.append("Trader Council final: mesa rebaixou forte para cautela operável")
+                return "ENTRADA_CAUTELA", final_direction
+            return decision, final_direction
+
+        if decision == "ENTRADA_CAUTELA":
+            if support_weight >= max(2.2, opposition_weight * 0.95):
                 reasons.append("Trader Council final: mesa preservou cautela operável")
                 return "ENTRADA_CAUTELA", final_direction
-            reasons.append("Trader Council final: mesa rebaixou entrada para observação")
-            return "OBSERVAR", final_direction
-        if cap == "ENTRADA_CAUTELA" and decision == "ENTRADA_FORTE":
-            reasons.append("Trader Council final: mesa rebaixou entrada forte para cautela")
+            if cap == "OBSERVAR" and quality == "fragile" and veto_weight > support_weight * 1.8:
+                reasons.append("Trader Council final: mesa rebaixou para observação por oposição relevante")
+                return "OBSERVAR", final_direction
+            reasons.append("Trader Council final: cautela preservada")
             return "ENTRADA_CAUTELA", final_direction
+
         return decision, final_direction
 
     def _apply_stake_multiplier(self, capital_plan, multiplier):
