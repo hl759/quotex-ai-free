@@ -1,0 +1,14 @@
+Ajustes aplicados para aumentar conversão scan -> entrada sem desmontar a prudência do Alpha Hive.
+
+Principais mudanças:
+- Mais especialistas por rodada (24 -> 36)
+- Menos rigidez na memória comportamental (protect <= 38%)
+- SURVIVAL passou a permitir cautela premium em setups realmente fortes
+- Trader Council menos sensível ao bloco cauteloso
+- Thresholds finais de decisão reduzidos de forma controlada
+- Bootstrap e validação inicial menos duros para construir amostra mais cedo
+
+Objetivo:
+- Preservar a mente de mesa veterana
+- Trocar parte do veto cego por entrada pequena e profissional
+- Aumentar o número de entradas avaliadas sem transformar a IA em aventureira
