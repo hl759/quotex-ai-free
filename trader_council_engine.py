@@ -321,27 +321,27 @@ class TraderCouncilEngine:
         if veto_weight > 0:
             reasons.append(f"Vetos fortes somaram {round(veto_weight, 2)}")
 
-        if senior_veto >= 7.4 or veto_weight >= max(10.5, support_weight * 1.25):
+        if senior_veto >= 8.4 or veto_weight >= max(11.8, support_weight * 1.45):
             decision_cap = "NAO_OPERAR"
             head_action = "block"
             score_boost = -0.35
             confidence_shift = -8
             council_quality = "capital_first"
             reasons.append("Head Trader: vetos seniores dominaram a mesa")
-        elif support_weight <= 0 or (caution_weight + veto_weight) > (support_weight * 1.70):
+        elif support_weight <= 0 or (caution_weight + veto_weight) > (support_weight * 2.10):
             decision_cap = "OBSERVAR"
             head_action = "observe"
             score_boost = -0.12
             confidence_shift = -3
             council_quality = "fragile"
             reasons.append("Head Trader: consenso insuficiente para arriscar patrimônio")
-        elif direction and consensus_direction and direction != consensus_direction and directional_gap >= 3.0:
+        elif direction and consensus_direction and direction != consensus_direction and directional_gap >= 3.4:
             decision_cap = "OBSERVAR"
             head_action = "reconcile"
             score_boost = -0.10
             confidence_shift = -2
             reasons.append("Head Trader: direção original conflita com a mesa")
-        elif support_weight >= max(5.2, opposition_weight * 1.35) and veto_weight <= 4.0 and senior_support >= 2.0:
+        elif support_weight >= max(4.8, opposition_weight * 1.22) and veto_weight <= 4.8 and senior_support >= 1.8:
             decision_cap = "ENTRADA_FORTE"
             head_action = "press"
             score_boost = 0.24
@@ -358,18 +358,18 @@ class TraderCouncilEngine:
 
         memory_total = int(memory_summary.get("total", 0) or 0)
         memory_expectancy = self._safe_float(memory_summary.get("expectancy_r"), 0.0)
-        if memory_total >= 18 and memory_expectancy <= -0.08:
+        if memory_total >= 24 and memory_expectancy <= -0.10:
             score_boost -= 0.10
             confidence_shift -= 2
             if decision_cap == "ENTRADA_FORTE":
                 decision_cap = "ENTRADA_CAUTELA"
             reasons.append("CRO interno: memória local negativa relevante reduziu agressividade")
-        elif memory_total >= 12 and memory_expectancy < 0:
+        elif memory_total >= 14 and memory_expectancy <= -0.03:
             score_boost -= 0.04
             confidence_shift -= 1
             if decision_cap == "ENTRADA_FORTE":
                 decision_cap = "ENTRADA_CAUTELA"
-            reasons.append("CRO interno: memória local levemente negativa reduziu um pouco a agressividade")
+            reasons.append("CRO interno: memória local moderadamente negativa reduziu um pouco a agressividade")
 
         if environment_type == "destructive":
             decision_cap = "NAO_OPERAR"
@@ -386,16 +386,16 @@ class TraderCouncilEngine:
             and anti_pattern_risk not in ("high", "critical")
             and conflict_type != "destrutivo"
         )
-        hard_block = senior_veto >= 7.4 or veto_weight >= max(10.5, support_weight * 1.35)
-        if premium_operable and decision_cap == "NAO_OPERAR" and not hard_block:
-            if support_weight >= max(3.8, opposition_weight * 1.10):
+        hard_block = senior_veto >= 8.4 or veto_weight >= max(11.8, support_weight * 1.50)
+        if premium_operable and decision_cap in ("NAO_OPERAR", "OBSERVAR") and not hard_block:
+            if support_weight >= max(3.2, opposition_weight * 1.05):
                 decision_cap = "ENTRADA_CAUTELA"
                 head_action = "probe"
-                score_boost = max(score_boost, 0.06)
-                confidence_shift = max(confidence_shift, 1)
+                score_boost = max(score_boost, 0.08)
+                confidence_shift = max(confidence_shift, 2)
                 council_quality = "measured"
-                reasons.append("Head Trader: contexto premium operável evitou bloqueio total")
-            else:
+                reasons.append("Head Trader: contexto premium operável evitou bloqueio excessivo")
+            elif support_weight > 0:
                 decision_cap = "OBSERVAR"
                 head_action = "observe"
                 reasons.append("Head Trader: contexto premium evitou veto total, mas manteve observação")

@@ -469,6 +469,13 @@ class DecisionEngine:
             reasons.append("Edge Guard final: bloqueio total")
             return "NAO_OPERAR", None
         if cap == "OBSERVAR" and decision in ("ENTRADA_FORTE", "ENTRADA_CAUTELA"):
+            if (
+                decision == "ENTRADA_CAUTELA"
+                and bool(guard.get("live_allowed", True))
+                and float(guard.get("stake_multiplier", 0.0) or 0.0) >= 0.32
+            ):
+                reasons.append("Edge Guard final: observação convertida em cautela reduzida")
+                return "ENTRADA_CAUTELA", final_direction
             reasons.append("Edge Guard final: entrada rebaixada para observação")
             return "OBSERVAR", final_direction
         if cap == "ENTRADA_CAUTELA" and decision == "ENTRADA_FORTE":
@@ -485,6 +492,14 @@ class DecisionEngine:
             reasons.append("Trader Council final: bloqueio da mesa veterana")
             return "NAO_OPERAR", None
         if cap == "OBSERVAR" and decision in ("ENTRADA_FORTE", "ENTRADA_CAUTELA"):
+            if (
+                decision == "ENTRADA_CAUTELA"
+                and council.get("quality") in ("measured", "prime")
+                and council.get("head_trader_action") in ("probe", "observe", "press")
+                and float(council.get("support_weight", 0.0) or 0.0) >= max(2.8, float(council.get("opposition_weight", 0.0) or 0.0) * 1.02)
+            ):
+                reasons.append("Trader Council final: mesa preservou cautela operável")
+                return "ENTRADA_CAUTELA", final_direction
             reasons.append("Trader Council final: mesa rebaixou entrada para observação")
             return "OBSERVAR", final_direction
         if cap == "ENTRADA_CAUTELA" and decision == "ENTRADA_FORTE":
