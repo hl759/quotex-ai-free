@@ -25,6 +25,7 @@ class StorageGovernanceEngine:
     Compatibilidade obrigatória com o app atual:
     - maybe_run_maintenance(scan_count=None, force=False)
     - collect_report()
+    - get_health_report(force=False, scan_count=None)
     """
 
     def __init__(self, state_store=None):
@@ -81,17 +82,76 @@ class StorageGovernanceEngine:
         except Exception:
             pass
 
+    def _base_disk_path(self):
+        """
+        Garante que total/free/used venham do mesmo filesystem.
+        """
+        try:
+            data_real = os.path.realpath(DATA_DIR)
+            state_real = os.path.realpath(STATE_DIR)
+            common = os.path.commonpath([data_real, state_real])
+            if common and os.path.exists(common):
+                return common
+        except Exception:
+            pass
+
+        for path in (os.path.realpath(DATA_DIR), os.path.realpath(STATE_DIR), os.getcwd(), "/tmp", "/"):
+            try:
+                if path and os.path.exists(path):
+                    return path
+            except Exception:
+                continue
+        return "/"
+
     # =========================
     # Métricas de armazenamento
     # =========================
-    def _disk_usage_pct(self):
+    def _disk_usage_snapshot(self):
+        base_path = self._base_disk_path()
+
+        total = 0
+        free = 0
+        used = 0
+
         try:
-            usage = shutil.disk_usage(DATA_DIR)
-            used = usage.total - usage.free
-            pct = (used / usage.total * 100.0) if usage.total else 0.0
-            return round(pct, 2), int(usage.total), int(usage.free)
+            usage = shutil.disk_usage(base_path)
+            total = int(usage.total)
+            free = int(usage.free)
+            used = max(0, total - free)
         except Exception:
-            return 0.0, 0, 0
+            try:
+                stat = os.statvfs(base_path)
+                total = int(stat.f_blocks * stat.f_frsize)
+                free = int(stat.f_bavail * stat.f_frsize)
+                used = max(0, total - free)
+            except Exception:
+                total = 0
+                free = 0
+                used = 0
+
+        # Guardas finais para nunca retornar JSON incoerente
+        if total < 0:
+            total = 0
+        if free < 0:
+            free = 0
+        if used < 0:
+            used = 0
+        if total and free > total:
+            free = total
+            used = 0
+        if total and used > total:
+            used = total
+            free = 0
+
+        pct = round((used / total * 100.0), 2) if total else 0.0
+
+        return {
+            "base_path": base_path,
+            "total_bytes": total,
+            "free_bytes": free,
+            "used_bytes": used,
+            "usage_pct": pct,
+        }
 
     def _dir_size(self, path):
         total = 0
@@ -123,7 +183,7 @@ class StorageGovernanceEngine:
                     os.path.basename(STORAGE_AUDIT_LOG),
                     os.path.basename(STORAGE_REPORT_FILE),
                 ):
-                    if not fp.startswith(STORAGE_ARCHIVE_DIR):
+                    if not os.path.realpath(fp).startswith(os.path.realpath(STORAGE_ARCHIVE_DIR)):
                         hot += os.path.getsize(fp)
         except Exception:
             pass
@@ -216,7 +276,7 @@ class StorageGovernanceEngine:
 
                         if rel_name in CRITICAL_FILES:
                             continue
-                        if fp.startswith(STORAGE_ARCHIVE_DIR):
+                        if os.path.realpath(fp).startswith(os.path.realpath(STORAGE_ARCHIVE_DIR)):
                             continue
                         if os.path.basename(fp) in (
                             os.path.basename(STORAGE_AUDIT_LOG),
@@ -305,7 +365,8 @@ class StorageGovernanceEngine:
                 if not raw:
                     continue
                 try:
-                    ts = datetime.fromisoformat(str(raw).replace("Z", "+00:00").replace("+00:00", ""))
+                    cleaned = str(raw).replace("Z", "+00:00")
+                    ts = datetime.fromisoformat(cleaned.replace("+00:00", ""))
                     break
                 except Exception:
                     continue
@@ -314,11 +375,9 @@ class StorageGovernanceEngine:
             else:
                 keep_candidates.append(row)
 
-        # nunca desmontar o histórico ativo: só arquiva se houver batch relevante
         if len(old_rows) < batch_min and len(rows) <= keep_rows:
             return {"archived_rows": 0, "archive_file": None}
 
-        # Se ainda estiver grande demais, manda excedente antigo para arquivo também
         if len(keep_candidates) > keep_rows:
             overflow = keep_candidates[:-keep_rows]
             old_rows.extend(overflow)
@@ -344,23 +403,40 @@ class StorageGovernanceEngine:
     # =========================
     def collect_report(self):
         prev_meta = self._load_meta()
-        usage_pct, total_bytes, free_bytes = self._disk_usage_pct()
+        disk = self._disk_usage_snapshot()
         hot, warm, cold = self._hot_warm_cold_sizes()
-        state = self._state_name(usage_pct)
-        growth_days = self._estimate_days_to_pressure(usage_pct, prev_meta)
+        managed_bytes = int(hot + warm + cold)
+        managed_usage_pct = round((managed_bytes / disk["total_bytes"] * 100.0), 4) if disk["total_bytes"] else 0.0
+
+        state = self._state_name(disk["usage_pct"])
+        growth_days = self._estimate_days_to_pressure(disk["usage_pct"], prev_meta)
 
         report = {
             "status": "ok",
             "measured_at": self._now().isoformat(),
-            "usage_pct": usage_pct,
+            "base_path": disk["base_path"],
+
+            # campos canônicos e consistentes
+            "usage_pct": disk["usage_pct"],
             "storage_state": state,
-            "growth_trend": "rising" if growth_days is not None else "stable",
-            "estimated_days_to_pressure": growth_days,
-            "total_bytes": int(total_bytes),
-            "free_bytes": int(free_bytes),
+            "total_bytes": int(disk["total_bytes"]),
+            "free_bytes": int(disk["free_bytes"]),
+            "used_bytes": int(disk["used_bytes"]),
+
+            # transparência extra
+            "filesystem_usage_pct": disk["usage_pct"],
+            "filesystem_total_bytes": int(disk["total_bytes"]),
+            "filesystem_free_bytes": int(disk["free_bytes"]),
+            "filesystem_used_bytes": int(disk["used_bytes"]),
+
+            "managed_data_bytes": managed_bytes,
+            "managed_usage_pct": managed_usage_pct,
             "hot_data_size": hot,
             "warm_data_size": warm,
             "cold_data_size": cold,
+
+            "growth_trend": "rising" if growth_days is not None else "stable",
+            "estimated_days_to_pressure": growth_days,
             "files_cleaned": self._safe_int(prev_meta.get("files_cleaned"), 0),
             "files_archived": self._safe_int(prev_meta.get("files_archived"), 0),
             "files_compressed": self._safe_int(prev_meta.get("files_compressed"), 0),
@@ -422,7 +498,7 @@ class StorageGovernanceEngine:
             report["maintenance_reason"] = "not_due_or_not_needed"
             return report
 
-        before_usage, _, before_free = self._disk_usage_pct()
+        before_disk = self._disk_usage_snapshot()
         files_cleaned = 0
         files_archived = 0
         files_compressed = 0
@@ -433,7 +509,6 @@ class StorageGovernanceEngine:
         )
         files_cleaned += len(removed_tmp)
 
-        # limpeza de audit logs antigos não essenciais
         try:
             if os.path.exists(STORAGE_AUDIT_LOG):
                 keep_days = max(7, int(RETENTION_POLICY.get("report_keep_days", 45)))
@@ -455,8 +530,8 @@ class StorageGovernanceEngine:
         files_compressed += 1 if journal_archive.get("archive_file") else 0
 
         prune_stats = self._prune_state_store()
-        after_usage, _, after_free = self._disk_usage_pct()
-        recovered = max(0, int(after_free - before_free))
+        after_disk = self._disk_usage_snapshot()
+        recovered = max(0, int(after_disk["free_bytes"] - before_disk["free_bytes"]))
 
         meta = {
             **prev_meta,
@@ -475,8 +550,10 @@ class StorageGovernanceEngine:
         self._save_meta(meta)
 
         payload = {
-            "before_usage_pct": before_usage,
-            "after_usage_pct": after_usage,
+            "before_usage_pct": before_disk["usage_pct"],
+            "after_usage_pct": after_disk["usage_pct"],
+            "before_free_bytes": before_disk["free_bytes"],
+            "after_free_bytes": after_disk["free_bytes"],
             "files_cleaned": files_cleaned,
             "files_archived": files_archived,
             "files_compressed": files_compressed,
