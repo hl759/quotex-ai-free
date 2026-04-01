@@ -7,7 +7,7 @@ except Exception:
         def evaluate(self, *args, **kwargs):
             return {
                 "active": False,
-                "mode": "validation",
+                "mode": "live",
                 "decision_cap": None,
                 "stake_multiplier": 1.0,
                 "live_allowed": True,
@@ -466,13 +466,15 @@ class DecisionEngine:
         if not cap:
             return decision, final_direction
         if cap == "NAO_OPERAR":
+            if decision in ("ENTRADA_FORTE", "ENTRADA_CAUTELA") and bool(guard.get("live_allowed", True)) and float(guard.get("stake_multiplier", 0.0) or 0.0) >= 0.18:
+                reasons.append("Edge Guard final: bloqueio convertido em cautela protegida")
+                return "ENTRADA_CAUTELA", final_direction
             reasons.append("Edge Guard final: bloqueio total")
             return "NAO_OPERAR", None
         if cap == "OBSERVAR" and decision in ("ENTRADA_FORTE", "ENTRADA_CAUTELA"):
             if (
-                decision == "ENTRADA_CAUTELA"
-                and bool(guard.get("live_allowed", True))
-                and float(guard.get("stake_multiplier", 0.0) or 0.0) >= 0.32
+                bool(guard.get("live_allowed", True))
+                and float(guard.get("stake_multiplier", 0.0) or 0.0) >= 0.18
             ):
                 reasons.append("Edge Guard final: observação convertida em cautela reduzida")
                 return "ENTRADA_CAUTELA", final_direction
@@ -489,6 +491,14 @@ class DecisionEngine:
         if not cap:
             return decision, final_direction
         if cap == "NAO_OPERAR":
+            if (
+                decision in ("ENTRADA_FORTE", "ENTRADA_CAUTELA")
+                and council.get("quality") in ("measured", "prime")
+                and council.get("head_trader_action") in ("probe", "observe", "press")
+                and float(council.get("support_weight", 0.0) or 0.0) >= max(2.4, float(council.get("opposition_weight", 0.0) or 0.0) * 0.98)
+            ):
+                reasons.append("Trader Council final: bloqueio convertido em cautela operável")
+                return "ENTRADA_CAUTELA", final_direction
             reasons.append("Trader Council final: bloqueio da mesa veterana")
             return "NAO_OPERAR", None
         if cap == "OBSERVAR" and decision in ("ENTRADA_FORTE", "ENTRADA_CAUTELA"):
@@ -496,7 +506,7 @@ class DecisionEngine:
                 decision == "ENTRADA_CAUTELA"
                 and council.get("quality") in ("measured", "prime")
                 and council.get("head_trader_action") in ("probe", "observe", "press")
-                and float(council.get("support_weight", 0.0) or 0.0) >= max(2.8, float(council.get("opposition_weight", 0.0) or 0.0) * 1.02)
+                and float(council.get("support_weight", 0.0) or 0.0) >= max(2.2, float(council.get("opposition_weight", 0.0) or 0.0) * 0.98)
             ):
                 reasons.append("Trader Council final: mesa preservou cautela operável")
                 return "ENTRADA_CAUTELA", final_direction
@@ -920,7 +930,7 @@ class DecisionEngine:
             "head_trader_action": council.get("head_trader_action", "none"),
             "council_participants": council.get("participants", []),
             "case_memory": council.get("memory", {}),
-            "edge_guard_mode": edge_guard.get("mode", "validation"),
+            "edge_guard_mode": edge_guard.get("mode", "live"),
             "edge_guard_active": edge_guard.get("active", False),
             "edge_guard_live_allowed": edge_guard.get("live_allowed", True),
             "edge_guard_decision_cap": edge_guard.get("decision_cap"),

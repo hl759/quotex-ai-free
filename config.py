@@ -48,7 +48,7 @@ ADAPTIVE_MIN_TRADES = int(os.getenv("ADAPTIVE_MIN_TRADES", "30"))
 ADAPTIVE_STRONG_MIN_TRADES = int(os.getenv("ADAPTIVE_STRONG_MIN_TRADES", "80"))
 ADAPTIVE_PROVEN_MIN_TRADES = int(os.getenv("ADAPTIVE_PROVEN_MIN_TRADES", "150"))
 
-ALPHA_HIVE_MODE = os.getenv("ALPHA_HIVE_MODE", "validation").strip().lower()
+ALPHA_HIVE_MODE = os.getenv("ALPHA_HIVE_MODE", "live").strip().lower()
 
 
 EDGE_GUARD_ACTIVE = os.getenv("EDGE_GUARD_ACTIVE", "1").strip().lower() not in ("0", "false", "no")
