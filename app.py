@@ -438,7 +438,7 @@ def _build_decision_summary(decision, reasons):
     if decision_cap:
         summary_points.append(f"Execução estatística: modo {edge_mode} com limite {decision_cap}")
     else:
-        summary_points.append(f"Execução estatística: modo {edge_mode}")
+        summary_points.append(f"Prova estatística: modo {edge_mode}")
     if direction:
         summary_points.insert(0, f"Direção preferida: {direction}")
 

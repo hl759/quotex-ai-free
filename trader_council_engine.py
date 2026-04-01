@@ -205,9 +205,7 @@ class TraderCouncilEngine:
                 "reasons": ["Trader Council desligado por configuração"],
                 "participants": [],
                 "memory": {"summary": {"total": 0, "wins": 0, "losses": 0, "winrate": 0.0, "expectancy_r": 0.0, "avg_payout": DEFAULT_PAYOUT, "breakeven_winrate": round((1 / (1 + DEFAULT_PAYOUT)) * 100.0, 2)}, "scar_tissue": ["Council off"]},
-                "hard_block": bool(hard_block or environment_type == "destructive"),
-            "premium_operable": bool(premium_operable),
-            "summary": {},
+                "summary": {},
             }
 
         regime = str(indicators.get("regime", "unknown"))
@@ -323,7 +321,7 @@ class TraderCouncilEngine:
         if veto_weight > 0:
             reasons.append(f"Vetos fortes somaram {round(veto_weight, 2)}")
 
-        if senior_veto >= 9.2 or veto_weight >= max(13.0, support_weight * 1.70):
+        if senior_veto >= 9.6 or veto_weight >= max(13.2, support_weight * 1.70):
             decision_cap = "NAO_OPERAR"
             head_action = "block"
             score_boost = -0.35
@@ -337,13 +335,13 @@ class TraderCouncilEngine:
             confidence_shift = -3
             council_quality = "fragile"
             reasons.append("Head Trader: consenso insuficiente para arriscar patrimônio")
-        elif direction and consensus_direction and direction != consensus_direction and directional_gap >= 4.0:
+        elif direction and consensus_direction and direction != consensus_direction and directional_gap >= 3.8:
             decision_cap = "OBSERVAR"
             head_action = "reconcile"
             score_boost = -0.10
             confidence_shift = -2
             reasons.append("Head Trader: direção original conflita com a mesa")
-        elif support_weight >= max(4.4, opposition_weight * 1.15) and veto_weight <= 5.4 and senior_support >= 1.6:
+        elif support_weight >= max(4.4, opposition_weight * 1.15) and veto_weight <= 5.2 and senior_support >= 1.6:
             decision_cap = "ENTRADA_FORTE"
             head_action = "press"
             score_boost = 0.24
@@ -383,26 +381,24 @@ class TraderCouncilEngine:
 
         conflict_type = str(meta_context.get("conflict_type", "neutro"))
         premium_operable = (
-            discernment_quality in ("premium", "bom")
+            discernment_quality == "premium"
             and environment_type != "destructive"
             and anti_pattern_risk not in ("high", "critical")
             and conflict_type != "destrutivo"
         )
-        hard_block = senior_veto >= 9.2 or veto_weight >= max(13.0, support_weight * 1.80)
+        hard_block = senior_veto >= 9.6 or veto_weight >= max(13.2, support_weight * 1.80)
         if premium_operable and decision_cap in ("NAO_OPERAR", "OBSERVAR") and not hard_block:
-            if support_weight >= max(2.6, opposition_weight * 1.00):
+            if support_weight >= max(2.6, opposition_weight * 1.02):
                 decision_cap = "ENTRADA_CAUTELA"
                 head_action = "probe"
                 score_boost = max(score_boost, 0.12)
                 confidence_shift = max(confidence_shift, 3)
                 council_quality = "measured"
                 reasons.append("Head Trader: contexto premium operável evitou bloqueio excessivo")
-            elif support_weight >= 0:
-                decision_cap = "ENTRADA_CAUTELA"
-                head_action = "probe"
-                score_boost = max(score_boost, 0.06)
-                confidence_shift = max(confidence_shift, 1)
-                reasons.append("Head Trader: contexto premium preservou cautela operável")
+            elif support_weight > 0:
+                decision_cap = "OBSERVAR"
+                head_action = "observe"
+                reasons.append("Head Trader: contexto premium evitou veto total, mas manteve observação")
 
         for item in participants:
             stance = item.get("stance")
@@ -431,8 +427,6 @@ class TraderCouncilEngine:
             "reasons": reasons,
             "participants": participants,
             "memory": memory,
-            "hard_block": bool(hard_block or environment_type == "destructive"),
-            "premium_operable": bool(premium_operable),
             "summary": {
                 "support_weight": round(support_weight, 4),
                 "opposition_weight": round(opposition_weight, 4),
