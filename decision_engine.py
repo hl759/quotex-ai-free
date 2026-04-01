@@ -7,7 +7,7 @@ except Exception:
         def evaluate(self, *args, **kwargs):
             return {
                 "active": False,
-                "mode": "live",
+                "mode": "validation",
                 "decision_cap": None,
                 "stake_multiplier": 1.0,
                 "live_allowed": True,
@@ -466,15 +466,17 @@ class DecisionEngine:
         if not cap:
             return decision, final_direction
         if cap == "NAO_OPERAR":
-            if decision in ("ENTRADA_FORTE", "ENTRADA_CAUTELA") and bool(guard.get("live_allowed", True)) and float(guard.get("stake_multiplier", 0.0) or 0.0) >= 0.18:
-                reasons.append("Edge Guard final: bloqueio convertido em cautela protegida")
+            severe = any("fortemente negativo" in str(r).lower() for r in guard.get("reasons", []))
+            if decision in ("ENTRADA_FORTE", "ENTRADA_CAUTELA") and not severe:
+                reasons.append("Edge Guard final: bloqueio convertido em cautela reduzida")
                 return "ENTRADA_CAUTELA", final_direction
             reasons.append("Edge Guard final: bloqueio total")
             return "NAO_OPERAR", None
         if cap == "OBSERVAR" and decision in ("ENTRADA_FORTE", "ENTRADA_CAUTELA"):
             if (
-                bool(guard.get("live_allowed", True))
-                and float(guard.get("stake_multiplier", 0.0) or 0.0) >= 0.18
+                decision == "ENTRADA_CAUTELA"
+                and bool(guard.get("live_allowed", True))
+                and float(guard.get("stake_multiplier", 0.0) or 0.0) >= 0.32
             ):
                 reasons.append("Edge Guard final: observação convertida em cautela reduzida")
                 return "ENTRADA_CAUTELA", final_direction
@@ -493,9 +495,8 @@ class DecisionEngine:
         if cap == "NAO_OPERAR":
             if (
                 decision in ("ENTRADA_FORTE", "ENTRADA_CAUTELA")
-                and council.get("quality") in ("measured", "prime")
-                and council.get("head_trader_action") in ("probe", "observe", "press")
-                and float(council.get("support_weight", 0.0) or 0.0) >= max(2.4, float(council.get("opposition_weight", 0.0) or 0.0) * 0.98)
+                and bool(council.get("premium_operable", False))
+                and not bool(council.get("hard_block", False))
             ):
                 reasons.append("Trader Council final: bloqueio convertido em cautela operável")
                 return "ENTRADA_CAUTELA", final_direction
@@ -506,7 +507,7 @@ class DecisionEngine:
                 decision == "ENTRADA_CAUTELA"
                 and council.get("quality") in ("measured", "prime")
                 and council.get("head_trader_action") in ("probe", "observe", "press")
-                and float(council.get("support_weight", 0.0) or 0.0) >= max(2.2, float(council.get("opposition_weight", 0.0) or 0.0) * 0.98)
+                and float(council.get("support_weight", 0.0) or 0.0) >= max(2.8, float(council.get("opposition_weight", 0.0) or 0.0) * 1.02)
             ):
                 reasons.append("Trader Council final: mesa preservou cautela operável")
                 return "ENTRADA_CAUTELA", final_direction
@@ -839,12 +840,20 @@ class DecisionEngine:
             floor_rank = self._quality_rank(behavior.get("acceptance_floor", "aceitavel"))
             current_rank = self._quality_rank(discernment_quality)
             if current_rank < floor_rank:
-                decision, direction = "NAO_OPERAR", None
-                reasons.append("Orquestração final: contexto abaixo do piso de aceitação")
+                if decision in ("ENTRADA_FORTE", "ENTRADA_CAUTELA") and discernment_quality in ("premium", "bom"):
+                    decision, direction = "ENTRADA_CAUTELA", final_direction
+                    reasons.append("Orquestração final: contexto abaixo do piso máximo, mas cautela foi preservada")
+                else:
+                    decision, direction = "NAO_OPERAR", None
+                    reasons.append("Orquestração final: contexto abaixo do piso de aceitação")
 
             if behavior.get("frequency_limit", 1) == 0 and decision != "NAO_OPERAR":
-                decision, direction = "OBSERVAR", final_direction
-                reasons.append("Orquestração final: limite de frequência travou entrada")
+                if adjusted_score >= 3.8 and discernment_quality in ("premium", "bom"):
+                    decision, direction = "ENTRADA_CAUTELA", final_direction
+                    reasons.append("Orquestração final: limite de frequência reduziu a cautela, sem travar a entrada")
+                else:
+                    decision, direction = "OBSERVAR", final_direction
+                    reasons.append("Orquestração final: limite de frequência travou entrada")
 
         confidence = base_confidence + capital_plan.get("confidence_shift", 0)
         confidence = int(max(50, min(95, confidence)))
@@ -930,7 +939,7 @@ class DecisionEngine:
             "head_trader_action": council.get("head_trader_action", "none"),
             "council_participants": council.get("participants", []),
             "case_memory": council.get("memory", {}),
-            "edge_guard_mode": edge_guard.get("mode", "live"),
+            "edge_guard_mode": edge_guard.get("mode", "validation"),
             "edge_guard_active": edge_guard.get("active", False),
             "edge_guard_live_allowed": edge_guard.get("live_allowed", True),
             "edge_guard_decision_cap": edge_guard.get("decision_cap"),

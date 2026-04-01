@@ -205,7 +205,9 @@ class TraderCouncilEngine:
                 "reasons": ["Trader Council desligado por configuração"],
                 "participants": [],
                 "memory": {"summary": {"total": 0, "wins": 0, "losses": 0, "winrate": 0.0, "expectancy_r": 0.0, "avg_payout": DEFAULT_PAYOUT, "breakeven_winrate": round((1 / (1 + DEFAULT_PAYOUT)) * 100.0, 2)}, "scar_tissue": ["Council off"]},
-                "summary": {},
+                "hard_block": bool(hard_block or environment_type == "destructive"),
+            "premium_operable": bool(premium_operable),
+            "summary": {},
             }
 
         regime = str(indicators.get("regime", "unknown"))
@@ -321,7 +323,7 @@ class TraderCouncilEngine:
         if veto_weight > 0:
             reasons.append(f"Vetos fortes somaram {round(veto_weight, 2)}")
 
-        if senior_veto >= 9.2 or veto_weight >= max(13.2, support_weight * 1.75):
+        if senior_veto >= 9.2 or veto_weight >= max(13.0, support_weight * 1.70):
             decision_cap = "NAO_OPERAR"
             head_action = "block"
             score_boost = -0.35
@@ -358,13 +360,13 @@ class TraderCouncilEngine:
 
         memory_total = int(memory_summary.get("total", 0) or 0)
         memory_expectancy = self._safe_float(memory_summary.get("expectancy_r"), 0.0)
-        if memory_total >= 36 and memory_expectancy <= -0.12:
+        if memory_total >= 40 and memory_expectancy <= -0.12:
             score_boost -= 0.10
             confidence_shift -= 2
             if decision_cap == "ENTRADA_FORTE":
                 decision_cap = "ENTRADA_CAUTELA"
             reasons.append("CRO interno: memória local negativa relevante reduziu agressividade")
-        elif memory_total >= 20 and memory_expectancy <= -0.06:
+        elif memory_total >= 24 and memory_expectancy <= -0.06:
             score_boost -= 0.04
             confidence_shift -= 1
             if decision_cap == "ENTRADA_FORTE":
@@ -381,27 +383,26 @@ class TraderCouncilEngine:
 
         conflict_type = str(meta_context.get("conflict_type", "neutro"))
         premium_operable = (
-            discernment_quality == "premium"
+            discernment_quality in ("premium", "bom")
             and environment_type != "destructive"
             and anti_pattern_risk not in ("high", "critical")
             and conflict_type != "destrutivo"
         )
-        hard_block = senior_veto >= 9.2 or veto_weight >= max(13.2, support_weight * 1.80)
+        hard_block = senior_veto >= 9.2 or veto_weight >= max(13.0, support_weight * 1.80)
         if premium_operable and decision_cap in ("NAO_OPERAR", "OBSERVAR") and not hard_block:
             if support_weight >= max(2.6, opposition_weight * 1.00):
                 decision_cap = "ENTRADA_CAUTELA"
                 head_action = "probe"
-                score_boost = max(score_boost, 0.10)
-                confidence_shift = max(confidence_shift, 2)
+                score_boost = max(score_boost, 0.12)
+                confidence_shift = max(confidence_shift, 3)
                 council_quality = "measured"
                 reasons.append("Head Trader: contexto premium operável evitou bloqueio excessivo")
-            elif support_weight > 0:
+            elif support_weight >= 0:
                 decision_cap = "ENTRADA_CAUTELA"
-                head_action = "observe"
-                score_boost = max(score_boost, 0.04)
+                head_action = "probe"
+                score_boost = max(score_boost, 0.06)
                 confidence_shift = max(confidence_shift, 1)
-                council_quality = "measured"
-                reasons.append("Head Trader: contexto premium manteve cautela em vez de veto")
+                reasons.append("Head Trader: contexto premium preservou cautela operável")
 
         for item in participants:
             stance = item.get("stance")
@@ -430,6 +431,8 @@ class TraderCouncilEngine:
             "reasons": reasons,
             "participants": participants,
             "memory": memory,
+            "hard_block": bool(hard_block or environment_type == "destructive"),
+            "premium_operable": bool(premium_operable),
             "summary": {
                 "support_weight": round(support_weight, 4),
                 "opposition_weight": round(opposition_weight, 4),
