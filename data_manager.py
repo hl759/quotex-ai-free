@@ -265,6 +265,14 @@ class DataManager:
         if self._is_crypto(symbol):
             return self._fetch_binance(symbol, interval=interval, limit=outputsize)
 
+        # Para M5 real de Forex — vai direto para Twelve Data (mais confiável)
+        if interval == "5min":
+            candles = self._fetch_twelve(symbol, interval="5min", outputsize=outputsize)
+            if candles:
+                return candles
+            return None
+
+        # Para M1 de Forex — cascata normal
         candles = self._fetch_finnhub(symbol, interval=interval)
         if candles:
             return candles
