@@ -1,0 +1,21 @@
+Correção final aplicada na rota /storage-health
+
+O que foi ajustado:
+- total_bytes, free_bytes, used_bytes e usage_pct agora vêm do mesmo filesystem/base_path
+- adicionados campos explícitos:
+  - base_path
+  - filesystem_total_bytes
+  - filesystem_free_bytes
+  - filesystem_used_bytes
+  - filesystem_usage_pct
+  - managed_data_bytes
+  - managed_usage_pct
+- guardas anti-inconsistência:
+  - free_bytes nunca maior que total_bytes
+  - used_bytes nunca maior que total_bytes
+  - usage_pct sempre derivado dos mesmos valores
+
+Compatibilidade preservada:
+- maybe_run_maintenance(scan_count=None, force=False)
+- collect_report()
+- get_health_report(force=False, scan_count=None)

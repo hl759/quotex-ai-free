@@ -1,0 +1,25 @@
+
+STORAGE GOVERNANCE INTEGRATION
+
+Arquivos novos:
+- storage_governance_config.py
+- storage_governance_engine.py
+
+Arquivos ajustados:
+- app.py
+- state_store.py
+
+O que foi integrado:
+- monitoramento de uso de armazenamento
+- retenção por faixas (normal/atenção/pressão/crítico)
+- limpeza automática de temporários, logs e caches
+- poda segura do banco de snapshots/scans
+- poda segura das coleções journal_trades e trade_ledger
+- arquivamento compactado do journal detalhado antigo com preservação resumida
+- rota /storage-health para inspeção e manutenção manual
+
+O que NÃO foi alterado:
+- cérebro da decisão
+- signal/decision logic
+- journal_manager logic
+- módulos mentais e de governança operacional

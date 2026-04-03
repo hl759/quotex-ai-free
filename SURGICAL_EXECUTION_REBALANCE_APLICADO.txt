@@ -1,0 +1,21 @@
+PATCH APLICADO
+
+Objetivo:
+- parar a auto-sabotagem da governança final
+- manter proteção real sem sufocar contexto bom/premium
+- fazer a IA preferir ENTRADA_CAUTELA em vez de OBSERVAR/NAO_OPERAR quando houver edge funcional
+
+Arquivos ajustados:
+- config.py
+- edge_guard.py
+- trader_council_engine.py
+- decision_engine.py
+- app.py
+
+Resumo do que mudou:
+1. Validation/edge validation deixou de funcionar como juíza final
+2. Edge Guard virou moderador, bloqueando totalmente só em hard risk real
+3. Trader Council / Head Trader bloqueiam muito menos
+4. Case memory / scar tissue perderam peso excessivo
+5. Contexto premium passou a ter mais autoridade executiva
+6. Governaça final agora modula mais e veta menos
