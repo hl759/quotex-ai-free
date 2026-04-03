@@ -1108,70 +1108,280 @@ HTML_PAGE = """
 <head>
 <meta charset='UTF-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-<title>Alpha Hive AI • Inteligência Coletiva</title>
+<title>Alpha Hive AI • Premium Mobile</title>
 <style>
+:root{
+  --bg:#030813;
+  --bg2:#081525;
+  --card:#09131f;
+  --card2:#0c1827;
+  --line:rgba(109,255,224,.12);
+  --line-strong:rgba(109,255,224,.28);
+  --text:#eef6ff;
+  --muted:#8fa8c7;
+  --teal:#66f5d1;
+  --cyan:#65d9ff;
+  --lime:#7dffbd;
+  --red:#ff8aa6;
+  --amber:#ffc85d;
+  --blue:#52a8ff;
+  --shadow:0 16px 50px rgba(0,0,0,.35);
+}
 *{box-sizing:border-box}
-body{margin:0;font-family:Arial,sans-serif;background:linear-gradient(180deg,#04101d 0%,#07192e 100%);color:#eef6ff}
-.app{max-width:780px;margin:0 auto;padding:18px}
-.hero,.card{background:linear-gradient(180deg,#0a1d33 0%,#0b2340 100%);border:1px solid rgba(80,220,255,.10);border-radius:28px;padding:18px;margin-bottom:18px;box-shadow:0 12px 40px rgba(0,0,0,.28)}
-.hero-top{display:flex;justify-content:space-between;align-items:center;gap:12px}
-.brand{display:flex;align-items:center;gap:14px}
-.logo{width:62px;height:62px;border-radius:18px;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#6c63ff,#24e5c2);font-size:34px}
-.title{font-size:30px;font-weight:900}.title .ai{color:#25e6c4}.subtitle{color:#8fa7c4;margin-top:8px;font-size:13px;letter-spacing:1.8px}
-.right-box{display:flex;flex-direction:column;gap:10px}.live{min-width:110px;text-align:center;padding:16px 14px;border-radius:999px;border:1px solid rgba(37,230,196,.24);background:rgba(14,54,55,.45);color:#86ffe8;font-size:18px;font-weight:800}.refresh-btn{border:none;border-radius:999px;padding:12px 16px;background:linear-gradient(180deg,#103153 0%,#153d66 100%);color:#25e6c4;font-size:14px;font-weight:800;cursor:pointer}
-.metrics{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-top:18px}.metric{background:#132b49;border-radius:18px;padding:18px}.metric-label,.section-sub,.mini-label,.muted{color:#8fa7c4}.metric-value{font-size:24px;font-weight:800}
-.tabs{display:grid;grid-template-columns:repeat(7,1fr);gap:12px;margin-top:18px}.tab-btn{border:none;border-radius:18px;padding:16px 10px;background:#132b49;color:#a8bdd8;font-size:14px;font-weight:800;cursor:pointer}.tab-btn.active{background:linear-gradient(180deg,#103153 0%,#153d66 100%);color:#25e6c4}
-.section-title{font-size:17px;font-weight:800;margin-bottom:8px}.status-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.status-item,.signal-card,.list-card,.decision-card{background:#132b49;border-radius:18px;padding:14px;margin-top:12px}
-.signal-head,.decision-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}.asset{font-size:22px;font-weight:900}
-.badge{padding:9px 14px;border-radius:999px;font-size:13px;font-weight:900}.call{background:linear-gradient(135deg,#25e6a0,#8affcc);color:#053324}.put{background:linear-gradient(135deg,#ff7a8a,#ffc0c8);color:#3f1119}.hold{background:linear-gradient(135deg,#8c95a6,#d2d7df);color:#20242b}
-.signal-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.mini{background:#0f223a;border-radius:14px;padding:12px}.mini-value{font-size:18px;font-weight:800}.summary-box{margin-top:14px;background:#0d1c31;border-radius:18px;padding:16px}.summary-kicker{font-size:12px;letter-spacing:1.2px;text-transform:uppercase;color:#7fd8ff;margin-bottom:8px}.summary-main{font-size:16px;font-weight:800;line-height:1.45;color:#eef6ff}.summary-points{display:grid;gap:8px;margin-top:12px}.summary-point{display:flex;gap:8px;color:#bdd0e8;line-height:1.5}.summary-point-dot{color:#25e6c4;font-weight:900}.advanced-box{margin-top:12px;background:#0d1c31;border-radius:16px;border:1px solid rgba(127,216,255,.08);overflow:hidden}.advanced-box summary{list-style:none;cursor:pointer;padding:14px 16px;color:#9fe6ff;font-weight:800}.advanced-box summary::-webkit-details-marker{display:none}.advanced-box[open] summary{border-bottom:1px solid rgba(127,216,255,.08)}.reason{padding:14px 16px;color:#bdd0e8;line-height:1.6;white-space:normal}.advanced-tip{margin-top:8px;color:#8fa7c4;font-size:13px}
-.empty{text-align:center;color:#9bb2cf;padding:26px 10px}.panel{display:none}.panel.active{display:block}.list-title{font-size:18px;font-weight:800;margin-bottom:6px}
-.form-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.field{display:flex;flex-direction:column;gap:8px;background:#132b49;border-radius:16px;padding:12px}.field label{font-size:13px;color:#8fa7c4}.field input{width:100%;background:#0f223a;border:1px solid rgba(255,255,255,.08);border-radius:12px;color:#eef6ff;padding:12px;font-size:15px}.save-btn{margin-top:14px;border:none;border-radius:16px;padding:14px 16px;background:linear-gradient(180deg,#103153 0%,#153d66 100%);color:#25e6c4;font-size:15px;font-weight:800;cursor:pointer}.save-status{margin-top:10px;color:#8fa7c4;font-size:14px}
-@media(max-width:640px){.tabs{grid-template-columns:repeat(2,1fr)}.hero-top{align-items:flex-start}.right-box{min-width:120px}.form-grid{grid-template-columns:1fr}}
+html,body{margin:0;padding:0;min-height:100%;font-family:Inter,Arial,sans-serif;color:var(--text);background:
+  radial-gradient(circle at top left, rgba(57,185,255,.12), transparent 30%),
+  radial-gradient(circle at top right, rgba(95,255,213,.08), transparent 24%),
+  linear-gradient(180deg,var(--bg) 0%, var(--bg2) 100%)}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;background:
+  linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px),
+  linear-gradient(180deg, rgba(255,255,255,.02) 1px, transparent 1px);background-size:28px 28px;mask-image:linear-gradient(180deg, rgba(255,255,255,.25), transparent 85%);opacity:.18}
+.app{max-width:460px;margin:0 auto;padding:14px 14px 26px}
+.shell,.panel-card,.glass-card,.metric-card,.signal-card,.decision-card,.list-card,.capital-card{position:relative;background:linear-gradient(180deg, rgba(10,18,31,.92) 0%, rgba(8,16,28,.96) 100%);border:1px solid var(--line);border-radius:26px;box-shadow:var(--shadow);overflow:hidden}
+.shell::before,.panel-card::before,.glass-card::before,.metric-card::before,.signal-card::before,.decision-card::before,.list-card::before,.capital-card::before{content:"";position:absolute;inset:-1px;border-radius:inherit;padding:1px;background:linear-gradient(135deg, rgba(101,217,255,.42), rgba(102,245,209,.18), rgba(102,245,209,.02));-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none;opacity:.85}
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px 16px 10px}
+.brand{display:flex;gap:12px;align-items:center}
+.logo{width:54px;height:54px;border-radius:18px;background:radial-gradient(circle at 30% 30%, rgba(102,245,209,.95), rgba(82,168,255,.45) 45%, rgba(8,17,29,.4) 70%),linear-gradient(180deg,#0d2235,#08131f);display:flex;align-items:center;justify-content:center;font-size:28px;box-shadow:0 0 30px rgba(102,245,209,.22)}
+.brand-title{font-size:28px;font-weight:900;line-height:1}
+.brand-title .ai{color:var(--teal)}
+.brand-sub{margin-top:6px;color:var(--muted);font-size:11px;letter-spacing:1.8px;text-transform:uppercase}
+.header-actions{display:flex;flex-direction:column;align-items:flex-end;gap:10px}
+.live-pill{padding:11px 14px;border-radius:999px;background:linear-gradient(180deg, rgba(15,36,38,.95), rgba(8,21,24,.95));border:1px solid rgba(102,245,209,.24);color:#b9ffee;font-size:12px;font-weight:900;letter-spacing:.6px;white-space:nowrap}
+.refresh-btn{border:none;border-radius:18px;padding:12px 16px;background:linear-gradient(180deg,#12304e 0%,#0d243d 100%);color:#dff9ff;font-size:13px;font-weight:800;box-shadow:0 10px 24px rgba(16,37,63,.28);cursor:pointer}
+.hero-meta{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:0 16px 12px}
+.meta-chip{background:rgba(10,19,31,.8);border:1px solid rgba(101,217,255,.10);border-radius:18px;padding:12px 12px}
+.meta-chip .label{color:var(--muted);font-size:11px;letter-spacing:.9px;text-transform:uppercase;margin-bottom:6px}
+.meta-chip .value{font-size:15px;font-weight:800}
+.summary-hero{margin:0 16px 16px;padding:16px;background:linear-gradient(180deg, rgba(12,28,41,.92), rgba(8,19,28,.92));border:1px solid rgba(101,217,255,.14);border-radius:24px;display:grid;gap:12px}
+.summary-top{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.summary-kicker{color:#dbeeff;font-weight:800;font-size:15px;letter-spacing:.6px}
+.status-chip{padding:8px 12px;border-radius:999px;font-size:11px;font-weight:900;letter-spacing:.7px;background:rgba(102,245,209,.10);border:1px solid rgba(102,245,209,.26);color:#a6ffe9}
+.metrics{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin:14px 0 18px}
+.metric-card{padding:16px}
+.metric-card .metric-label{color:var(--muted);font-size:13px;margin-bottom:8px}
+.metric-card .metric-value{font-size:33px;font-weight:900;letter-spacing:-.03em}
+.metric-card .metric-mini{margin-top:8px;color:#9db8d7;font-size:12px}
+.tabbar-wrap{position:sticky;top:0;z-index:9;padding:0 0 14px;background:linear-gradient(180deg, rgba(3,8,19,.92), rgba(3,8,19,.76) 70%, rgba(3,8,19,0))}
+.tabs{display:flex;gap:10px;overflow:auto;padding-bottom:2px;scrollbar-width:none}.tabs::-webkit-scrollbar{display:none}
+.tab-btn{flex:0 0 auto;border:none;border-radius:18px;padding:13px 14px;background:rgba(10,19,31,.88);color:#a9c0da;border:1px solid rgba(101,217,255,.08);font-size:13px;font-weight:800;cursor:pointer;transition:.18s}
+.tab-btn.active{background:linear-gradient(180deg, rgba(18,48,78,.95), rgba(9,29,51,.95));color:#dffcff;border-color:rgba(102,245,209,.22);box-shadow:0 0 0 1px rgba(102,245,209,.10) inset, 0 10px 24px rgba(0,0,0,.22)}
+.panel{display:none}.panel.active{display:block}
+.panel-card{padding:16px 14px 14px;margin-bottom:14px}
+.panel-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:12px}
+.section-title{font-size:16px;font-weight:900;letter-spacing:.2px;margin:0}
+.section-sub,.muted,.mini-label,.field label,.save-status,.advanced-tip{color:var(--muted)}
+.section-sub{font-size:12px;margin-top:6px;line-height:1.45}
+.signal-card,.decision-card,.list-card{padding:16px 14px;margin-top:12px}
+.signal-head,.decision-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px}
+.asset{font-size:24px;font-weight:900;letter-spacing:-.02em}
+.badge{padding:10px 14px;border-radius:999px;font-size:12px;font-weight:900;letter-spacing:.5px;white-space:nowrap}
+.call{background:linear-gradient(135deg,#0e3a2f,#1ca87f 75%,#82ffd6);color:#dffef5}
+.put{background:linear-gradient(135deg,#4e1730,#f26086 75%,#ffc7d6);color:#fff4f7}
+.hold{background:linear-gradient(135deg,#2a3444,#71849b 80%,#dce6f1);color:#f7fbff}
+.signal-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.mini{padding:13px 12px;border-radius:18px;background:linear-gradient(180deg, rgba(11,22,35,.92), rgba(8,17,28,.92));border:1px solid rgba(101,217,255,.08)}
+.mini-label{font-size:12px;margin-bottom:7px}.mini-value{font-size:18px;font-weight:900;letter-spacing:-.02em}
+.summary-box{margin-top:14px;padding:14px;border-radius:20px;background:linear-gradient(180deg, rgba(9,18,30,.92), rgba(6,13,22,.92));border:1px solid rgba(101,217,255,.08)}
+.summary-kicker-sm{font-size:11px;letter-spacing:1.3px;text-transform:uppercase;color:#7fd8ff;margin-bottom:8px}
+.summary-main{font-size:15px;font-weight:900;line-height:1.45}
+.summary-points{display:grid;gap:8px;margin-top:12px}.summary-point{display:flex;gap:8px;line-height:1.5;color:#bfd1e8}.summary-point-dot{color:var(--teal);font-weight:900}
+.advanced-box{margin-top:12px;background:rgba(8,15,25,.9);border-radius:18px;border:1px solid rgba(101,217,255,.08);overflow:hidden}
+.advanced-box summary{list-style:none;cursor:pointer;padding:14px;color:#9fe6ff;font-weight:800}.advanced-box summary::-webkit-details-marker{display:none}.advanced-box[open] summary{border-bottom:1px solid rgba(127,216,255,.08)}
+.reason{padding:14px;color:#bfd1e8;line-height:1.65;white-space:normal}
+.empty{text-align:center;color:#9bb2cf;padding:28px 10px}
+.status-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-top:10px}
+.status-item{padding:16px;border-radius:18px;background:linear-gradient(180deg, rgba(10,19,31,.92), rgba(8,16,27,.92));border:1px solid rgba(101,217,255,.08)}
+.status-item b{display:block;margin-top:8px;font-size:24px;color:#f2f8ff}
+.performance-panel{display:grid;gap:12px}
+.performance-ring{display:flex;align-items:center;gap:12px;padding:16px;border-radius:22px;background:linear-gradient(180deg, rgba(10,19,31,.92), rgba(7,14,24,.92));border:1px solid rgba(101,217,255,.08)}
+.ring{--pct:60;flex:0 0 92px;width:92px;height:92px;border-radius:50%;display:grid;place-items:center;background:conic-gradient(var(--teal) calc(var(--pct) * 1%), rgba(101,217,255,.16) 0);box-shadow:inset 0 0 0 1px rgba(102,245,209,.18)}
+.ring::before{content:"";width:66px;height:66px;border-radius:50%;background:linear-gradient(180deg,#08111c,#0b1522);position:absolute}.ring-value{position:relative;font-size:20px;font-weight:900}
+.performance-copy .big{font-size:30px;font-weight:900;line-height:1}.performance-copy .small{margin-top:6px;color:var(--muted);font-size:13px}
+.list-title{font-size:17px;font-weight:900;margin-bottom:8px}
+.form-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.field{display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:18px;background:linear-gradient(180deg, rgba(10,19,31,.92), rgba(8,16,27,.92));border:1px solid rgba(101,217,255,.08)}
+.field input{width:100%;background:#09131f;border:1px solid rgba(255,255,255,.08);border-radius:14px;color:var(--text);padding:12px;font-size:15px}
+.save-btn{width:100%;margin-top:14px;border:none;border-radius:18px;padding:14px 16px;background:linear-gradient(180deg,#12304e 0%,#0d243d 100%);color:#dffcff;font-size:15px;font-weight:900;cursor:pointer}
+.stats-highlight{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:12px}.stats-pill{padding:12px;border-radius:16px;background:linear-gradient(180deg, rgba(9,17,28,.95), rgba(7,13,22,.95));border:1px solid rgba(101,217,255,.08)}.stats-pill .num{font-size:24px;font-weight:900}.stats-pill .cap{margin-top:6px;color:var(--muted);font-size:12px}
+.footer-note{padding:14px 4px 0;color:#7793b5;font-size:12px;line-height:1.45;text-align:center}
+.glow-divider{height:1px;margin:10px 0 0;background:linear-gradient(90deg, transparent, rgba(102,245,209,.7), transparent)}
+@media (max-width:400px){.asset{font-size:22px}.brand-title{font-size:26px}.metric-card .metric-value{font-size:28px}.signal-grid,.status-grid,.form-grid,.stats-highlight{grid-template-columns:1fr 1fr}.mini-value{font-size:17px}}
 </style>
 </head>
 <body>
 <div class='app'>
-<div class='hero'>
-<div class='hero-top'>
-<div class='brand'><div class='logo'>🐝</div><div><div class='title'>Alpha Hive <span class='ai'>AI</span></div><div class='subtitle'>INTELIGÊNCIA COLETIVA DE MERCADO</div></div></div>
-<div class='right-box'><div id='liveBadge' class='live'>● LIVE</div><button id='refreshBtn' class='refresh-btn' onclick='refreshSnapshot(false)'>↻ Atualizar agora</button></div>
-</div>
-<div class='metrics'>
-<div class='metric'><div class='metric-label'>Último scan</div><div class='metric-value' id='last_scan'></div></div>
-<div class='metric'><div class='metric-label'>Scans</div><div class='metric-value' id='scan_count'></div></div>
-<div class='metric'><div class='metric-label'>Sinais</div><div class='metric-value' id='signal_count'></div></div>
-<div class='metric'><div class='metric-label'>Ativos</div><div class='metric-value' id='asset_count'></div></div>
-</div>
-<div class='tabs'>
-<button class='tab-btn active' onclick="showTab('signals', this)">⚡ Sinais</button>
-<button class='tab-btn' onclick="showTab('decision', this)">🧠 Decisão</button>
-<button class='tab-btn' onclick="showTab('history', this)">📋 Histórico</button>
-<button class='tab-btn' onclick="showTab('stats', this)">📊 Stats</button>
-<button class='tab-btn' onclick="showTab('assets', this)">🏆 Ativos</button>
-<button class='tab-btn' onclick="showTab('hours', this)">⏰ Horários</button>
-<button class='tab-btn' onclick="showTab('capital', this)">💰 Capital</button>
-</div>
-</div>
+  <div class='shell'>
+    <div class='topbar'>
+      <div class='brand'>
+        <div class='logo'>🐝</div>
+        <div>
+          <div class='brand-title'>Alpha Hive <span class='ai'>AI</span></div>
+          <div class='brand-sub'>INTELIGÊNCIA COLETIVA • EDIÇÃO PREMIUM</div>
+        </div>
+      </div>
+      <div class='header-actions'>
+        <div id='liveBadge' class='live-pill'>● LIVE</div>
+        <button id='refreshBtn' class='refresh-btn' onclick='refreshSnapshot(false)'>↻ Atualizar agora</button>
+      </div>
+    </div>
+    <div class='hero-meta'>
+      <div class='meta-chip'><div class='label'>Motor</div><div class='value'>Adaptativo</div></div>
+      <div class='meta-chip'><div class='label'>Modo</div><div class='value'>Operável</div></div>
+      <div class='meta-chip'><div class='label'>Perfil</div><div class='value'>Premium</div></div>
+    </div>
+    <div class='summary-hero'>
+      <div class='summary-top'>
+        <div>
+          <div class='summary-kicker'>Visão instantânea da mesa</div>
+          <div class='section-sub'>Decisão, risco e desempenho em uma leitura mais limpa e premium para mobile.</div>
+        </div>
+        <div class='status-chip'>MODO LIVE</div>
+      </div>
+      <div class='metrics'>
+        <div class='metric-card'>
+          <div class='metric-label'>Último scan</div>
+          <div class='metric-value' id='last_scan'></div>
+          <div class='metric-mini'>ritmo da leitura de mercado</div>
+        </div>
+        <div class='metric-card'>
+          <div class='metric-label'>Scans</div>
+          <div class='metric-value' id='scan_count'></div>
+          <div class='metric-mini'>varreduras acumuladas</div>
+        </div>
+        <div class='metric-card'>
+          <div class='metric-label'>Sinais</div>
+          <div class='metric-value' id='signal_count'></div>
+          <div class='metric-mini'>oportunidades ativas</div>
+        </div>
+        <div class='metric-card'>
+          <div class='metric-label'>Ativos</div>
+          <div class='metric-value' id='asset_count'></div>
+          <div class='metric-mini'>universo monitorado</div>
+        </div>
+      </div>
+    </div>
+  </div>
 
-<div id='signals' class='panel active'><div class='card'><div class='section-title'>Sinais atuais</div><div class='section-sub'>Sinais coerentes com a decisão dominante</div><div id='signals_container'></div></div></div>
-<div id='decision' class='panel'><div class='card'><div class='section-title'>Decisão do momento</div><div class='section-sub'>Alpha Hive AI • motor inteligente de decisão</div><div id='decision_container'></div></div></div>
-<div id='history' class='panel'><div class='card'><div class='section-title'>Histórico recente</div><div class='section-sub'>Últimos sinais salvos</div><div id='history_container'></div></div></div>
-<div id='stats' class='panel'><div class='card'><div class='section-title'>Aprendizado</div><div class='section-sub'>Acompanhamento do motor adaptativo</div><div class='status-grid'><div class='status-item'>Total avaliadas<br><b id='stats_total'></b></div><div class='status-item'>Win rate<br><b id='stats_winrate'></b></div><div class='status-item'>Wins<br><b id='stats_wins'></b></div><div class='status-item'>Loss<br><b id='stats_loss'></b></div></div></div></div>
-<div id='assets' class='panel'><div class='card'><div class='section-title'>Melhores ativos</div><div class='section-sub'>Ranking baseado no histórico avaliado</div><div id='assets_container'></div></div></div>
-<div id='hours' class='panel'><div class='card'><div class='section-title'>Melhores horários</div><div class='section-sub'>Ranking por faixa horária</div><div id='hours_container'></div></div></div>
-<div id='capital' class='panel'><div class='card'><div class='section-title'>Capital da IA</div><div class='section-sub'>Informe a banca para a IA gerir como patrimônio próprio</div>
-<div class='form-grid'>
-<div class='field'><label>Capital atual</label><input id='capital_current' type='number' step='0.01' min='0'></div>
-<div class='field'><label>Pico da banca</label><input id='capital_peak' type='number' step='0.01' min='0'></div>
-<div class='field'><label>PnL do dia</label><input id='daily_pnl' type='number' step='0.01'></div>
-<div class='field'><label>Sequência</label><input id='streak' type='number' step='1'></div>
-<div class='field'><label>Meta diária %</label><input id='daily_target_pct' type='number' step='0.1' min='0'></div>
-<div class='field'><label>Stop diário %</label><input id='daily_stop_pct' type='number' step='0.1' min='0'></div>
-</div>
-<button id='saveCapitalBtn' class='save-btn' onclick='saveCapitalState()'>Salvar capital</button>
-<div id='capital_status' class='save-status'></div>
-</div></div>
+  <div class='tabbar-wrap'>
+    <div class='tabs'>
+      <button class='tab-btn' onclick="showTab('signals', this)">⚡ Sinais</button>
+      <button class='tab-btn active' onclick="showTab('decision', this)">🧠 Decisão</button>
+      <button class='tab-btn' onclick="showTab('history', this)">📋 Histórico</button>
+      <button class='tab-btn' onclick="showTab('stats', this)">📊 Stats</button>
+      <button class='tab-btn' onclick="showTab('assets', this)">🏆 Ativos</button>
+      <button class='tab-btn' onclick="showTab('hours', this)">⏰ Horários</button>
+      <button class='tab-btn' onclick="showTab('capital', this)">💰 Capital</button>
+    </div>
+  </div>
+
+  <div id='decision' class='panel active'>
+    <div class='panel-card'>
+      <div class='panel-head'>
+        <div>
+          <div class='section-title'>Decisão do momento</div>
+          <div class='section-sub'>Alpha Hive AI • leitura premium de execução</div>
+        </div>
+      </div>
+      <div id='decision_container'></div>
+    </div>
+  </div>
+
+  <div id='signals' class='panel'>
+    <div class='panel-card'>
+      <div class='panel-head'>
+        <div>
+          <div class='section-title'>Sinais atuais</div>
+          <div class='section-sub'>Oportunidades coerentes com a decisão dominante</div>
+        </div>
+      </div>
+      <div id='signals_container'></div>
+    </div>
+  </div>
+
+  <div id='history' class='panel'>
+    <div class='panel-card'>
+      <div class='panel-head'>
+        <div>
+          <div class='section-title'>Histórico recente</div>
+          <div class='section-sub'>Últimos sinais e decisões registradas</div>
+        </div>
+      </div>
+      <div id='history_container'></div>
+    </div>
+  </div>
+
+  <div id='stats' class='panel'>
+    <div class='panel-card'>
+      <div class='panel-head'>
+        <div>
+          <div class='section-title'>Aprendizado da IA</div>
+          <div class='section-sub'>Acompanhamento do motor adaptativo</div>
+        </div>
+      </div>
+      <div class='performance-panel'>
+        <div class='performance-ring'>
+          <div class='ring' id='stats_ring' style='--pct:0'>
+            <div class='ring-value' id='ring_value'>0%</div>
+          </div>
+          <div class='performance-copy'>
+            <div class='big' id='stats_winrate_big'>0%</div>
+            <div class='small'>win rate operacional em tempo real</div>
+          </div>
+        </div>
+        <div class='stats-highlight'>
+          <div class='stats-pill'><div class='num' id='stats_total'></div><div class='cap'>avaliadas</div></div>
+          <div class='stats-pill'><div class='num' id='stats_winrate'></div><div class='cap'>win rate</div></div>
+          <div class='stats-pill'><div class='num' id='stats_wins'></div><div class='cap'>wins</div></div>
+          <div class='stats-pill'><div class='num' id='stats_loss'></div><div class='cap'>loss</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id='assets' class='panel'>
+    <div class='panel-card'>
+      <div class='panel-head'>
+        <div>
+          <div class='section-title'>Melhores ativos</div>
+          <div class='section-sub'>Ranking baseado no histórico avaliado</div>
+        </div>
+      </div>
+      <div id='assets_container'></div>
+    </div>
+  </div>
+
+  <div id='hours' class='panel'>
+    <div class='panel-card'>
+      <div class='panel-head'>
+        <div>
+          <div class='section-title'>Melhores horários</div>
+          <div class='section-sub'>Faixas com melhor resposta operacional</div>
+        </div>
+      </div>
+      <div id='hours_container'></div>
+    </div>
+  </div>
+
+  <div id='capital' class='panel'>
+    <div class='panel-card capital-card'>
+      <div class='panel-head'>
+        <div>
+          <div class='section-title'>Capital da IA</div>
+          <div class='section-sub'>Informe a banca para a IA gerir como patrimônio próprio</div>
+        </div>
+      </div>
+      <div class='form-grid'>
+        <div class='field'><label>Capital atual</label><input id='capital_current' type='number' step='0.01' min='0'></div>
+        <div class='field'><label>Pico da banca</label><input id='capital_peak' type='number' step='0.01' min='0'></div>
+        <div class='field'><label>PnL do dia</label><input id='daily_pnl' type='number' step='0.01'></div>
+        <div class='field'><label>Sequência</label><input id='streak' type='number' step='1'></div>
+        <div class='field'><label>Meta diária %</label><input id='daily_target_pct' type='number' step='0.1' min='0'></div>
+        <div class='field'><label>Stop diário %</label><input id='daily_stop_pct' type='number' step='0.1' min='0'></div>
+      </div>
+      <button id='saveCapitalBtn' class='save-btn' onclick='saveCapitalState()'>Salvar capital</button>
+      <div id='capital_status' class='save-status'></div>
+    </div>
+  </div>
+
+  <div class='footer-note'>Alpha Hive AI • layout premium mobile inspirado na referência aprovada, mantendo a base operacional da sua IA intacta.</div>
 </div>
 
 <script>
@@ -1197,14 +1407,14 @@ function updateLiveBadge(meta){
   const age = parseInt(meta.last_scan_age_seconds || 0, 10) || 0;
   const staleAfter = parseInt(meta.ui_stale_after_seconds || staleAfterSeconds || 95, 10) || 95;
   if(meta.scan_in_progress){
-    el.textContent = "● Escaneando";
+    el.textContent = "● ESCANEANDO";
     return;
   }
   if(age >= staleAfter){
-    el.textContent = `● Scan atrasado (${formatAge(age)})`;
+    el.textContent = `● SCAN ATRASADO (${formatAge(age)})`;
     return;
   }
-  el.textContent = age <= 5 ? "● LIVE" : `● Atualizado há ${formatAge(age)}`;
+  el.textContent = age <= 5 ? "● AO VIVO" : `● ATUALIZADO ${formatAge(age)}`;
 }
 
 function showTab(tabId, btn){
@@ -1212,6 +1422,7 @@ function showTab(tabId, btn){
   document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
   document.getElementById(tabId).classList.add('active');
   btn.classList.add('active');
+  window.scrollTo({top: 0, behavior: 'smooth'});
 }
 
 function escapeHtml(text){
@@ -1235,83 +1446,143 @@ function renderSummaryBlock(title, main, points){
   const pointsHtml = rows.length
     ? `<div class="summary-points">${rows.map(p => `<div class="summary-point"><span class="summary-point-dot">•</span><span>${escapeHtml(p)}</span></div>`).join("")}</div>`
     : "";
-  return `<div class="summary-box"><div class="summary-kicker">${safeTitle}</div><div class="summary-main">${safeMain}</div>${pointsHtml}</div>`;
+  return `<div class="summary-box"><div class="summary-kicker-sm">${safeTitle}</div><div class="summary-main">${safeMain}</div>${pointsHtml}</div>`;
 }
 
 function renderAdvancedDetails(reasonText){
   return `<details class="advanced-box"><summary>Detalhes avançados</summary><div class="reason">${formatText(reasonText || "Sem detalhes")}</div></details>`;
 }
 
+function decisionBadgeData(d){
+  let badgeClass = "hold";
+  let badgeText = d.decision || "OBSERVAR";
+  if(d.decision === "NAO_OPERAR"){
+    badgeClass = "hold";
+    badgeText = "NÃO OPERAR";
+  }else if(d.decision === "ENTRADA_FORTE"){
+    badgeClass = d.direction === "PUT" ? "put" : "call";
+    badgeText = "ENTRADA FORTE";
+  }else if(d.decision === "ENTRADA_CAUTELA"){
+    badgeClass = d.direction === "PUT" ? "put" : "call";
+    badgeText = "ENTRADA CAUTELA";
+  }else if(d.decision === "OBSERVAR"){
+    badgeClass = "hold";
+    badgeText = "OBSERVAR";
+  }else if(d.direction === "CALL"){
+    badgeClass = "call";
+  }else if(d.direction === "PUT"){
+    badgeClass = "put";
+  }
+  return {badgeClass, badgeText};
+}
+
 function renderSignals(signals){
-  const c=document.getElementById("signals_container");
-  if(!signals||signals.length===0){
-    c.innerHTML='<div class="empty">Nenhum sinal disponível agora.</div>';
+  const c = document.getElementById("signals_container");
+  if(!signals || signals.length === 0){
+    c.innerHTML = '<div class="empty">Nenhum sinal premium disponível agora.</div>';
     return;
   }
-  let h="";
-  signals.forEach(s=>{
-    const bc=s.signal==="CALL"?"call":"put";
-    h+=`<div class="signal-card"><div class="signal-head"><div class="asset">${escapeHtml(s.asset)}</div><div class="badge ${bc}">${escapeHtml(s.signal)}${s.confidence_label ? " • " + escapeHtml(s.confidence_label) : ""}</div></div><div class="signal-grid"><div class="mini"><div class="mini-label">Score</div><div class="mini-value">${escapeHtml(s.score)}</div></div><div class="mini"><div class="mini-label">Confiança</div><div class="mini-value">${escapeHtml(s.confidence)}%</div></div><div class="mini"><div class="mini-label">Análise</div><div class="mini-value">${escapeHtml(s.analysis_time)}</div></div><div class="mini"><div class="mini-label">Entrada</div><div class="mini-value">${escapeHtml(s.entry_time)}</div></div><div class="mini"><div class="mini-label">Expiração</div><div class="mini-value">${escapeHtml(s.expiration)}</div></div><div class="mini"><div class="mini-label">Regime</div><div class="mini-value">${escapeHtml(s.regime)}</div></div></div>${renderSummaryBlock(s.summary_title, s.summary_main, s.summary_points)}${renderAdvancedDetails(s.reason_text)}</div>`;
+  let h = "";
+  signals.forEach(s => {
+    const badge = decisionBadgeData({decision: s.signal === 'CALL' || s.signal === 'PUT' ? 'ENTRADA_CAUTELA' : 'OBSERVAR', direction: s.signal});
+    h += `
+      <div class="signal-card">
+        <div class="signal-head">
+          <div>
+            <div class="asset">${escapeHtml(s.asset)}</div>
+            <div class="section-sub">Sinal coerente com a leitura dominante</div>
+          </div>
+          <div class="badge ${badge.badgeClass}">${escapeHtml(s.signal)}${s.confidence_label ? " • " + escapeHtml(s.confidence_label) : ""}</div>
+        </div>
+        <div class="signal-grid">
+          <div class="mini"><div class="mini-label">Score</div><div class="mini-value">${escapeHtml(s.score)}</div></div>
+          <div class="mini"><div class="mini-label">Confiança</div><div class="mini-value">${escapeHtml(s.confidence)}%</div></div>
+          <div class="mini"><div class="mini-label">Análise</div><div class="mini-value">${escapeHtml(s.analysis_time)}</div></div>
+          <div class="mini"><div class="mini-label">Entrada</div><div class="mini-value">${escapeHtml(s.entry_time)}</div></div>
+          <div class="mini"><div class="mini-label">Expiração</div><div class="mini-value">${escapeHtml(s.expiration)}</div></div>
+          <div class="mini"><div class="mini-label">Regime</div><div class="mini-value">${escapeHtml(s.regime)}</div></div>
+        </div>
+        ${renderSummaryBlock(s.summary_title, s.summary_main, s.summary_points)}
+        ${renderAdvancedDetails(s.reason_text)}
+      </div>`;
   });
-  c.innerHTML=h;
+  c.innerHTML = h;
 }
 
 function renderDecision(d){
-  const c=document.getElementById("decision_container");
-  if(!d||!d.decision){
-    c.innerHTML='<div class="empty">Sem decisão disponível agora.</div>';
+  const c = document.getElementById("decision_container");
+  if(!d || !d.decision){
+    c.innerHTML = '<div class="empty">Sem decisão disponível agora.</div>';
     return;
   }
-  let badgeClass="hold";
-  let badgeText=d.decision;
-  if(d.direction==="CALL") badgeClass="call";
-  else if(d.direction==="PUT") badgeClass="put";
-
-  if(d.decision==="NAO_OPERAR") badgeText="NÃO OPERAR";
-  else if(d.decision==="ENTRADA_FORTE") badgeText=(d.direction||"CALL")+" • FORTE";
-  else if(d.decision==="ENTRADA_CAUTELA") badgeText=(d.direction||"CALL")+" • CAUTELA";
-  else if(d.decision==="OBSERVAR") badgeText=(d.direction||"CALL")+" • OBSERVAR";
-
-  c.innerHTML=`<div class="decision-card"><div class="decision-head"><div class="asset">${escapeHtml(d.asset||"MERCADO")}</div><div class="badge ${badgeClass}">${escapeHtml(badgeText)}</div></div><div class="signal-grid"><div class="mini"><div class="mini-label">Score</div><div class="mini-value">${escapeHtml(d.score)}</div></div><div class="mini"><div class="mini-label">Confiança</div><div class="mini-value">${escapeHtml(d.confidence)}%</div></div><div class="mini"><div class="mini-label">Análise</div><div class="mini-value">${escapeHtml(d.analysis_time)}</div></div><div class="mini"><div class="mini-label">Entrada</div><div class="mini-value">${escapeHtml(d.entry_time)}</div></div><div class="mini"><div class="mini-label">Expiração</div><div class="mini-value">${escapeHtml(d.expiration)}</div></div><div class="mini"><div class="mini-label">Regime</div><div class="mini-value">${escapeHtml(d.regime)}</div></div></div>${renderSummaryBlock(d.summary_title, d.summary_main, d.summary_points)}<div class="advanced-tip">A inteligência continua completa; aqui a interface mostra só o resumo operacional.</div>${renderAdvancedDetails(d.reason_text)}</div>`;
+  const badge = decisionBadgeData(d);
+  const stake = d.stake_suggested ?? d.stake ?? d.stake_value ?? 0;
+  const stakeLabel = Number(stake) > 0 ? `Stake ${escapeHtml(stake)}` : 'Stake 0.0';
+  c.innerHTML = `
+    <div class="decision-card">
+      <div class="decision-head">
+        <div>
+          <div class="asset">${escapeHtml(d.asset || 'MERCADO')}</div>
+          <div class="section-sub">Motor inteligente de decisão • leitura operacional premium</div>
+        </div>
+        <div class="badge ${badge.badgeClass}">${escapeHtml(badge.badgeText)}</div>
+      </div>
+      <div class="summary-box" style="margin-top:0;margin-bottom:12px">
+        <div class="summary-kicker-sm">Decisão executiva</div>
+        <div class="summary-main">${escapeHtml(badge.badgeText)} • ${escapeHtml(stakeLabel)}</div>
+      </div>
+      <div class="signal-grid">
+        <div class="mini"><div class="mini-label">Score</div><div class="mini-value">${escapeHtml(d.score)}</div></div>
+        <div class="mini"><div class="mini-label">Confiança</div><div class="mini-value">${escapeHtml(d.confidence)}%</div></div>
+        <div class="mini"><div class="mini-label">Análise</div><div class="mini-value">${escapeHtml(d.analysis_time)}</div></div>
+        <div class="mini"><div class="mini-label">Entrada</div><div class="mini-value">${escapeHtml(d.entry_time)}</div></div>
+        <div class="mini"><div class="mini-label">Expiração</div><div class="mini-value">${escapeHtml(d.expiration)}</div></div>
+        <div class="mini"><div class="mini-label">Regime</div><div class="mini-value">${escapeHtml(d.regime)}</div></div>
+      </div>
+      ${renderSummaryBlock(d.summary_title, d.summary_main, d.summary_points)}
+      <div class="advanced-tip">A inteligência completa continua ativa; aqui a interface mostra o resumo operacional com visual premium.</div>
+      ${renderAdvancedDetails(d.reason_text)}
+    </div>`;
 }
 
 function renderHistory(history){
-  const c=document.getElementById("history_container");
-  if(!history||history.length===0){
-    c.innerHTML='<div class="empty">Ainda não há histórico salvo.</div>';
+  const c = document.getElementById("history_container");
+  if(!history || history.length === 0){
+    c.innerHTML = '<div class="empty">Ainda não há histórico salvo.</div>';
     return;
   }
-  let h="";
-  history.forEach(x=>{
-    h+=`<div class="list-card"><div class="list-title">${escapeHtml(x.asset)} • ${escapeHtml(x.signal)}</div><div class="muted">Análise: ${escapeHtml(x.analysis_time)}<br>Entrada: ${escapeHtml(x.entry_time)}<br>Expiração: ${escapeHtml(x.expiration)}<br>Score: ${escapeHtml(x.score)} • Confiança: ${escapeHtml(x.confidence)}% • Fonte: ${escapeHtml(x.provider)}</div></div>`;
+  let h = "";
+  history.forEach(x => {
+    const signalClass = x.signal === 'CALL' ? 'call' : (x.signal === 'PUT' ? 'put' : 'hold');
+    h += `<div class="list-card"><div class="signal-head"><div class="list-title">${escapeHtml(x.asset)}</div><div class="badge ${signalClass}">${escapeHtml(x.signal)}</div></div><div class="muted">Análise: ${escapeHtml(x.analysis_time)}<br>Entrada: ${escapeHtml(x.entry_time)}<br>Expiração: ${escapeHtml(x.expiration)}<br>Score: <b>${escapeHtml(x.score)}</b> • Confiança: <b>${escapeHtml(x.confidence)}%</b> • Fonte: ${escapeHtml(x.provider)}</div></div>`;
   });
-  c.innerHTML=h;
+  c.innerHTML = h;
 }
 
 function renderBestAssets(bestAssets){
-  const c=document.getElementById("assets_container");
-  if(!bestAssets||bestAssets.length===0){
-    c.innerHTML='<div class="empty">Ainda sem dados suficientes.</div>';
+  const c = document.getElementById("assets_container");
+  if(!bestAssets || bestAssets.length === 0){
+    c.innerHTML = '<div class="empty">Ainda sem dados suficientes.</div>';
     return;
   }
-  let h="";
-  bestAssets.forEach(x=>{
-    h+=`<div class="list-card"><div class="list-title">${escapeHtml(x.asset)}</div><div class="muted">Win rate: <b>${escapeHtml(x.winrate)}%</b><br>Trades: <b>${escapeHtml(x.total)}</b><br>Wins: <b>${escapeHtml(x.wins)}</b></div></div>`;
+  let h = "";
+  bestAssets.forEach(x => {
+    h += `<div class="list-card"><div class="list-title">${escapeHtml(x.asset)}</div><div class="muted">Win rate: <b>${escapeHtml(x.winrate)}%</b><br>Trades: <b>${escapeHtml(x.total)}</b><br>Wins: <b>${escapeHtml(x.wins)}</b></div></div>`;
   });
-  c.innerHTML=h;
+  c.innerHTML = h;
 }
 
 function renderBestHours(bestHours){
-  const c=document.getElementById("hours_container");
-  if(!bestHours||bestHours.length===0){
-    c.innerHTML='<div class="empty">Ainda sem dados suficientes.</div>';
+  const c = document.getElementById("hours_container");
+  if(!bestHours || bestHours.length === 0){
+    c.innerHTML = '<div class="empty">Ainda sem dados suficientes.</div>';
     return;
   }
-  let h="";
-  bestHours.forEach(x=>{
-    h+=`<div class="list-card"><div class="list-title">${escapeHtml(x.hour)}</div><div class="muted">Win rate: <b>${escapeHtml(x.winrate)}%</b><br>Trades: <b>${escapeHtml(x.total)}</b><br>Wins: <b>${escapeHtml(x.wins)}</b></div></div>`;
+  let h = "";
+  bestHours.forEach(x => {
+    h += `<div class="list-card"><div class="list-title">${escapeHtml(x.hour)}</div><div class="muted">Win rate: <b>${escapeHtml(x.winrate)}%</b><br>Trades: <b>${escapeHtml(x.total)}</b><br>Wins: <b>${escapeHtml(x.wins)}</b></div></div>`;
   });
-  c.innerHTML=h;
+  c.innerHTML = h;
 }
 
 function safeSnapshot(d){
@@ -1364,8 +1635,12 @@ function applySnapshot(d){
   document.getElementById("asset_count").textContent = s.meta.asset_count;
   document.getElementById("stats_total").textContent = s.learning_stats.total;
   document.getElementById("stats_winrate").textContent = s.learning_stats.winrate + "%";
+  document.getElementById("stats_winrate_big").textContent = s.learning_stats.winrate + "%";
+  document.getElementById("ring_value").textContent = s.learning_stats.winrate + "%";
   document.getElementById("stats_wins").textContent = s.learning_stats.wins;
   document.getElementById("stats_loss").textContent = s.learning_stats.loss;
+  const ring = document.getElementById("stats_ring");
+  if(ring) ring.style.setProperty('--pct', parseFloat(s.learning_stats.winrate || 0));
   renderSignals(s.signals);
   renderDecision(s.current_decision);
   renderHistory(s.history);
@@ -1437,10 +1712,8 @@ async function saveCapitalState(){
   const btn = document.getElementById("saveCapitalBtn");
   const status = document.getElementById("capital_status");
   if(!btn || !status) return;
-
   btn.disabled = true;
   status.textContent = "Salvando...";
-
   const payload = {
     capital_current: parseFloat(document.getElementById("capital_current").value || 0),
     capital_peak: parseFloat(document.getElementById("capital_peak").value || 0),
@@ -1449,7 +1722,6 @@ async function saveCapitalState(){
     daily_target_pct: parseFloat(document.getElementById("daily_target_pct").value || 2),
     daily_stop_pct: parseFloat(document.getElementById("daily_stop_pct").value || 3)
   };
-
   try{
     const r = await fetch("/capital-state", {
       method: "POST",
@@ -1464,26 +1736,14 @@ async function saveCapitalState(){
     console.error("capital save error", e);
     status.textContent = "Erro ao salvar capital";
   }
-
-  setTimeout(()=>{
-    btn.disabled = false;
-  },800);
+  setTimeout(()=>{ btn.disabled = false; }, 800);
 }
 
 document.addEventListener("DOMContentLoaded", function(){
-  try{
-    applySnapshot(initialSnapshot);
-  }catch(e){
-    console.error("initial snapshot error", e);
-    applySnapshot(null);
-  }
+  try{ applySnapshot(initialSnapshot); }catch(e){ console.error("initial snapshot error", e); applySnapshot(null); }
   startAutoRefresh();
   setTimeout(()=>refreshSnapshot(true), 250);
-  document.addEventListener("visibilitychange", function(){
-    if(!document.hidden){
-      refreshSnapshot(true);
-    }
-  });
+  document.addEventListener("visibilitychange", function(){ if(!document.hidden){ refreshSnapshot(true); } });
 });
 </script>
 </body>
