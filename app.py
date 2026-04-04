@@ -550,6 +550,14 @@ def decorate_decision(decision):
 
 
 def _decision_uid(item):
+    explicit_uid = str(item.get('uid') or '').strip()
+    if explicit_uid:
+        return explicit_uid
+
+    unique_issued_at = str(item.get('issued_at_ms') or item.get('issued_at') or '').strip()
+    if unique_issued_at:
+        return f"{item.get('asset','N/A')}-{item.get('direction','N/A')}-{item.get('analysis_time','--:--')}-{item.get('entry_time','--:--')}-{item.get('expiration','--:--')}-{unique_issued_at}"
+
     return f"{item.get('asset','N/A')}-{item.get('direction','N/A')}-{item.get('analysis_time','--:--')}-{item.get('entry_time','--:--')}-{item.get('expiration','--:--')}"
 
 
@@ -564,8 +572,10 @@ def enqueue_pending_decision(current_decision, matched_market):
     pending = read_json(PENDING_DECISIONS_FILE, [])
     existing = {item.get("uid") for item in pending if isinstance(item, dict)}
 
+    issued_at_ms = int(time.time() * 1000)
     record = {
-        "uid": _decision_uid(current_decision),
+        "issued_at_ms": issued_at_ms,
+        "uid": _decision_uid({**current_decision, "issued_at_ms": issued_at_ms}),
         "asset": current_decision.get("asset"),
         "signal": current_decision.get("direction"),
         "score": current_decision.get("score", 0),
@@ -648,6 +658,7 @@ def register_all_learning_outputs(signal, result_data):
             print("MarketProfileEngine register error:", e, flush=True)
 
     journal_payload = {
+        "uid": signal.get("uid"),
         "asset": signal.get("asset"),
         "signal": signal.get("signal"),
         "strategy_name": strategy_name,
@@ -713,10 +724,11 @@ def register_all_learning_outputs(signal, result_data):
 def process_pending_decisions(market):
     pending = read_json(PENDING_DECISIONS_FILE, [])
     if not pending:
-        return
+        return {"processed": 0, "remaining": 0}
 
     now_str = now_brazil().strftime("%H:%M")
     still_pending = []
+    processed = 0
 
     for signal in pending:
         expiration = str(signal.get("expiration", "99:99"))
@@ -724,7 +736,14 @@ def process_pending_decisions(market):
             still_pending.append(signal)
             continue
 
-        matched_asset = next((item for item in market if item.get("asset") == signal.get("asset")), None)
+        signal_asset = str(signal.get("asset") or "").strip().upper()
+        matched_asset = next(
+            (
+                item for item in market
+                if str(item.get("asset") or "").strip().upper() == signal_asset
+            ),
+            None,
+        )
         if not matched_asset:
             still_pending.append(signal)
             continue
@@ -732,10 +751,12 @@ def process_pending_decisions(market):
         result_data = result_engine.evaluate_expired_signal(signal, matched_asset.get("candles", []))
         if result_data:
             register_all_learning_outputs(signal, result_data)
+            processed += 1
         else:
             still_pending.append(signal)
 
     write_json(PENDING_DECISIONS_FILE, still_pending)
+    return {"processed": processed, "remaining": len(still_pending)}
 
 
 def save_state(signals, history, current_decision, scans):
@@ -971,7 +992,7 @@ def run_scan_once(trigger="loop"):
     try:
         market = scanner.scan_assets()
 
-        process_pending_decisions(market)
+        pending_summary = process_pending_decisions(market)
         capital_auto_tracker.update()
 
         decision_candidates = []
@@ -1008,6 +1029,10 @@ def run_scan_once(trigger="loop"):
         current_decision = dict(display_decision)
         raw_signals = signal_engine.generate_signals_from_decision(best_decision_raw)
         signals = normalize_signals(raw_signals if raw_signals else [])
+        for signal in signals:
+            signal["analysis_time"] = current_decision.get("analysis_time")
+            signal["entry_time"] = current_decision.get("entry_time")
+            signal["expiration"] = current_decision.get("expiration")
         enqueue_pending_decision(current_decision, matched_market)
 
         history = read_json(SIGNAL_HISTORY_FILE, [])
@@ -1025,7 +1050,7 @@ def run_scan_once(trigger="loop"):
         except Exception as e:
             print(f"storage governance warning: {e}", flush=True)
         try:
-            if _should_refresh_ui_cache_after_scan():
+            if (pending_summary or {}).get("processed", 0) > 0 or _should_refresh_ui_cache_after_scan():
                 get_ui_cache(force=True)
         except Exception as e:
             print(f"ui_cache refresh warning: {e}", flush=True)

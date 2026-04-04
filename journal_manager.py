@@ -54,6 +54,9 @@ class JournalManager:
         os.replace(tmp, JOURNAL_FILE)
 
     def _trade_id(self, trade):
+        explicit_uid = str(trade.get("uid") or "").strip()
+        if explicit_uid:
+            return explicit_uid
         return f"{trade.get('asset')}-{trade.get('signal')}-{trade.get('analysis_time')}-{trade.get('entry_time')}-{trade.get('expiration')}"
 
     def _valid_trades(self):
