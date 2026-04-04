@@ -1,23 +1,18 @@
 from datetime import datetime, timedelta, timezone
 
-from decision_engine import DecisionEngine
-
 BRAZIL_TZ = timezone(timedelta(hours=-3))
 
 
 class SignalEngine:
     """
-    Confluência total entre aba Sinais e aba Decisão.
+    A aba Sinais não possui inteligência própria.
 
-    Ajuste desta versão:
-    - aba Sinais mostra resumo curto dos motivos
-    - aba Decisão continua mostrando todos os motivos completos
-    - sem alterar app.py
+    Ela apenas transforma a decisão já escolhida pela aba Decisão em um payload
+    enxuto para renderização. Se a decisão não for operável, não existe sinal.
     """
 
     def __init__(self, learning_engine):
         self.learning_engine = learning_engine
-        self.decision_engine = DecisionEngine(learning_engine)
 
     def _now_brazil(self):
         return datetime.now(BRAZIL_TZ)
@@ -31,7 +26,8 @@ class SignalEngine:
 
     def _is_operable(self, decision):
         return (
-            str(decision.get("decision", "")).upper() in ("ENTRADA_FORTE", "ENTRADA_CAUTELA")
+            isinstance(decision, dict)
+            and str(decision.get("decision", "")).upper() in ("ENTRADA_FORTE", "ENTRADA_CAUTELA")
             and str(decision.get("direction", "")).upper() in ("CALL", "PUT")
         )
 
@@ -107,72 +103,24 @@ class SignalEngine:
             "confidence": int(decision.get("confidence", 50)),
             "confidence_label": self._confidence_label(int(decision.get("confidence", 50))),
             "timeframe": "M1",
-            "provider": "decision_engine",
+            "provider": "decision_tab_mirror",
             "reason": summary_reasons,
             "regime": regime,
         }
+
+    def generate_signals_from_decision(self, decision):
+        if not self._is_operable(decision):
+            return []
+
+        asset_name = decision.get("asset", "N/A")
+        return [self._decision_to_signal(asset_name, decision)]
 
     def generate_signals_from_decisions(self, decision_candidates):
         if not decision_candidates:
             return []
 
-        candidates = []
-        for asset_name, decision in [
-            (decision.get("asset", "N/A"), decision) if isinstance(decision, dict) else ("N/A", {})
-            for decision, _item in decision_candidates
-        ]:
-            if self._is_operable(decision):
-                candidates.append((asset_name, decision))
-
-        if not candidates:
-            return []
-
-        candidates.sort(
-            key=lambda x: (
-                float(x[1].get("score", 0.0)),
-                int(x[1].get("confidence", 0))
-            ),
-            reverse=True
-        )
-
-        best_asset, best_decision = candidates[0]
-        return [self._decision_to_signal(best_asset, best_decision)]
+        best_decision = decision_candidates[0][0] if isinstance(decision_candidates[0], tuple) else decision_candidates[0]
+        return self.generate_signals_from_decision(best_decision)
 
     def generate_signals(self, market_data):
-        if not market_data:
-            return []
-
-        analysis_time = self._now_brazil().strftime("%H:%M")
-        weekday = self._now_brazil().weekday()
-
-        candidates = []
-
-        for asset in market_data:
-            asset_name = asset.get("asset", "N/A")
-            indicators = dict(asset.get("indicators", {}))
-            indicators.setdefault("analysis_time", analysis_time)
-            indicators.setdefault("weekday", weekday)
-
-            try:
-                decision = self.decision_engine.decide(asset_name, indicators)
-            except Exception:
-                continue
-
-            if self._is_operable(decision):
-                candidates.append((asset_name, decision))
-
-        if not candidates:
-            return []
-
-        candidates.sort(
-            key=lambda x: (
-                float(x[1].get("score", 0.0)),
-                int(x[1].get("confidence", 0))
-            ),
-            reverse=True
-        )
-
-        best_asset, best_decision = candidates[0]
-        signal = self._decision_to_signal(best_asset, best_decision)
-
-        return [signal]
+        return []

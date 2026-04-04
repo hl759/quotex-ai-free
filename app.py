@@ -988,25 +988,10 @@ def run_scan_once(trigger="loop"):
             decision["provider"] = item.get("provider", "auto")
             decision_candidates.append((decision, item))
 
-        raw_signals = signal_engine.generate_signals_from_decisions(decision_candidates)
-        signals = normalize_signals(raw_signals if raw_signals else [])
-
         if decision_candidates:
             decision_candidates.sort(key=lambda x: (x[0].get("score", 0), x[0].get("confidence", 0)), reverse=True)
-            best_display_decision_raw, best_display_market = decision_candidates[0]
-            tradeable_candidates = [
-                (d, m) for d, m in decision_candidates
-                if str(d.get("decision", "")).upper() in ("ENTRADA_FORTE", "ENTRADA_CAUTELA")
-            ]
-            if tradeable_candidates:
-                best_tradeable_decision_raw, best_tradeable_market = tradeable_candidates[0]
-            else:
-                best_tradeable_decision_raw, best_tradeable_market = None, None
-            best_decision_raw = best_tradeable_decision_raw or best_display_decision_raw
-            matched_market = best_tradeable_market or best_display_market
+            best_decision_raw, matched_market = decision_candidates[0]
         else:
-            best_display_decision_raw, best_display_market = None, None
-            best_tradeable_decision_raw, best_tradeable_market = None, None
             best_decision_raw, matched_market = {
                 "asset": "MERCADO",
                 "decision": "NAO_OPERAR",
@@ -1019,8 +1004,10 @@ def run_scan_once(trigger="loop"):
                 "strategy_name": "none"
             }, None
 
-        display_decision = decorate_decision(best_display_decision_raw or best_decision_raw)
-        current_decision = decorate_decision(best_decision_raw)
+        display_decision = decorate_decision(best_decision_raw)
+        current_decision = dict(display_decision)
+        raw_signals = signal_engine.generate_signals_from_decision(best_decision_raw)
+        signals = normalize_signals(raw_signals if raw_signals else [])
         enqueue_pending_decision(current_decision, matched_market)
 
         history = read_json(SIGNAL_HISTORY_FILE, [])
@@ -1044,7 +1031,7 @@ def run_scan_once(trigger="loop"):
             print(f"ui_cache refresh warning: {e}", flush=True)
 
         print(
-            f"Scan #{scan_count} | Signals: {len(signals)} | Decision: {display_decision['decision']} | Asset: {display_decision['asset']} | Executable: {current_decision['decision']} | Trigger: {trigger} | Took: {last_scan_duration_ms}ms",
+            f"Scan #{scan_count} | Signals: {len(signals)} | Decision: {display_decision['decision']} | Asset: {display_decision['asset']} | Execution Mirror: {current_decision['decision']} | Trigger: {trigger} | Took: {last_scan_duration_ms}ms",
             flush=True
         )
         return {
