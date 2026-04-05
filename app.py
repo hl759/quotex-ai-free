@@ -1299,6 +1299,7 @@ body:after{width:220px;height:220px;right:-80px;top:340px;background:rgba(111,74
 .dock-btn{flex:0 0 auto;min-width:104px;padding:14px 16px;font-weight:850;font-size:15px;color:#c5d4e9;cursor:pointer;pointer-events:auto;touch-action:manipulation;-webkit-tap-highlight-color:transparent;white-space:nowrap}
 .dock-btn.active{background:linear-gradient(180deg,rgba(37,99,103,.98),rgba(15,57,67,.98));color:#ecfffc;border-color:rgba(95,245,220,.24);box-shadow:0 0 0 1px rgba(95,245,220,.12),0 0 28px rgba(95,245,220,.12)}
 .panel{display:none;margin-top:18px;position:relative;z-index:1}.panel.active{display:block}
+.click-safe,.right-stack,#refreshBtn,.bottom-dock,.dock-btn,.save-btn{position:relative;z-index:9999;pointer-events:auto;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
 .list-grid{display:grid;gap:12px}
 .decision-solo{padding:16px}
 .empty{padding:24px;text-align:center;border-radius:18px;border:1px dashed rgba(108,145,185,.22);color:#93a7c5;background:rgba(8,16,27,.72)}
@@ -1347,7 +1348,7 @@ body:after{width:220px;height:220px;right:-80px;top:340px;background:rgba(111,74
       </div>
       <div class='right-stack'>
         <div id='liveBadge' class='live-pill'>● ESCANEANDO</div>
-        <button id='refreshBtn' class='refresh-btn' onclick='refreshSnapshot(false)'>↻ Atualizar agora</button>
+        <button id='refreshBtn' type='button' class='refresh-btn click-safe' onclick='refreshSnapshot(false)'>↻ Atualizar agora</button>
       </div>
     </div>
 
@@ -1392,7 +1393,7 @@ body:after{width:220px;height:220px;right:-80px;top:340px;background:rgba(111,74
           <div>
             <div class='learn-title'>Aprendizado da IA<small>Acompanhamento do motor adaptativo</small></div>
           </div>
-          <button class='ghost-btn' onclick="showTab('stats', document.querySelector('[data-tab=stats]'))">Ver detalhes</button>
+          <button type='button' class='ghost-btn click-safe' onclick="showTab('stats', document.querySelector('[data-tab=stats]'))">Ver detalhes</button>
         </div>
         <div class='learn-stats'>
           <div class='stat-tile'><div class='label'>Total avaliadas</div><div class='value' id='stats_total'>0</div></div>
@@ -1433,14 +1434,14 @@ body:after{width:220px;height:220px;right:-80px;top:340px;background:rgba(111,74
     </div>
 
     <div class='bottom-dock'>
-      <button class='dock-btn active' data-tab='dashboard' onclick="showTab('dashboard', this)">⌂ Dashboard</button>
-      <button class='dock-btn' data-tab='signals' onclick="showTab('signals', this)">⚡ Sinais</button>
-      <button class='dock-btn' data-tab='decision' onclick="showTab('decision', this)">🧠 Decisão</button>
-      <button class='dock-btn' data-tab='history' onclick="showTab('history', this)">📋 Histórico</button>
-      <button class='dock-btn' data-tab='stats' onclick="showTab('stats', this)">📊 Stats</button>
-      <button class='dock-btn' data-tab='assets' onclick="showTab('assets', this)">🏆 Ativos</button>
-      <button class='dock-btn' data-tab='hours' onclick="showTab('hours', this)">⏰ Horários</button>
-      <button class='dock-btn' data-tab='capital' onclick="showTab('capital', this)">💰 Capital</button>
+      <button type='button' class='dock-btn active click-safe' data-tab='dashboard' onclick="showTab('dashboard', this)">⌂ Dashboard</button>
+      <button type='button' class='dock-btn click-safe' data-tab='signals' onclick="showTab('signals', this)">⚡ Sinais</button>
+      <button type='button' class='dock-btn click-safe' data-tab='decision' onclick="showTab('decision', this)">🧠 Decisão</button>
+      <button type='button' class='dock-btn click-safe' data-tab='history' onclick="showTab('history', this)">📋 Histórico</button>
+      <button type='button' class='dock-btn click-safe' data-tab='stats' onclick="showTab('stats', this)">📊 Stats</button>
+      <button type='button' class='dock-btn click-safe' data-tab='assets' onclick="showTab('assets', this)">🏆 Ativos</button>
+      <button type='button' class='dock-btn click-safe' data-tab='hours' onclick="showTab('hours', this)">⏰ Horários</button>
+      <button type='button' class='dock-btn click-safe' data-tab='capital' onclick="showTab('capital', this)">💰 Capital</button>
     </div>
 
     <div class='panel' id='signals'>
@@ -1472,7 +1473,7 @@ body:after{width:220px;height:220px;right:-80px;top:340px;background:rgba(111,74
           <div class='field'><label>Meta diária %</label><input id='daily_target_pct' type='number' step='0.1' min='0'></div>
           <div class='field'><label>Stop diário %</label><input id='daily_stop_pct' type='number' step='0.1' min='0'></div>
         </div>
-        <button id='saveCapitalBtn' class='save-btn' onclick='saveCapitalState()'>Salvar capital</button>
+        <button id='saveCapitalBtn' type='button' class='save-btn click-safe' onclick='saveCapitalState()'>Salvar capital</button>
         <div id='capital_status' class='save-status'></div>
       </div>
     </div>
@@ -1772,6 +1773,33 @@ async function saveCapitalState(){
   }catch(e){ status.textContent='Erro ao salvar capital.'; }
   setTimeout(()=>{ btn.disabled=false; },800);
 }
+function bindInteractiveFallbacks(){
+  const bindTap = (el, fn)=>{
+    if(!el || el.dataset.boundTap === '1') return;
+    let lastTs = 0;
+    const wrapped = (ev)=>{
+      const now = Date.now();
+      if(now - lastTs < 350) return;
+      lastTs = now;
+      try{ ev.preventDefault(); ev.stopPropagation(); }catch(e){}
+      try{ fn(ev); }catch(err){ console.error('tap handler error', err); }
+    };
+    el.addEventListener('touchend', wrapped, {passive:false});
+    el.addEventListener('click', wrapped);
+    el.dataset.boundTap = '1';
+  };
+
+  bindTap(document.getElementById('refreshBtn'), ()=>refreshSnapshot(false));
+  bindTap(document.getElementById('saveCapitalBtn'), ()=>saveCapitalState());
+  document.querySelectorAll('.dock-btn[data-tab]').forEach(btn=>{
+    bindTap(btn, ()=>activateTab(btn.dataset.tab, btn));
+  });
+}
+
+window.addEventListener('pageshow', function(){
+  try{ bindInteractiveFallbacks(); }catch(e){ console.error('pageshow bind error', e); }
+});
+
 document.addEventListener('DOMContentLoaded', function(){
   const defaultTabBtn = document.querySelector('.dock-btn[data-tab="dashboard"]');
   activateTab('dashboard', defaultTabBtn);
@@ -1783,6 +1811,7 @@ document.addEventListener('DOMContentLoaded', function(){
       return;
     }
   });
+  try{ bindInteractiveFallbacks(); }catch(e){ console.error('bind fallback error', e); }
   try{ applySnapshot(initialSnapshot); }catch(e){ console.error('initial snapshot error', e); applySnapshot(null); }
   startAutoRefresh();
   startBootstrapPolling();
