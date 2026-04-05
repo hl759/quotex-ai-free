@@ -1920,6 +1920,9 @@ async function refreshSnapshot(silent){
     const resp = await fetch('/snapshot', {cache:'no-store', signal:controller.signal});
     const data = await resp.json();
     applySnapshot(data);
+    if(document.querySelector('.dock-btn.active') && document.querySelector('.dock-btn.active').dataset.tab === 'futures'){
+      refreshFuturesPanel();
+    }
     await maybeTriggerScan(data.meta || {});
   }catch(e){ console.error('snapshot refresh error', e); }
   finally{
@@ -1983,7 +1986,6 @@ document.addEventListener('DOMContentLoaded', function(){
   startAutoRefresh();
   startBootstrapPolling();
   setTimeout(()=>refreshSnapshot(true), 250);
-  setTimeout(()=>refreshFuturesPanel(), 450);
   document.addEventListener('visibilitychange', function(){ if(!document.hidden){ refreshSnapshot(true); } });
 });
 </script>
@@ -1994,8 +1996,9 @@ document.addEventListener('DOMContentLoaded', function(){
 
 @app.route("/")
 def home():
+    # Faz o primeiro bootstrap de forma síncrona para evitar tela vazia na carga inicial.
+    ensure_bootstrap_snapshot(force=True)
     ensure_scanner_started()
-    ensure_bootstrap_snapshot(force=False)
     return render_template_string(HTML_PAGE, snapshot_json=safe_dumps(get_snapshot(light=True)))
 
 
@@ -2036,9 +2039,12 @@ def capital_state_post():
 
 @app.route("/snapshot")
 def snapshot():
-    ensure_scanner_started()
     ensure_bootstrap_snapshot(force=False)
+    ensure_scanner_started()
     try:
+        signals, history, current_decision, meta = ensure_bootstrap_snapshot(force=False)
+        if _snapshot_is_empty(signals, history, current_decision, meta) and not scan_in_progress:
+            signals, history, current_decision, meta = ensure_bootstrap_snapshot(force=True)
         return jsonify(to_jsonable(get_snapshot(light=True)))
     except Exception as e:
         print(f"snapshot route warning: {e}", flush=True)
