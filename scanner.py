@@ -74,7 +74,7 @@ class MarketScanner:
             return results
 
         interval = self._normalize_interval(timeframe)
-        max_workers = max(1, min(6, len(active_assets)))
+        max_workers = max(1, min(3, len(active_assets)))
         ordered = []
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_map = {

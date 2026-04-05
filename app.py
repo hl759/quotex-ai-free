@@ -1900,14 +1900,7 @@ function applySnapshot(d){
   startAutoRefresh();
 }
 async function maybeTriggerScan(meta){
-  const age = parseInt((meta && meta.last_scan_age_seconds) || 0, 10) || 0;
-  const count = parseInt((meta && meta.scan_count) || 0, 10) || 0;
-  const missingBootstrap = !meta || !meta.last_scan || meta.last_scan === '--' || count <= 0;
-  if(!missingBootstrap && age < (parseInt((meta && meta.ui_force_scan_after_seconds) || forceScanAfterSeconds || 110, 10) || 110)) return;
-  const now = Date.now();
-  if(now - lastAutoRunScanAt < (missingBootstrap ? 5000 : 45000)) return;
-  lastAutoRunScanAt = now;
-  try{ await fetch('/run-scan', {cache:'no-store'}); }catch(e){ console.error('run-scan warning', e); }
+  return;
 }
 async function refreshSnapshot(silent){
   if(refreshInFlight) return;
@@ -1920,9 +1913,6 @@ async function refreshSnapshot(silent){
     const resp = await fetch('/snapshot', {cache:'no-store', signal:controller.signal});
     const data = await resp.json();
     applySnapshot(data);
-    if(document.querySelector('.dock-btn.active') && document.querySelector('.dock-btn.active').dataset.tab === 'futures'){
-      refreshFuturesPanel();
-    }
     await maybeTriggerScan(data.meta || {});
   }catch(e){ console.error('snapshot refresh error', e); }
   finally{
@@ -1996,8 +1986,6 @@ document.addEventListener('DOMContentLoaded', function(){
 
 @app.route("/")
 def home():
-    # Faz o primeiro bootstrap de forma síncrona para evitar tela vazia na carga inicial.
-    ensure_bootstrap_snapshot(force=True)
     ensure_scanner_started()
     return render_template_string(HTML_PAGE, snapshot_json=safe_dumps(get_snapshot(light=True)))
 
@@ -2039,12 +2027,8 @@ def capital_state_post():
 
 @app.route("/snapshot")
 def snapshot():
-    ensure_bootstrap_snapshot(force=False)
     ensure_scanner_started()
     try:
-        signals, history, current_decision, meta = ensure_bootstrap_snapshot(force=False)
-        if _snapshot_is_empty(signals, history, current_decision, meta) and not scan_in_progress:
-            signals, history, current_decision, meta = ensure_bootstrap_snapshot(force=True)
         return jsonify(to_jsonable(get_snapshot(light=True)))
     except Exception as e:
         print(f"snapshot route warning: {e}", flush=True)
