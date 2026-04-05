@@ -1,0 +1,43 @@
+trading_platform_upgrade/
+├── api/
+│   ├── server.py
+│   └── routes/
+│       ├── system.py
+│       ├── binary.py
+│       ├── futures.py
+│       └── analytics.py
+├── core/
+│   ├── runtime.py
+│   ├── logging_config.py
+│   └── security.py
+├── services/
+│   ├── credential_vault.py
+│   ├── binance_futures_client.py
+│   ├── execution_service.py
+│   └── futures_bot_service.py
+├── ui/
+│   ├── app/
+│   │   ├── layout.tsx
+│   │   ├── page.tsx
+│   │   └── globals.css
+│   ├── components/
+│   │   └── trading-dashboard.tsx
+│   ├── package.json
+│   ├── tsconfig.json
+│   └── next.config.mjs
+├── docker/
+│   ├── backend.Dockerfile
+│   └── ui.Dockerfile
+├── logs/
+│   └── .gitkeep
+├── app.py                        # legacy UI/backend preserved
+├── scanner.py                    # upgraded for timeframe-aware scans
+├── futures_module.py             # upgraded futures planner
+├── binary_options_module.py      # preserved binary wrapper
+├── self_optimization_engine.py   # shared adaptive intelligence
+├── run_platform.py               # new backend entrypoint
+├── docker-compose.yml
+├── .env.example
+├── README_PLATFORM.md
+├── ARCHITECTURE_PLATFORM.md
+└── FILE_STRUCTURE_PLATFORM.txt

@@ -35,8 +35,8 @@ class MarketScanner:
             return True
         return False
 
-    def _scan_one(self, asset):
-        candles = self.data.get_candles(asset, interval="1min", outputsize=50)
+    def _scan_one(self, asset, interval="1min", outputsize=50):
+        candles = self.data.get_candles(asset, interval=interval, outputsize=outputsize)
         if not candles:
             return None
         indicators = self.indicators.calculate(candles)
@@ -47,11 +47,11 @@ class MarketScanner:
             "provider": self.data.last_provider_used.get(asset, "auto"),
         }
 
-    def scan_assets(self):
+    def scan_assets(self, interval="1min", outputsize=50, assets=None):
         results = []
-        active_assets = list(CRYPTO_ASSETS)
+        active_assets = list(assets) if assets else list(CRYPTO_ASSETS)
 
-        if self._should_scan_slow_now():
+        if assets is None and self._should_scan_slow_now():
             active_assets += self._get_slow_batch()
 
         if not active_assets:
@@ -60,7 +60,7 @@ class MarketScanner:
         max_workers = max(1, min(6, len(active_assets)))
         ordered = []
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_map = {executor.submit(self._scan_one, asset): idx for idx, asset in enumerate(active_assets)}
+            future_map = {executor.submit(self._scan_one, asset, interval, outputsize): idx for idx, asset in enumerate(active_assets)}
             for future in as_completed(future_map):
                 idx = future_map[future]
                 try:

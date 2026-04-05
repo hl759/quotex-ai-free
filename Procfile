@@ -1,1 +1,1 @@
-web: gunicorn --workers 1 --threads 1 --bind 0.0.0.0:$PORT app:app
+web: gunicorn -w 2 -k gthread --threads 4 -b 0.0.0.0:$PORT api.server:app

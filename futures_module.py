@@ -480,8 +480,9 @@ class FuturesModule:
                 "note": f"Falha no envio live: {e}",
             }
 
-    def analyze_market(self, market, capital_state=None, asset=None, execution_mode=None):
+    def analyze_market(self, market, capital_state=None, asset=None, execution_mode=None, timeframe="1min", strategy_name="institutional_confluence"):
         execution_mode = str(execution_mode or self.default_execution_mode or "paper").lower()
+        timeframe = str(timeframe or "1min")
         candidates = []
         for item in market or []:
             symbol = str(item.get("asset") or "").upper()
@@ -491,7 +492,7 @@ class FuturesModule:
                 continue
             candles = item.get("candles")
             if not candles:
-                candles = self.data_manager.get_candles(symbol, interval="1min", outputsize=120)
+                candles = self.data_manager.get_candles(symbol, interval=timeframe, outputsize=120)
             if not candles:
                 continue
             features = self._feature_pack(candles)
@@ -536,7 +537,7 @@ class FuturesModule:
         adjustment = self.self_optimizer.get_mode_adjustments(
             mode="FUTURES_MODE",
             asset=symbol,
-            setup_type="futures_confluence",
+            setup_type=str(strategy_name or "institutional_confluence"),
             market_condition=market_condition,
             analysis_time=analysis_time,
             capital_state=capital_state,
@@ -573,7 +574,7 @@ class FuturesModule:
             reasons.append("Gestão adaptativa bloqueou nova posição")
 
         plan = {
-            "uid": f"FUT|{symbol}|{analysis_time}|{best['direction']}",
+            "uid": f"FUT|{symbol}|{timeframe}|{analysis_time}|{best['direction']}",
             "mode": "FUTURES_MODE",
             "status": status,
             "asset": symbol,
@@ -586,7 +587,8 @@ class FuturesModule:
             "confidence": confidence,
             "reason": reasons[:8],
             "provider": best.get("provider", "auto"),
-            "setup_type": "futures_confluence",
+            "timeframe": timeframe,
+            "setup_type": str(strategy_name or "institutional_confluence"),
             "market_condition": market_condition,
             "confluence_score": score,
             "analysis_time": analysis_time,
