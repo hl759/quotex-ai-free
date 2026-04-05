@@ -21,6 +21,10 @@ from edge_audit import EdgeAuditEngine
 from edge_guard import EdgeGuardEngine
 from specialist_reputation_engine import SpecialistReputationEngine
 from storage_governance_engine import StorageGovernanceEngine
+from binary_options_module import BinaryOptionsModule
+from futures_module import FuturesModule
+from self_optimization_engine import SelfOptimizationEngine
+from hybrid_mode_router import HybridModeRouter
 
 try:
     from adaptive_engine import AdaptiveEngine
@@ -61,6 +65,9 @@ journal = JournalManager()
 edge_audit = EdgeAuditEngine()
 edge_guard = EdgeGuardEngine()
 specialist_reputation = SpecialistReputationEngine()
+self_optimization_engine = SelfOptimizationEngine()
+binary_options_module = BinaryOptionsModule(decision_engine, signal_engine, self_optimizer=self_optimization_engine)
+futures_module = FuturesModule(data_manager, self_optimizer=self_optimization_engine)
 
 LATEST_SIGNALS_FILE = os.path.join(STATE_DIR, "latest_signals.json")
 SIGNAL_HISTORY_FILE = os.path.join(STATE_DIR, "history.json")
@@ -180,6 +187,9 @@ def ensure_capital_state():
     return current
 
 
+hybrid_mode_router = None
+
+
 def load_capital_state():
     default_state = {
         "capital_current": 0.0,
@@ -226,6 +236,15 @@ def save_capital_state(data):
     except Exception as e:
         print(f"save_capital_state store write warning: {e}", flush=True)
     return merged
+
+
+hybrid_mode_router = HybridModeRouter(
+    binary_module=binary_options_module,
+    futures_module=futures_module,
+    self_optimizer=self_optimization_engine,
+    scanner=scanner,
+    capital_state_loader=load_capital_state,
+)
 
 
 class CapitalAutoTracker:
@@ -719,6 +738,11 @@ def register_all_learning_outputs(signal, result_data):
         specialist_reputation.register_trade(signal, result_data)
     except Exception as e:
         print("Specialist reputation register error:", e, flush=True)
+
+    try:
+        self_optimization_engine.register_binary_outcome(signal, result_data)
+    except Exception as e:
+        print("SelfOptimizationEngine binary register error:", e, flush=True)
 
 
 def process_pending_decisions(market):
@@ -1861,6 +1885,93 @@ def storage_health():
     else:
         report = storage_governance.collect_report()
     return jsonify(to_jsonable(report))
+
+
+@app.route("/mode", methods=["GET", "POST"])
+def mode_route():
+    ensure_scanner_started()
+    if request.method == "POST":
+        payload = request.get_json(silent=True) or {}
+        desired_mode = str(payload.get("mode") or request.args.get("mode") or "BINARY_MODE").upper().strip()
+        try:
+            active = hybrid_mode_router.set_active_mode(desired_mode)
+            return jsonify({"ok": True, "active_mode": active, "supported_modes": ["BINARY_MODE", "FUTURES_MODE"]})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e), "supported_modes": ["BINARY_MODE", "FUTURES_MODE"]}), 400
+    snapshot_data = hybrid_mode_router.snapshot()
+    return jsonify(to_jsonable({
+        "ok": True,
+        "active_mode": snapshot_data.get("active_mode"),
+        "supported_modes": snapshot_data.get("supported_modes", ["BINARY_MODE", "FUTURES_MODE"]),
+        "self_optimization": snapshot_data.get("self_optimization", {}),
+    }))
+
+
+@app.route("/hybrid/snapshot", methods=["GET"])
+def hybrid_snapshot_route():
+    ensure_scanner_started()
+    return jsonify(to_jsonable(hybrid_mode_router.snapshot()))
+
+
+@app.route("/hybrid/run-scan", methods=["GET", "POST"])
+def hybrid_run_scan_route():
+    ensure_scanner_started()
+    payload = request.get_json(silent=True) or {}
+    mode = str(payload.get("mode") or request.args.get("mode") or hybrid_mode_router.get_active_mode()).upper().strip()
+    asset = str(payload.get("asset") or request.args.get("asset") or "").upper().strip() or None
+    execution_mode = str(payload.get("execution_mode") or request.args.get("execution_mode") or "paper").lower().strip()
+    result = hybrid_mode_router.run_once(mode=mode, asset=asset, execution_mode=execution_mode)
+    return jsonify(to_jsonable({
+        "ok": True,
+        "active_mode": mode,
+        "result": result,
+        "self_optimization": self_optimization_engine.summary(),
+    }))
+
+
+@app.route("/binary/analyze", methods=["GET"])
+def binary_analyze_route():
+    ensure_scanner_started()
+    market = scanner.scan_assets()
+    result = binary_options_module.analyze_market(market, capital_state=load_capital_state())
+    return jsonify(to_jsonable(result))
+
+
+@app.route("/futures/analyze", methods=["GET"])
+def futures_analyze_route():
+    ensure_scanner_started()
+    asset = str(request.args.get("asset") or "").upper().strip() or None
+    execution_mode = str(request.args.get("execution_mode") or "paper").lower().strip()
+    market = scanner.scan_assets()
+    result = futures_module.analyze_market(market, capital_state=load_capital_state(), asset=asset, execution_mode=execution_mode)
+    return jsonify(to_jsonable(result))
+
+
+@app.route("/futures/execute", methods=["POST"])
+def futures_execute_route():
+    ensure_scanner_started()
+    payload = request.get_json(silent=True) or {}
+    plan = payload.get("plan") if isinstance(payload.get("plan"), dict) else None
+    asset = str(payload.get("asset") or "").upper().strip() or None
+    execution_mode = str(payload.get("execution_mode") or "paper").lower().strip()
+    live = execution_mode == "live"
+    if not plan:
+        market = scanner.scan_assets()
+        plan = futures_module.analyze_market(market, capital_state=load_capital_state(), asset=asset, execution_mode=execution_mode)
+    execution = futures_module.execute_signal(plan, live=live)
+    return jsonify(to_jsonable({"ok": True, "plan": plan, "execution": execution}))
+
+
+@app.route("/futures/close-report", methods=["POST"])
+def futures_close_report_route():
+    ensure_scanner_started()
+    payload = request.get_json(silent=True) or {}
+    trade = self_optimization_engine.register_futures_close(payload)
+    return jsonify(to_jsonable({
+        "ok": trade is not None,
+        "registered_trade": trade,
+        "self_optimization": self_optimization_engine.summary(),
+    }))
 
 
 if __name__ == "__main__":
