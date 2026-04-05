@@ -22,6 +22,23 @@ from edge_guard import EdgeGuardEngine
 from specialist_reputation_engine import SpecialistReputationEngine
 from storage_governance_engine import StorageGovernanceEngine
 
+FUTURES_AVAILABLE = True
+FUTURES_IMPORT_ERROR = ""
+try:
+    from futures_module import FuturesModule
+    from self_optimization_engine import SelfOptimizationEngine
+    from binance_runtime_vault import BinanceRuntimeVault
+    from binance_broker_service import BinanceBrokerService
+    from futures_bot_service import FuturesBotService
+except Exception as futures_import_exc:
+    FUTURES_AVAILABLE = False
+    FUTURES_IMPORT_ERROR = str(futures_import_exc)
+    FuturesModule = None
+    SelfOptimizationEngine = None
+    BinanceRuntimeVault = None
+    BinanceBrokerService = None
+    FuturesBotService = None
+
 try:
     from adaptive_engine import AdaptiveEngine
 except Exception:
@@ -61,6 +78,10 @@ journal = JournalManager()
 edge_audit = EdgeAuditEngine()
 edge_guard = EdgeGuardEngine()
 specialist_reputation = SpecialistReputationEngine()
+self_optimization_engine = SelfOptimizationEngine() if FUTURES_AVAILABLE and SelfOptimizationEngine else None
+futures_module = FuturesModule(data_manager, self_optimizer=self_optimization_engine) if FUTURES_AVAILABLE and FuturesModule else None
+binance_vault = BinanceRuntimeVault() if FUTURES_AVAILABLE and BinanceRuntimeVault else None
+binance_broker = BinanceBrokerService(binance_vault) if FUTURES_AVAILABLE and BinanceBrokerService and binance_vault else None
 
 LATEST_SIGNALS_FILE = os.path.join(STATE_DIR, "latest_signals.json")
 SIGNAL_HISTORY_FILE = os.path.join(STATE_DIR, "history.json")
@@ -226,6 +247,32 @@ def save_capital_state(data):
     except Exception as e:
         print(f"save_capital_state store write warning: {e}", flush=True)
     return merged
+
+
+def futures_feature_status():
+    return {
+        "available": bool(FUTURES_AVAILABLE and futures_module is not None and self_optimization_engine is not None),
+        "import_error": str(FUTURES_IMPORT_ERROR or ""),
+    }
+
+
+def sync_futures_credentials_from_vault():
+    if not futures_feature_status()["available"] or not binance_vault or not futures_module:
+        return {"api_key": None, "api_secret": None, "testnet": False}
+    resolved = binance_vault.resolve()
+    futures_module.api_key = str(resolved.get("api_key") or "").strip()
+    futures_module.api_secret = str(resolved.get("api_secret") or "").strip()
+    futures_module.base_url = "https://testnet.binancefuture.com" if resolved.get("testnet") else "https://fapi.binance.com"
+    return resolved
+
+
+def _futures_disabled_response(status=503):
+    payload = {"ok": False, "error": "futures_module_unavailable", "details": futures_feature_status()}
+    return jsonify(to_jsonable(payload)), status
+
+
+sync_futures_credentials_from_vault()
+futures_bot_service = FuturesBotService(scanner, futures_module, load_capital_state) if futures_feature_status()["available"] and FuturesBotService else None
 
 
 class CapitalAutoTracker:
@@ -720,6 +767,11 @@ def register_all_learning_outputs(signal, result_data):
     except Exception as e:
         print("Specialist reputation register error:", e, flush=True)
 
+    try:
+        self_optimization_engine.register_binary_outcome(signal, result_data)
+    except Exception as e:
+        print("Self optimization binary register error:", e, flush=True)
+
 
 def process_pending_decisions(market):
     pending = read_json(PENDING_DECISIONS_FILE, [])
@@ -1118,6 +1170,38 @@ def ensure_scanner_started():
         scanner_started = True
 
 
+def _snapshot_is_empty(signals=None, history=None, current_decision=None, meta=None):
+    signals = signals if isinstance(signals, list) else []
+    history = history if isinstance(history, list) else []
+    current_decision = current_decision if isinstance(current_decision, dict) else {}
+    meta = meta if isinstance(meta, dict) else {}
+
+    if signals or history:
+        return False
+    if str(current_decision.get("decision") or "").strip():
+        return False
+    if str(current_decision.get("asset") or "").strip():
+        return False
+    if int(meta.get("scan_count", 0) or 0) > 0:
+        return False
+    return True
+
+
+def ensure_bootstrap_snapshot(force=False):
+    signals, history, current_decision, meta = load_state()
+    if scan_in_progress:
+        return signals, history, current_decision, meta
+    if force or _snapshot_is_empty(signals, history, current_decision, meta):
+        result = run_scan_once("bootstrap")
+        if not result.get("ok") and result.get("reason") != "scan_already_running":
+            try:
+                print(f"bootstrap snapshot warning: {result}", flush=True)
+            except Exception:
+                pass
+        signals, history, current_decision, meta = load_state()
+    return signals, history, current_decision, meta
+
+
 HTML_PAGE = """
 <!DOCTYPE html>
 <html lang='pt-BR'>
@@ -1263,7 +1347,7 @@ body:after{width:220px;height:220px;right:-80px;top:340px;background:rgba(111,74
 .summary-points{display:grid;gap:9px}.summary-point{display:flex;gap:10px;color:#cce2ff;line-height:1.45}.summary-point .dot{color:var(--teal)}
 .advanced-tip{margin-top:12px;color:#8298b6;font-size:12px;line-height:1.45}
 .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.field{display:grid;gap:6px}.field label{font-size:12px;color:#9ab0ce}.field input{width:100%;border-radius:16px;padding:13px 14px;background:#0b1626;border:1px solid rgba(106,225,255,.12);color:#f4f9ff;font-size:15px;outline:none}.save-btn{margin-top:12px;padding:14px 18px;font-weight:900;color:#eff9ff;cursor:pointer;background:linear-gradient(180deg,#1a4f88,#11355a);pointer-events:auto;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+.field{display:grid;gap:6px}.field label{font-size:12px;color:#9ab0ce}.field input,.field select{width:100%;border-radius:16px;padding:13px 14px;background:#0b1626;border:1px solid rgba(106,225,255,.12);color:#f4f9ff;font-size:15px;outline:none}.save-btn{margin-top:12px;padding:14px 18px;font-weight:900;color:#eff9ff;cursor:pointer;background:linear-gradient(180deg,#1a4f88,#11355a);pointer-events:auto;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
 .save-status{margin-top:10px;color:#94abca;font-size:13px}
 .hidden{display:none!important}
 @media (min-width: 700px){
@@ -1384,6 +1468,7 @@ body:after{width:220px;height:220px;right:-80px;top:340px;background:rgba(111,74
       <button class='dock-btn' data-tab='stats' onclick="showTab('stats', this)">📊 Stats</button>
       <button class='dock-btn' data-tab='assets' onclick="showTab('assets', this)">🏆 Ativos</button>
       <button class='dock-btn' data-tab='hours' onclick="showTab('hours', this)">⏰ Horários</button>
+      <button class='dock-btn' data-tab='futures' onclick="showTab('futures', this)">🚀 Futures</button>
       <button class='dock-btn' data-tab='capital' onclick="showTab('capital', this)">💰 Capital</button>
     </div>
 
@@ -1405,6 +1490,47 @@ body:after{width:220px;height:220px;right:-80px;top:340px;background:rgba(111,74
     <div class='panel' id='hours'>
       <div class='panel-card'><div class='panel-head'><h3>Melhores horários</h3><div class='mini-badge'>Janela ideal</div></div><div id='hours_container' class='list-grid'></div></div>
     </div>
+    <div class='panel' id='futures'>
+      <div class='panel-card'>
+        <div class='panel-head'><h3>Binance Futures</h3><div class='mini-badge'>Automação</div></div>
+        <div class='form-grid'>
+          <div class='field'><label>API Key</label><input id='f_api_key' type='text' autocomplete='off' placeholder='Backend only'></div>
+          <div class='field'><label>Secret Key</label><input id='f_api_secret' type='password' autocomplete='off' placeholder='Backend only'></div>
+          <div class='field'><label>Symbol</label><input id='f_symbol' type='text' value='BTCUSDT'></div>
+          <div class='field'><label>Timeframe</label><select id='f_timeframe'><option value='1m'>1 minuto</option><option value='5m'>5 minutos</option></select></div>
+          <div class='field'><label>Execution</label><select id='f_execution_mode'><option value='paper'>Paper</option><option value='live'>Live</option></select></div>
+          <div class='field'><label>Testnet</label><select id='f_testnet'><option value='1'>Ligado</option><option value='0'>Desligado</option></select></div>
+          <div class='field'><label>Leverage</label><input id='f_leverage' type='number' min='1' step='1' value='3'></div>
+          <div class='field'><label>Risco por trade %</label><input id='f_risk_pct' type='number' min='0.1' step='0.1' value='0.6'></div>
+          <div class='field'><label>Max trades/dia</label><input id='f_max_trades' type='number' min='1' step='1' value='3'></div>
+          <div class='field'><label>Poll segundos</label><input id='f_poll_seconds' type='number' min='20' step='5' value='45'></div>
+        </div>
+        <div style='display:flex;gap:10px;flex-wrap:wrap;margin-top:12px'>
+          <button class='save-btn' onclick='futuresConnect()'>Conectar</button>
+          <button class='ghost-btn' onclick='futuresDisconnect()'>Desconectar</button>
+          <button class='ghost-btn' onclick='futuresAnalyze()'>Analisar agora</button>
+          <button class='save-btn' onclick='futuresStartBot()'>Start bot</button>
+          <button class='ghost-btn' onclick='futuresStopBot()'>Stop bot</button>
+        </div>
+        <div id='f_connection_status' class='save-status'></div>
+      </div>
+      <div class='panel-card' style='margin-top:14px'>
+        <div class='panel-head'><h3>Plano atual</h3><div class='mini-badge'>Execução</div></div>
+        <div id='f_plan_container'></div>
+      </div>
+      <div class='panel-card' style='margin-top:14px'>
+        <div class='panel-head'><h3>Conta e posições</h3><div class='mini-badge'>Exchange</div></div>
+        <div id='f_account_container' class='advanced-tip'>Sem conexão.</div>
+        <div id='f_positions_container' class='list-grid' style='margin-top:12px'></div>
+        <div id='f_orders_container' class='list-grid' style='margin-top:12px'></div>
+      </div>
+      <div class='panel-card' style='margin-top:14px'>
+        <div class='panel-head'><h3>Bot status</h3><div class='mini-badge'>Runtime</div></div>
+        <div id='f_bot_status' class='advanced-tip'>Parado.</div>
+        <div id='f_bot_logs' class='advanced-tip' style='margin-top:12px;white-space:pre-wrap'></div>
+      </div>
+    </div>
+
     <div class='panel' id='capital'>
       <div class='panel-card'>
         <div class='panel-head'><h3>Capital da IA</h3><div class='mini-badge'>Mesa premium</div></div>
@@ -1446,6 +1572,7 @@ function activateTab(tabId, btn){
 }
 function showTab(tabId, btn){
   activateTab(tabId, btn);
+  if(tabId==='futures'){ refreshFuturesPanel(); }
 }
 window.showTab = showTab;
 window.refreshSnapshot = refreshSnapshot;
@@ -1603,6 +1730,130 @@ function renderStatsPanel(s){
       <div class='performance-card'><div class='panel-head'><h3>Resumo</h3><div class='mini-badge'>Live</div></div><div class='advanced-tip'>Scans: <b>${escapeHtml(s.meta.scan_count)}</b><br>Sinais: <b>${escapeHtml(s.meta.signal_count)}</b><br>Ativos: <b>${escapeHtml(s.meta.asset_count)}</b><br>Último scan: <b>${escapeHtml(s.meta.last_scan)}</b></div></div>
     </div>`;
 }
+async function getJSON(url){
+  const resp = await fetch(url, {cache:'no-store'});
+  return await resp.json();
+}
+async function postJSON(url, payload){
+  const resp = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload || {})});
+  return await resp.json();
+}
+function renderFuturesPlan(plan, execution){
+  const c=document.getElementById('f_plan_container'); if(!c) return;
+  if(!plan){ c.innerHTML="<div class='empty'>Sem plano futures no momento.</div>"; return; }
+  const tps = Array.isArray(plan.take_profits) ? plan.take_profits : [];
+  const rr = plan.risk_reward != null ? plan.risk_reward : '--';
+  const execNote = execution && execution.note ? execution.note : 'Sem execução recente.';
+  c.innerHTML=`<div class='signal-card'>
+    <div class='signal-head'><div class='asset-name'>${escapeHtml(plan.asset || 'ATIVO')}</div><div class='badge ${String(plan.direction||'').toUpperCase()==='SHORT'?'put':'call'}'>${escapeHtml(plan.direction || plan.status || 'READY')}</div></div>
+    <div class='grid-2'>
+      <div class='mini-card'><div class='label'>Entry</div><div class='value'>${escapeHtml(plan.entry || '--')}</div></div>
+      <div class='mini-card'><div class='label'>Stop</div><div class='value'>${escapeHtml(plan.stop_loss || '--')}</div></div>
+      <div class='mini-card'><div class='label'>RR</div><div class='value'>${escapeHtml(rr)}</div></div>
+      <div class='mini-card'><div class='label'>Lev.</div><div class='value'>${escapeHtml(plan.leverage || '--')}x</div></div>
+      <div class='mini-card'><div class='label'>Confiança</div><div class='value'>${escapeHtml(plan.confidence || '--')}%</div></div>
+      <div class='mini-card'><div class='label'>Qty</div><div class='value'>${escapeHtml(plan.quantity || '--')}</div></div>
+    </div>
+    ${tps.length ? `<div class='advanced-tip' style='margin-top:12px'>${tps.map(tp=>`${escapeHtml(tp.label)}: <b>${escapeHtml(tp.price)}</b> (${escapeHtml(tp.size_pct)}%)`).join('<br>')}</div>` : ''}
+    <div class='advanced-tip' style='margin-top:12px'>${escapeHtml(execNote)}</div>
+  </div>`;
+}
+function renderFuturesAccount(data){
+  const c=document.getElementById('f_account_container'); if(!c) return;
+  if(!data || !data.ok){ c.innerHTML=`Sem conexão ativa com a Binance Futures.`; return; }
+  const s=data.summary || {};
+  c.innerHTML=`Saldo USDT: <b>${escapeHtml((s.total_wallet_balance ?? 0).toFixed ? s.total_wallet_balance.toFixed(2) : s.total_wallet_balance)}</b><br>Disponível: <b>${escapeHtml((s.available_balance ?? 0).toFixed ? s.available_balance.toFixed(2) : s.available_balance)}</b><br>Unrealized PnL: <b>${escapeHtml((s.total_unrealized_profit ?? 0).toFixed ? s.total_unrealized_profit.toFixed(2) : s.total_unrealized_profit)}</b>`;
+}
+function renderFuturesPositions(data){
+  const c=document.getElementById('f_positions_container'); if(!c) return;
+  const rows=(data && data.positions) || [];
+  if(!rows.length){ c.innerHTML="<div class='advanced-tip'>Sem posições abertas.</div>"; return; }
+  c.innerHTML=rows.map(p=>`<div class='history-card'><b>${escapeHtml(p.symbol)}</b> • ${escapeHtml(p.side)}<br>Entry: <b>${escapeHtml(p.entry_price)}</b> • Mark: <b>${escapeHtml(p.mark_price)}</b><br>PnL: <b>${escapeHtml(p.unrealized_pnl)}</b> • Liq: <b>${escapeHtml(p.liquidation_price)}</b> • Lev: <b>${escapeHtml(p.leverage)}x</b></div>`).join('');
+}
+function renderFuturesOrders(data){
+  const c=document.getElementById('f_orders_container'); if(!c) return;
+  const rows=(data && data.orders) || [];
+  if(!rows.length){ c.innerHTML="<div class='advanced-tip'>Sem ordens abertas.</div>"; return; }
+  c.innerHTML=rows.slice(0,8).map(o=>`<div class='history-card'><b>${escapeHtml(o.symbol)}</b> • ${escapeHtml(o.side)} • ${escapeHtml(o.type)}<br>Status: <b>${escapeHtml(o.status)}</b> • Qty: <b>${escapeHtml(o.orig_qty)}</b><br>Price: <b>${escapeHtml(o.price)}</b> • Stop: <b>${escapeHtml(o.stop_price)}</b></div>`).join('');
+}
+function renderFuturesBot(bot){
+  const s=document.getElementById('f_bot_status');
+  const l=document.getElementById('f_bot_logs');
+  if(!s || !l) return;
+  if(!bot){ s.textContent='Sem status do bot.'; l.textContent=''; return; }
+  s.innerHTML=`Running: <b>${escapeHtml(bot.running ? 'SIM' : 'NÃO')}</b><br>Symbol: <b>${escapeHtml(bot.symbol || '--')}</b> • Timeframe: <b>${escapeHtml(bot.timeframe || '--')}</b><br>Mode: <b>${escapeHtml(bot.execution_mode || '--')}</b> • Último run: <b>${escapeHtml(bot.last_run_at || '--')}</b>${bot.last_error ? `<br>Erro: <b>${escapeHtml(bot.last_error)}</b>` : ''}`;
+  const logs = Array.isArray(bot.logs) ? bot.logs.slice(-8).reverse() : [];
+  l.textContent = logs.map(x=>`[${x.level}] ${x.ts} - ${x.message}`).join('
+');
+}
+async function refreshFuturesPanel(){
+  try{
+    const status = await getJSON('/futures/status');
+    const conn=status.connection || {};
+    const c=document.getElementById('f_connection_status');
+    if(c){ c.innerHTML=`Conexão: <b>${conn.connected ? 'ATIVA' : 'INATIVA'}</b> • Origem: <b>${escapeHtml(conn.source || 'none')}</b> • Testnet: <b>${conn.testnet ? 'SIM' : 'NÃO'}</b> ${conn.api_key_masked ? '• Key: <b>'+escapeHtml(conn.api_key_masked)+'</b>' : ''}`; }
+    renderFuturesBot(status.bot || {});
+    const last = status.bot && status.bot.last_result ? status.bot.last_result : {};
+    renderFuturesPlan(last.plan || null, last.execution || null);
+    if(conn.connected){
+      const symbol=(document.getElementById('f_symbol') && document.getElementById('f_symbol').value) || 'BTCUSDT';
+      const [account, positions, orders] = await Promise.all([
+        getJSON('/futures/account'),
+        getJSON('/futures/positions'),
+        getJSON('/futures/orders?symbol='+encodeURIComponent(symbol))
+      ]);
+      renderFuturesAccount(account); renderFuturesPositions(positions); renderFuturesOrders(orders);
+    } else {
+      renderFuturesAccount(null); renderFuturesPositions({positions:[]}); renderFuturesOrders({orders:[]});
+    }
+  }catch(e){ console.error('refresh futures error', e); }
+}
+async function futuresConnect(){
+  const api_key=(document.getElementById('f_api_key').value || '').trim();
+  const api_secret=(document.getElementById('f_api_secret').value || '').trim();
+  const testnet=(document.getElementById('f_testnet').value || '1');
+  const out=document.getElementById('f_connection_status');
+  if(out) out.textContent='Conectando...';
+  try{
+    const data = await postJSON('/futures/connect', {api_key, api_secret, testnet});
+    if(out) out.textContent = data.ok ? 'Conectado com sucesso.' : 'Falha ao conectar.';
+    await refreshFuturesPanel();
+  }catch(e){ if(out) out.textContent='Erro ao conectar.'; }
+}
+async function futuresDisconnect(){
+  await postJSON('/futures/disconnect', {});
+  await refreshFuturesPanel();
+}
+async function futuresAnalyze(){
+  const symbol=(document.getElementById('f_symbol').value || 'BTCUSDT').trim().toUpperCase();
+  const timeframe=(document.getElementById('f_timeframe').value || '1m').trim();
+  const execution_mode=(document.getElementById('f_execution_mode').value || 'paper').trim();
+  const data = await getJSON(`/futures/analyze?asset=${encodeURIComponent(symbol)}&timeframe=${encodeURIComponent(timeframe)}&execution_mode=${encodeURIComponent(execution_mode)}&leverage=${encodeURIComponent(document.getElementById('f_leverage').value || '3')}&risk_per_trade_pct=${encodeURIComponent(document.getElementById('f_risk_pct').value || '0.6')}&max_trades_per_day=${encodeURIComponent(document.getElementById('f_max_trades').value || '3')}`);
+  renderFuturesPlan(data, null);
+}
+async function futuresStartBot(){
+  const payload={
+    symbol:(document.getElementById('f_symbol').value || 'BTCUSDT').trim().toUpperCase(),
+    timeframe:(document.getElementById('f_timeframe').value || '1m').trim(),
+    execution_mode:(document.getElementById('f_execution_mode').value || 'paper').trim(),
+    leverage:parseFloat(document.getElementById('f_leverage').value || 3),
+    risk_per_trade_pct:parseFloat(document.getElementById('f_risk_pct').value || 0.6),
+    max_trades_per_day:parseInt(document.getElementById('f_max_trades').value || 3,10) || 3,
+    poll_seconds:parseInt(document.getElementById('f_poll_seconds').value || 45,10) || 45
+  };
+  await postJSON('/futures/bot/start', payload);
+  await refreshFuturesPanel();
+}
+async function futuresStopBot(){
+  await postJSON('/futures/bot/stop', {});
+  await refreshFuturesPanel();
+}
+window.futuresConnect=futuresConnect;
+window.futuresDisconnect=futuresDisconnect;
+window.futuresAnalyze=futuresAnalyze;
+window.futuresStartBot=futuresStartBot;
+window.futuresStopBot=futuresStopBot;
+
 function fillCapitalForm(cap){
   const ids=['capital_current','capital_peak','daily_pnl','streak','daily_target_pct','daily_stop_pct'];
   ids.forEach(id=>{const el=document.getElementById(id); if(el) el.value = cap[id] ?? (id==='daily_target_pct'?2.0:id==='daily_stop_pct'?3.0:0);});
@@ -1645,6 +1896,7 @@ function applySnapshot(d){
   renderStatsPanel(s);
   fillCapitalForm(s.capital_state || {});
   updateLiveBadge(s.meta || {});
+  if(document.getElementById('futures') && document.getElementById('futures').classList.contains('active')){ refreshFuturesPanel(); }
   startAutoRefresh();
 }
 async function maybeTriggerScan(meta){
@@ -1731,6 +1983,7 @@ document.addEventListener('DOMContentLoaded', function(){
   startAutoRefresh();
   startBootstrapPolling();
   setTimeout(()=>refreshSnapshot(true), 250);
+  setTimeout(()=>refreshFuturesPanel(), 450);
   document.addEventListener('visibilitychange', function(){ if(!document.hidden){ refreshSnapshot(true); } });
 });
 </script>
@@ -1742,6 +1995,7 @@ document.addEventListener('DOMContentLoaded', function(){
 @app.route("/")
 def home():
     ensure_scanner_started()
+    ensure_bootstrap_snapshot(force=False)
     return render_template_string(HTML_PAGE, snapshot_json=safe_dumps(get_snapshot(light=True)))
 
 
@@ -1783,6 +2037,7 @@ def capital_state_post():
 @app.route("/snapshot")
 def snapshot():
     ensure_scanner_started()
+    ensure_bootstrap_snapshot(force=False)
     try:
         return jsonify(to_jsonable(get_snapshot(light=True)))
     except Exception as e:
@@ -1861,6 +2116,190 @@ def storage_health():
     else:
         report = storage_governance.collect_report()
     return jsonify(to_jsonable(report))
+
+
+@app.route("/futures/analyze", methods=["GET"])
+def futures_analyze_route():
+    ensure_scanner_started()
+    if not futures_feature_status()["available"]:
+        return _futures_disabled_response()
+    sync_futures_credentials_from_vault()
+    asset = str(request.args.get("asset") or "").upper().strip() or None
+    execution_mode = str(request.args.get("execution_mode") or "paper").lower().strip()
+    timeframe = str(request.args.get("timeframe") or "1m").strip().lower()
+    strategy_name = str(request.args.get("strategy") or "futures_confluence").strip()
+    leverage = request.args.get("leverage")
+    risk_per_trade_pct = request.args.get("risk_per_trade_pct")
+    max_trades_per_day = request.args.get("max_trades_per_day")
+    market = scanner.scan_assets(timeframe=timeframe, assets=[asset] if asset else None, outputsize=120)
+    result = futures_module.analyze_market(
+        market,
+        capital_state=load_capital_state(),
+        asset=asset,
+        execution_mode=execution_mode,
+        timeframe=timeframe,
+        strategy_name=strategy_name,
+        leverage_override=leverage,
+        risk_pct_override=(float(risk_per_trade_pct) / 100.0) if risk_per_trade_pct not in (None, "") else None,
+        max_trades_per_day=max_trades_per_day,
+    )
+    return jsonify(to_jsonable(result))
+
+
+@app.route("/futures/execute", methods=["POST"])
+def futures_execute_route():
+    ensure_scanner_started()
+    if not futures_feature_status()["available"]:
+        return _futures_disabled_response()
+    sync_futures_credentials_from_vault()
+    payload = request.get_json(silent=True) or {}
+    plan = payload.get("plan") if isinstance(payload.get("plan"), dict) else None
+    asset = str(payload.get("asset") or "").upper().strip() or None
+    execution_mode = str(payload.get("execution_mode") or "paper").lower().strip()
+    timeframe = str(payload.get("timeframe") or "1m").strip().lower()
+    strategy_name = str(payload.get("strategy") or "futures_confluence").strip()
+    leverage = payload.get("leverage")
+    risk_per_trade_pct = payload.get("risk_per_trade_pct")
+    max_trades_per_day = payload.get("max_trades_per_day")
+    live = execution_mode == "live"
+    if not plan:
+        market = scanner.scan_assets(timeframe=timeframe, assets=[asset] if asset else None, outputsize=120)
+        plan = futures_module.analyze_market(
+            market,
+            capital_state=load_capital_state(),
+            asset=asset,
+            execution_mode=execution_mode,
+            timeframe=timeframe,
+            strategy_name=strategy_name,
+            leverage_override=leverage,
+            risk_pct_override=(float(risk_per_trade_pct) / 100.0) if risk_per_trade_pct not in (None, "") else None,
+            max_trades_per_day=max_trades_per_day,
+        )
+    execution = futures_module.execute_signal(plan, live=live)
+    return jsonify(to_jsonable({"ok": True, "plan": plan, "execution": execution, "connection": binance_vault.status()}))
+
+
+@app.route("/futures/close-report", methods=["POST"])
+def futures_close_report_route():
+    ensure_scanner_started()
+    payload = request.get_json(silent=True) or {}
+    trade = self_optimization_engine.register_futures_close(payload)
+    return jsonify(to_jsonable({
+        "ok": trade is not None,
+        "registered_trade": trade,
+        "self_optimization": self_optimization_engine.summary() if self_optimization_engine else {},
+    }))
+
+
+@app.route("/futures/status", methods=["GET"])
+def futures_status_route():
+    ensure_scanner_started()
+    if not futures_feature_status()["available"]:
+        return jsonify(to_jsonable({"ok": False, "connection": {"connected": False, "source": "none", "testnet": False}, "bot": {"running": False}, "self_optimization": {}, "details": futures_feature_status()})), 200
+    sync_futures_credentials_from_vault()
+    return jsonify(to_jsonable({
+        "ok": True,
+        "connection": binance_vault.status(),
+        "bot": futures_bot_service.status(),
+        "self_optimization": self_optimization_engine.summary(),
+    }))
+
+
+@app.route("/futures/connect", methods=["POST"])
+def futures_connect_route():
+    ensure_scanner_started()
+    if not futures_feature_status()["available"]:
+        return _futures_disabled_response()
+    payload = request.get_json(silent=True) or {}
+    api_key = str(payload.get("api_key") or "").strip()
+    api_secret = str(payload.get("api_secret") or "").strip()
+    testnet = str(payload.get("testnet") or "1").strip().lower() in ("1", "true", "yes")
+    if api_key and api_secret:
+        binance_vault.set_credentials(api_key, api_secret, testnet=testnet)
+    sync_futures_credentials_from_vault()
+    ping = binance_broker.ping()
+    return jsonify(to_jsonable({
+        "ok": bool(ping.get("ok")),
+        "connection": binance_vault.status(),
+        "exchange": ping,
+        "note": "Credenciais salvas apenas em memória desta instância. Para persistir no Render, use env vars.",
+    })), (200 if ping.get("ok") else 400)
+
+
+@app.route("/futures/disconnect", methods=["POST"])
+def futures_disconnect_route():
+    ensure_scanner_started()
+    if not futures_feature_status()["available"]:
+        return _futures_disabled_response()
+    binance_vault.clear_credentials()
+    sync_futures_credentials_from_vault()
+    return jsonify(to_jsonable({"ok": True, "connection": binance_vault.status()}))
+
+
+@app.route("/futures/account", methods=["GET"])
+def futures_account_route():
+    ensure_scanner_started()
+    if not futures_feature_status()["available"]:
+        return _futures_disabled_response()
+    sync_futures_credentials_from_vault()
+    return jsonify(to_jsonable(binance_broker.account_overview()))
+
+
+@app.route("/futures/positions", methods=["GET"])
+def futures_positions_route():
+    ensure_scanner_started()
+    if not futures_feature_status()["available"]:
+        return _futures_disabled_response()
+    sync_futures_credentials_from_vault()
+    return jsonify(to_jsonable(binance_broker.positions()))
+
+
+@app.route("/futures/orders", methods=["GET"])
+def futures_orders_route():
+    ensure_scanner_started()
+    if not futures_feature_status()["available"]:
+        return _futures_disabled_response()
+    sync_futures_credentials_from_vault()
+    symbol = str(request.args.get("symbol") or "").upper().strip() or None
+    return jsonify(to_jsonable(binance_broker.open_orders(symbol=symbol)))
+
+
+@app.route("/futures/bot/start", methods=["POST"])
+def futures_bot_start_route():
+    ensure_scanner_started()
+    if not futures_feature_status()["available"]:
+        return _futures_disabled_response()
+    sync_futures_credentials_from_vault()
+    payload = request.get_json(silent=True) or {}
+    config = {
+        "symbol": str(payload.get("symbol") or "BTCUSDT").upper().strip(),
+        "timeframe": str(payload.get("timeframe") or "1m").strip().lower(),
+        "execution_mode": str(payload.get("execution_mode") or "paper").strip().lower(),
+        "strategy": str(payload.get("strategy") or "futures_confluence").strip(),
+        "risk_per_trade_pct": float(payload.get("risk_per_trade_pct") or 0.6),
+        "leverage": int(float(payload.get("leverage") or 3)),
+        "max_trades_per_day": int(float(payload.get("max_trades_per_day") or 3)),
+        "poll_seconds": int(float(payload.get("poll_seconds") or 45)),
+    }
+    status = futures_bot_service.start(config=config)
+    return jsonify(to_jsonable({"ok": True, "bot": status, "connection": binance_vault.status()}))
+
+
+@app.route("/futures/bot/stop", methods=["POST"])
+def futures_bot_stop_route():
+    ensure_scanner_started()
+    if not futures_feature_status()["available"]:
+        return _futures_disabled_response()
+    status = futures_bot_service.stop()
+    return jsonify(to_jsonable({"ok": True, "bot": status}))
+
+
+@app.route("/futures/bot/status", methods=["GET"])
+def futures_bot_status_route():
+    ensure_scanner_started()
+    if not futures_feature_status()["available"]:
+        return jsonify(to_jsonable({"ok": False, "bot": {"running": False}, "details": futures_feature_status()})), 200
+    return jsonify(to_jsonable({"ok": True, "bot": futures_bot_service.status()}))
 
 
 if __name__ == "__main__":
