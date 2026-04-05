@@ -35,8 +35,21 @@ class MarketScanner:
             return True
         return False
 
-    def _scan_one(self, asset):
-        candles = self.data.get_candles(asset, interval="1min", outputsize=50)
+    def _normalize_interval(self, timeframe):
+        raw = str(timeframe or "1min").strip().lower()
+        mapping = {
+            "1m": "1min",
+            "1min": "1min",
+            "m1": "1min",
+            "5m": "5min",
+            "5min": "5min",
+            "m5": "5min",
+        }
+        return mapping.get(raw, "1min")
+
+    def _scan_one(self, asset, timeframe="1min", outputsize=50):
+        interval = self._normalize_interval(timeframe)
+        candles = self.data.get_candles(asset, interval=interval, outputsize=max(50, int(outputsize or 50)))
         if not candles:
             return None
         indicators = self.indicators.calculate(candles)
@@ -45,22 +58,29 @@ class MarketScanner:
             "candles": candles,
             "indicators": indicators,
             "provider": self.data.last_provider_used.get(asset, "auto"),
+            "timeframe_code": interval,
         }
 
-    def scan_assets(self):
+    def scan_assets(self, timeframe="1min", assets=None, outputsize=50):
         results = []
-        active_assets = list(CRYPTO_ASSETS)
-
-        if self._should_scan_slow_now():
-            active_assets += self._get_slow_batch()
+        if assets:
+            active_assets = [str(a).upper().strip() for a in assets if str(a).strip()]
+        else:
+            active_assets = list(CRYPTO_ASSETS)
+            if self._should_scan_slow_now():
+                active_assets += self._get_slow_batch()
 
         if not active_assets:
             return results
 
+        interval = self._normalize_interval(timeframe)
         max_workers = max(1, min(6, len(active_assets)))
         ordered = []
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_map = {executor.submit(self._scan_one, asset): idx for idx, asset in enumerate(active_assets)}
+            future_map = {
+                executor.submit(self._scan_one, asset, interval, outputsize): idx
+                for idx, asset in enumerate(active_assets)
+            }
             for future in as_completed(future_map):
                 idx = future_map[future]
                 try:
