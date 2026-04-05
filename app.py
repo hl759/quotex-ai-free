@@ -21,10 +21,6 @@ from edge_audit import EdgeAuditEngine
 from edge_guard import EdgeGuardEngine
 from specialist_reputation_engine import SpecialistReputationEngine
 from storage_governance_engine import StorageGovernanceEngine
-from binary_options_module import BinaryOptionsModule
-from futures_module import FuturesModule
-from self_optimization_engine import SelfOptimizationEngine
-from hybrid_mode_router import HybridModeRouter
 
 try:
     from adaptive_engine import AdaptiveEngine
@@ -65,9 +61,6 @@ journal = JournalManager()
 edge_audit = EdgeAuditEngine()
 edge_guard = EdgeGuardEngine()
 specialist_reputation = SpecialistReputationEngine()
-self_optimization_engine = SelfOptimizationEngine()
-binary_options_module = BinaryOptionsModule(decision_engine, signal_engine, self_optimizer=self_optimization_engine)
-futures_module = FuturesModule(data_manager, self_optimizer=self_optimization_engine)
 
 LATEST_SIGNALS_FILE = os.path.join(STATE_DIR, "latest_signals.json")
 SIGNAL_HISTORY_FILE = os.path.join(STATE_DIR, "history.json")
@@ -187,9 +180,6 @@ def ensure_capital_state():
     return current
 
 
-hybrid_mode_router = None
-
-
 def load_capital_state():
     default_state = {
         "capital_current": 0.0,
@@ -236,15 +226,6 @@ def save_capital_state(data):
     except Exception as e:
         print(f"save_capital_state store write warning: {e}", flush=True)
     return merged
-
-
-hybrid_mode_router = HybridModeRouter(
-    binary_module=binary_options_module,
-    futures_module=futures_module,
-    self_optimizer=self_optimization_engine,
-    scanner=scanner,
-    capital_state_loader=load_capital_state,
-)
 
 
 class CapitalAutoTracker:
@@ -739,11 +720,6 @@ def register_all_learning_outputs(signal, result_data):
     except Exception as e:
         print("Specialist reputation register error:", e, flush=True)
 
-    try:
-        self_optimization_engine.register_binary_outcome(signal, result_data)
-    except Exception as e:
-        print("SelfOptimizationEngine binary register error:", e, flush=True)
-
 
 def process_pending_decisions(market):
     pending = read_json(PENDING_DECISIONS_FILE, [])
@@ -1142,38 +1118,6 @@ def ensure_scanner_started():
         scanner_started = True
 
 
-def _snapshot_is_empty(signals=None, history=None, current_decision=None, meta=None):
-    signals = signals if isinstance(signals, list) else []
-    history = history if isinstance(history, list) else []
-    current_decision = current_decision if isinstance(current_decision, dict) else {}
-    meta = meta if isinstance(meta, dict) else {}
-
-    if signals or history:
-        return False
-    if str(current_decision.get("decision") or "").strip():
-        return False
-    if str(current_decision.get("asset") or "").strip():
-        return False
-    if int(meta.get("scan_count", 0) or 0) > 0:
-        return False
-    return True
-
-
-def ensure_bootstrap_snapshot(force=False):
-    signals, history, current_decision, meta = load_state()
-    if scan_in_progress:
-        return signals, history, current_decision, meta
-    if force or _snapshot_is_empty(signals, history, current_decision, meta):
-        result = run_scan_once("bootstrap")
-        if not result.get("ok") and result.get("reason") != "scan_already_running":
-            try:
-                print(f"bootstrap snapshot warning: {result}", flush=True)
-            except Exception:
-                pass
-        signals, history, current_decision, meta = load_state()
-    return signals, history, current_decision, meta
-
-
 HTML_PAGE = """
 <!DOCTYPE html>
 <html lang='pt-BR'>
@@ -1299,7 +1243,6 @@ body:after{width:220px;height:220px;right:-80px;top:340px;background:rgba(111,74
 .dock-btn{flex:0 0 auto;min-width:104px;padding:14px 16px;font-weight:850;font-size:15px;color:#c5d4e9;cursor:pointer;pointer-events:auto;touch-action:manipulation;-webkit-tap-highlight-color:transparent;white-space:nowrap}
 .dock-btn.active{background:linear-gradient(180deg,rgba(37,99,103,.98),rgba(15,57,67,.98));color:#ecfffc;border-color:rgba(95,245,220,.24);box-shadow:0 0 0 1px rgba(95,245,220,.12),0 0 28px rgba(95,245,220,.12)}
 .panel{display:none;margin-top:18px;position:relative;z-index:1}.panel.active{display:block}
-.click-safe,.right-stack,#refreshBtn,.bottom-dock,.dock-btn,.save-btn{position:relative;z-index:9999;pointer-events:auto;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
 .list-grid{display:grid;gap:12px}
 .decision-solo{padding:16px}
 .empty{padding:24px;text-align:center;border-radius:18px;border:1px dashed rgba(108,145,185,.22);color:#93a7c5;background:rgba(8,16,27,.72)}
@@ -1348,7 +1291,7 @@ body:after{width:220px;height:220px;right:-80px;top:340px;background:rgba(111,74
       </div>
       <div class='right-stack'>
         <div id='liveBadge' class='live-pill'>● ESCANEANDO</div>
-        <button id='refreshBtn' type='button' class='refresh-btn click-safe' onclick='refreshSnapshot(false)'>↻ Atualizar agora</button>
+        <button id='refreshBtn' class='refresh-btn' onclick='refreshSnapshot(false)'>↻ Atualizar agora</button>
       </div>
     </div>
 
@@ -1393,7 +1336,7 @@ body:after{width:220px;height:220px;right:-80px;top:340px;background:rgba(111,74
           <div>
             <div class='learn-title'>Aprendizado da IA<small>Acompanhamento do motor adaptativo</small></div>
           </div>
-          <button type='button' class='ghost-btn click-safe' onclick="showTab('stats', document.querySelector('[data-tab=stats]'))">Ver detalhes</button>
+          <button class='ghost-btn' onclick="showTab('stats', document.querySelector('[data-tab=stats]'))">Ver detalhes</button>
         </div>
         <div class='learn-stats'>
           <div class='stat-tile'><div class='label'>Total avaliadas</div><div class='value' id='stats_total'>0</div></div>
@@ -1434,14 +1377,14 @@ body:after{width:220px;height:220px;right:-80px;top:340px;background:rgba(111,74
     </div>
 
     <div class='bottom-dock'>
-      <button type='button' class='dock-btn active click-safe' data-tab='dashboard' onclick="showTab('dashboard', this)">⌂ Dashboard</button>
-      <button type='button' class='dock-btn click-safe' data-tab='signals' onclick="showTab('signals', this)">⚡ Sinais</button>
-      <button type='button' class='dock-btn click-safe' data-tab='decision' onclick="showTab('decision', this)">🧠 Decisão</button>
-      <button type='button' class='dock-btn click-safe' data-tab='history' onclick="showTab('history', this)">📋 Histórico</button>
-      <button type='button' class='dock-btn click-safe' data-tab='stats' onclick="showTab('stats', this)">📊 Stats</button>
-      <button type='button' class='dock-btn click-safe' data-tab='assets' onclick="showTab('assets', this)">🏆 Ativos</button>
-      <button type='button' class='dock-btn click-safe' data-tab='hours' onclick="showTab('hours', this)">⏰ Horários</button>
-      <button type='button' class='dock-btn click-safe' data-tab='capital' onclick="showTab('capital', this)">💰 Capital</button>
+      <button class='dock-btn active' data-tab='dashboard' onclick="showTab('dashboard', this)">⌂ Dashboard</button>
+      <button class='dock-btn' data-tab='signals' onclick="showTab('signals', this)">⚡ Sinais</button>
+      <button class='dock-btn' data-tab='decision' onclick="showTab('decision', this)">🧠 Decisão</button>
+      <button class='dock-btn' data-tab='history' onclick="showTab('history', this)">📋 Histórico</button>
+      <button class='dock-btn' data-tab='stats' onclick="showTab('stats', this)">📊 Stats</button>
+      <button class='dock-btn' data-tab='assets' onclick="showTab('assets', this)">🏆 Ativos</button>
+      <button class='dock-btn' data-tab='hours' onclick="showTab('hours', this)">⏰ Horários</button>
+      <button class='dock-btn' data-tab='capital' onclick="showTab('capital', this)">💰 Capital</button>
     </div>
 
     <div class='panel' id='signals'>
@@ -1473,7 +1416,7 @@ body:after{width:220px;height:220px;right:-80px;top:340px;background:rgba(111,74
           <div class='field'><label>Meta diária %</label><input id='daily_target_pct' type='number' step='0.1' min='0'></div>
           <div class='field'><label>Stop diário %</label><input id='daily_stop_pct' type='number' step='0.1' min='0'></div>
         </div>
-        <button id='saveCapitalBtn' type='button' class='save-btn click-safe' onclick='saveCapitalState()'>Salvar capital</button>
+        <button id='saveCapitalBtn' class='save-btn' onclick='saveCapitalState()'>Salvar capital</button>
         <div id='capital_status' class='save-status'></div>
       </div>
     </div>
@@ -1773,33 +1716,6 @@ async function saveCapitalState(){
   }catch(e){ status.textContent='Erro ao salvar capital.'; }
   setTimeout(()=>{ btn.disabled=false; },800);
 }
-function bindInteractiveFallbacks(){
-  const bindTap = (el, fn)=>{
-    if(!el || el.dataset.boundTap === '1') return;
-    let lastTs = 0;
-    const wrapped = (ev)=>{
-      const now = Date.now();
-      if(now - lastTs < 350) return;
-      lastTs = now;
-      try{ ev.preventDefault(); ev.stopPropagation(); }catch(e){}
-      try{ fn(ev); }catch(err){ console.error('tap handler error', err); }
-    };
-    el.addEventListener('touchend', wrapped, {passive:false});
-    el.addEventListener('click', wrapped);
-    el.dataset.boundTap = '1';
-  };
-
-  bindTap(document.getElementById('refreshBtn'), ()=>refreshSnapshot(false));
-  bindTap(document.getElementById('saveCapitalBtn'), ()=>saveCapitalState());
-  document.querySelectorAll('.dock-btn[data-tab]').forEach(btn=>{
-    bindTap(btn, ()=>activateTab(btn.dataset.tab, btn));
-  });
-}
-
-window.addEventListener('pageshow', function(){
-  try{ bindInteractiveFallbacks(); }catch(e){ console.error('pageshow bind error', e); }
-});
-
 document.addEventListener('DOMContentLoaded', function(){
   const defaultTabBtn = document.querySelector('.dock-btn[data-tab="dashboard"]');
   activateTab('dashboard', defaultTabBtn);
@@ -1811,7 +1727,6 @@ document.addEventListener('DOMContentLoaded', function(){
       return;
     }
   });
-  try{ bindInteractiveFallbacks(); }catch(e){ console.error('bind fallback error', e); }
   try{ applySnapshot(initialSnapshot); }catch(e){ console.error('initial snapshot error', e); applySnapshot(null); }
   startAutoRefresh();
   startBootstrapPolling();
@@ -1827,7 +1742,6 @@ document.addEventListener('DOMContentLoaded', function(){
 @app.route("/")
 def home():
     ensure_scanner_started()
-    ensure_bootstrap_snapshot(force=False)
     return render_template_string(HTML_PAGE, snapshot_json=safe_dumps(get_snapshot(light=True)))
 
 
@@ -1869,7 +1783,6 @@ def capital_state_post():
 @app.route("/snapshot")
 def snapshot():
     ensure_scanner_started()
-    ensure_bootstrap_snapshot(force=False)
     try:
         return jsonify(to_jsonable(get_snapshot(light=True)))
     except Exception as e:
@@ -1948,93 +1861,6 @@ def storage_health():
     else:
         report = storage_governance.collect_report()
     return jsonify(to_jsonable(report))
-
-
-@app.route("/mode", methods=["GET", "POST"])
-def mode_route():
-    ensure_scanner_started()
-    if request.method == "POST":
-        payload = request.get_json(silent=True) or {}
-        desired_mode = str(payload.get("mode") or request.args.get("mode") or "BINARY_MODE").upper().strip()
-        try:
-            active = hybrid_mode_router.set_active_mode(desired_mode)
-            return jsonify({"ok": True, "active_mode": active, "supported_modes": ["BINARY_MODE", "FUTURES_MODE"]})
-        except Exception as e:
-            return jsonify({"ok": False, "error": str(e), "supported_modes": ["BINARY_MODE", "FUTURES_MODE"]}), 400
-    snapshot_data = hybrid_mode_router.snapshot()
-    return jsonify(to_jsonable({
-        "ok": True,
-        "active_mode": snapshot_data.get("active_mode"),
-        "supported_modes": snapshot_data.get("supported_modes", ["BINARY_MODE", "FUTURES_MODE"]),
-        "self_optimization": snapshot_data.get("self_optimization", {}),
-    }))
-
-
-@app.route("/hybrid/snapshot", methods=["GET"])
-def hybrid_snapshot_route():
-    ensure_scanner_started()
-    return jsonify(to_jsonable(hybrid_mode_router.snapshot()))
-
-
-@app.route("/hybrid/run-scan", methods=["GET", "POST"])
-def hybrid_run_scan_route():
-    ensure_scanner_started()
-    payload = request.get_json(silent=True) or {}
-    mode = str(payload.get("mode") or request.args.get("mode") or hybrid_mode_router.get_active_mode()).upper().strip()
-    asset = str(payload.get("asset") or request.args.get("asset") or "").upper().strip() or None
-    execution_mode = str(payload.get("execution_mode") or request.args.get("execution_mode") or "paper").lower().strip()
-    result = hybrid_mode_router.run_once(mode=mode, asset=asset, execution_mode=execution_mode)
-    return jsonify(to_jsonable({
-        "ok": True,
-        "active_mode": mode,
-        "result": result,
-        "self_optimization": self_optimization_engine.summary(),
-    }))
-
-
-@app.route("/binary/analyze", methods=["GET"])
-def binary_analyze_route():
-    ensure_scanner_started()
-    market = scanner.scan_assets()
-    result = binary_options_module.analyze_market(market, capital_state=load_capital_state())
-    return jsonify(to_jsonable(result))
-
-
-@app.route("/futures/analyze", methods=["GET"])
-def futures_analyze_route():
-    ensure_scanner_started()
-    asset = str(request.args.get("asset") or "").upper().strip() or None
-    execution_mode = str(request.args.get("execution_mode") or "paper").lower().strip()
-    market = scanner.scan_assets()
-    result = futures_module.analyze_market(market, capital_state=load_capital_state(), asset=asset, execution_mode=execution_mode)
-    return jsonify(to_jsonable(result))
-
-
-@app.route("/futures/execute", methods=["POST"])
-def futures_execute_route():
-    ensure_scanner_started()
-    payload = request.get_json(silent=True) or {}
-    plan = payload.get("plan") if isinstance(payload.get("plan"), dict) else None
-    asset = str(payload.get("asset") or "").upper().strip() or None
-    execution_mode = str(payload.get("execution_mode") or "paper").lower().strip()
-    live = execution_mode == "live"
-    if not plan:
-        market = scanner.scan_assets()
-        plan = futures_module.analyze_market(market, capital_state=load_capital_state(), asset=asset, execution_mode=execution_mode)
-    execution = futures_module.execute_signal(plan, live=live)
-    return jsonify(to_jsonable({"ok": True, "plan": plan, "execution": execution}))
-
-
-@app.route("/futures/close-report", methods=["POST"])
-def futures_close_report_route():
-    ensure_scanner_started()
-    payload = request.get_json(silent=True) or {}
-    trade = self_optimization_engine.register_futures_close(payload)
-    return jsonify(to_jsonable({
-        "ok": trade is not None,
-        "registered_trade": trade,
-        "self_optimization": self_optimization_engine.summary(),
-    }))
 
 
 if __name__ == "__main__":
