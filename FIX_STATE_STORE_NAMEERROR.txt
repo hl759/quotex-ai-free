@@ -1,4 +1,0 @@
-Correção aplicada:
-- app.py: StorageGovernanceEngine agora é inicializado somente depois de state_store = StateStore().
-- Isso resolve o erro: NameError: name 'state_store' is not defined.
-- Validação de sintaxe executada em todos os .py do pacote.

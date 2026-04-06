@@ -1,3 +1,0 @@
-Validação de sintaxe executada.
-Erros encontrados: 0
-Nenhum

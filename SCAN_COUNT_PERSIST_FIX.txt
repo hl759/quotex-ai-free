@@ -1,1 +1,0 @@
-Fixes scan counter reset by restoring scan_count from META_FILE on startup and moving default state dir away from /tmp. You can override with STATE_DIR env var.
