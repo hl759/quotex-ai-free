@@ -1,0 +1,18 @@
+PRESSURE FIX APLICADO
+
+Objetivo:
+- resolver excesso de conservadorismo sem desmontar a arquitetura
+
+Arquivos ajustados:
+1. adaptive_behavioral_orchestration_engine.py
+   - CAUTIOUS menos punitivo
+   - edge imperfeito mas válido agora pode passar com atuação controlada
+   - SURVIVAL continua defensivo, mas leitura premium pode sobreviver sem travar sempre
+
+2. risk_dominance_engine.py
+   - complex e structured_chaos menos penalizados
+   - transição média menos punitiva
+   - conflito transicional e breakout duvidoso menos agressivos
+   - downgrade para cautela só entra mais cedo quando realmente necessário
+
+Nenhum outro cérebro foi alterado.

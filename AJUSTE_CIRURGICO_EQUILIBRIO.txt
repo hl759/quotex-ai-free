@@ -1,0 +1,27 @@
+AJUSTE CIRÚRGICO DE EQUILÍBRIO
+
+Objetivo:
+- parar a IA de se sabotar na governança final
+- manter proteção real sem sufocar contexto bom/premium
+
+Arquivos ajustados:
+1. trader_council_engine.py
+   - bloqueio total mais exigente
+   - consenso insuficiente menos punitivo
+   - memória local negativa só pesa forte com amostra/expectancy mais relevantes
+   - contexto premium operável pode escapar de OBSERVAR/NAO_OPERAR com mais facilidade
+
+2. edge_guard.py
+   - validação e segmentos desconhecidos menos sufocantes
+   - weak segments menos destrutivos
+   - gate global em validation aceita edge quase provado com cautela
+   - cautela operável preservada com stake reduzida
+
+3. decision_engine.py
+   - Council OBSERVAR não mata cautela operável quando a própria mesa ainda está measured/prime
+   - Edge Guard OBSERVAR não mata cautela operável quando stake/live still support execution
+
+Resultado esperado:
+- menos auto-sabotagem em contexto bom/premium imperfeito
+- mais ENTRADA_CAUTELA profissional
+- proteção continua forte em hard blocks reais e ambiente destrutivo
