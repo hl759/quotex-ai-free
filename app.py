@@ -3,7 +3,7 @@ import os
 import threading
 import time
 from datetime import datetime, timedelta
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template_string, request
 from json_safe import safe_dump, safe_dumps, to_jsonable
 from storage_paths import DATA_DIR, STATE_DIR, migrate_file
 from state_store import StateStore
@@ -45,6 +45,19 @@ from config import (
 )
 
 app = Flask(__name__)
+
+TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "templates", "index.html")
+FALLBACK_TEMPLATE = """<!DOCTYPE html><html lang='pt-BR'><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'><title>Alpha Hive AI</title><style>body{font-family:Arial,sans-serif;background:#08111f;color:#eef6ff;margin:0;padding:24px} .card{max-width:780px;margin:0 auto;background:#0b1424;border:1px solid rgba(106,225,255,.15);border-radius:18px;padding:24px} h1{margin-top:0} code{background:#07101c;padding:2px 6px;border-radius:6px} .muted{color:#9cb1cf}</style></head><body><div class='card'><h1>Alpha Hive AI</h1><p>Template principal não encontrado. A aplicação continuou ativa com fallback seguro.</p><p class='muted'>Verifique se o arquivo <code>templates/index.html</code> foi enviado no deploy.</p><p class='muted'>Snapshot inicial: {{ snapshot_json|safe }}</p></div></body></html>"""
+
+def load_html_template():
+    try:
+        with open(TEMPLATE_PATH, "r", encoding="utf-8") as f:
+            return f.read()
+    except Exception as e:
+        print(f"template load warning: {e}", flush=True)
+        return FALLBACK_TEMPLATE
+
+HTML_PAGE = load_html_template()
 
 data_manager = DataManager()
 learning = LearningEngine()
@@ -1131,7 +1144,7 @@ def ensure_scanner_started():
 @app.route("/")
 def home():
     ensure_scanner_started()
-    return render_template("index.html", snapshot_json=safe_dumps(get_snapshot(light=True)))
+    return render_template_string(HTML_PAGE, snapshot_json=safe_dumps(get_snapshot(light=True)))
 
 
 import time

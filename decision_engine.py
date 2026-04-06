@@ -664,6 +664,24 @@ class DecisionEngine:
         final_direction = self._vote_direction(candidates, fallback_direction)
 
         try:
+            segment_adjustment = self.learning.get_segment_adjustment(
+                asset=asset,
+                analysis_time=analysis_time,
+                regime=regime,
+                strategy_name=leader_name,
+                direction=final_direction,
+                provider=str(indicators.get("provider", "auto") or "auto"),
+                market_type=str(indicators.get("market_type", "unknown") or "unknown"),
+            )
+        except Exception:
+            segment_adjustment = {"score_shift": 0.0, "confidence_shift": 0, "sample": 0, "reason": "Ajuste por segmento indisponível"}
+
+        adjusted_score += float(segment_adjustment.get("score_shift", 0.0) or 0.0)
+        seg_reason = str(segment_adjustment.get("reason", "")).strip()
+        if seg_reason:
+            reasons.append(seg_reason)
+
+        try:
             boost = self.learning.get_score_boost(asset)
         except Exception:
             boost = 0.0
