@@ -1,0 +1,55 @@
+Alpha HIVE AI - Trader Council Upgrade
+
+Objetivo desta etapa
+- Aproximar a IA da arquitetura "mesa invisível de traders veteranos ricos e consistentes"
+- Tirar o projeto de uma lógica só de score e empurrar para conselho + reputação + memória de casos + head trader
+
+O que foi adicionado
+1) trader_genome.py
+- Gera o genoma de especialistas virtuais a partir de combinações de:
+  role x regime x classe de ativo x sessão x senioridade
+- A biblioteca resultante passa de mil perfis possíveis e o motor convoca só os relevantes para cada contexto
+
+2) trader_council_engine.py
+- Convoca especialistas relevantes
+- Faz cada papel emitir support / caution / veto
+- Pesa senioridade e reputação
+- Consolida consenso, dissenso, vetos seniores e ação do head trader
+- Entrega score_boost, confidence_shift, decision_cap, direction_override, participants e case memory
+
+3) case_memory_engine.py
+- Busca casos parecidos no ledger real
+- Calcula memória local, expectancy e cicatrizes contextuais
+- Rebaixa entusiasmo quando o passado parecido foi ruim
+
+4) specialist_reputation_engine.py
+- Mantém reputação por especialista
+- Atualiza alinhamento depois de cada trade executado
+- Permite que especialistas ganhem ou percam voz com o tempo
+
+5) Integrações no core
+- decision_engine.py agora inclui o Trader Council antes da decisão final
+- app.py agora carrega e salva dados do conselho e das reputações
+- edge_audit.py agora registra mais contexto estrutural por trade
+- nova rota: /specialists
+
+Leituras novas no payload/ledger
+- environment_type
+- market_narrative
+- trend_quality
+- breakout_quality
+- conflict_type
+- discernment_quality
+- anti_pattern_risk
+- trend_m1 / trend_m5
+- breakout / rejection / volatility / moved_too_fast / is_sideways / pattern
+- council_quality / council_consensus_direction / head_trader_action
+
+Variáveis novas
+- TRADER_COUNCIL_ACTIVE
+- TRADER_COUNCIL_SPECIALIST_LIMIT
+- TRADER_COUNCIL_MEMORY_MIN_CASES
+
+Observação honesta
+- Esta etapa melhora muito a semelhança com uma mesa de veteranos.
+- Isso NAO comprova edge por si só. O sistema agora está mais alinhado com o objetivo mental e muito mais auditável.
