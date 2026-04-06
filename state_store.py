@@ -374,6 +374,7 @@ class StateStore:
         return default if value is None else value
 
 
+
     def prune_scans(self, keep_latest=1200, max_age_days=14):
         keep_latest = max(50, int(keep_latest or 1200))
         removed = 0
@@ -458,7 +459,6 @@ class StateStore:
             with self._connect() as conn:
                 conn.execute('VACUUM')
         return True
-
 
 def get_state_store():
     return StateStore()

@@ -86,6 +86,3 @@ UI_CACHE_REFRESH_MAX_SECONDS = int(os.getenv("UI_CACHE_REFRESH_MAX_SECONDS", "18
 SCAN_TRIGGER_TOKEN = os.getenv("SCAN_TRIGGER_TOKEN", "").strip()
 SCAN_ROUTE_ENABLED = os.getenv("SCAN_ROUTE_ENABLED", "1").strip().lower() not in ("0", "false", "no")
 SCAN_ALIGN_TO_INTERVAL = os.getenv("SCAN_ALIGN_TO_INTERVAL", "1").strip().lower() not in ("0", "false", "no")
-
-SCANNER_MAX_WORKERS = int(os.getenv("SCANNER_MAX_WORKERS", "3"))
-MIN_PROVIDER_TRUST_TO_TRADE = float(os.getenv("MIN_PROVIDER_TRUST_TO_TRADE", "0.74"))

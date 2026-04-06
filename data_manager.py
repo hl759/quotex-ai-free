@@ -3,8 +3,6 @@ import time
 from datetime import datetime
 
 import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
 from config import (
     ALPHA_VANTAGE_API_KEY,
@@ -40,12 +38,6 @@ class DataManager:
             "User-Agent": "AlphaHiveAI/1.0 (+https://render.com)",
             "Accept": "application/json,text/plain,*/*",
         }
-        self.session = requests.Session()
-        retry = Retry(total=2, connect=2, read=2, backoff_factor=0.2, status_forcelist=(429, 500, 502, 503, 504), allowed_methods=("GET",))
-        adapter = HTTPAdapter(max_retries=retry, pool_connections=12, pool_maxsize=12)
-        self.session.mount("https://", adapter)
-        self.session.mount("http://", adapter)
-
         self.key_usage = [
             {"key": key, "daily": 0, "minute": 0, "minute_window_start": time.time()}
             for key in TWELVE_API_KEYS
@@ -253,7 +245,7 @@ class DataManager:
 
     def _http_get_json(self, url, params=None, timeout=4):
         try:
-            response = self.session.get(url, params=params, headers=self.request_headers, timeout=timeout)
+            response = requests.get(url, params=params, headers=self.request_headers, timeout=timeout)
             response.raise_for_status()
             return response.json()
         except Exception:

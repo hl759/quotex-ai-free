@@ -1,4 +1,3 @@
-from config import DEFAULT_PAYOUT, MIN_PROVIDER_TRUST_TO_TRADE
 from strategy_engine import StrategyEngine
 
 try:
@@ -464,20 +463,32 @@ class DecisionEngine:
 
     def _apply_edge_guard(self, decision, guard, final_direction, reasons):
         cap = guard.get("decision_cap")
+        permission = str(guard.get("execution_permission") or "").upper()
+        hard_block = bool(guard.get("hard_block", False))
+        stake_mult = float(guard.get("stake_multiplier", 0.0) or 0.0)
+
+        if hard_block or permission == "BLOQUEADO":
+            reasons.append("Edge Guard final: execução bloqueada")
+            return "NAO_OPERAR", None
+
+        if permission == "CAUTELA_OPERAVEL":
+            if decision in ("ENTRADA_FORTE", "ENTRADA_CAUTELA"):
+                reasons.append("Edge Guard final: cautela operável preservada")
+                return "ENTRADA_CAUTELA", final_direction
+            if cap == "OBSERVAR":
+                reasons.append("Edge Guard final: observação mantida por cautela estatística")
+                return "OBSERVAR", final_direction
+
         if not cap:
             return decision, final_direction
         if cap == "NAO_OPERAR":
-            if decision in ("ENTRADA_FORTE", "ENTRADA_CAUTELA") and float(guard.get("stake_multiplier", 0.0) or 0.0) >= 0.18:
-                reasons.append("Edge Guard final: bloqueio convertido em cautela por edge funcional")
+            if decision in ("ENTRADA_FORTE", "ENTRADA_CAUTELA") and stake_mult >= 0.12:
+                reasons.append("Edge Guard final: bloqueio rebaixado para cautela mínima")
                 return "ENTRADA_CAUTELA", final_direction
             reasons.append("Edge Guard final: bloqueio total")
             return "NAO_OPERAR", None
         if cap == "OBSERVAR" and decision in ("ENTRADA_FORTE", "ENTRADA_CAUTELA"):
-            if (
-                decision == "ENTRADA_CAUTELA"
-                and bool(guard.get("live_allowed", True))
-                and float(guard.get("stake_multiplier", 0.0) or 0.0) >= 0.32
-            ):
+            if decision == "ENTRADA_CAUTELA" and stake_mult >= 0.18:
                 reasons.append("Edge Guard final: observação convertida em cautela reduzida")
                 return "ENTRADA_CAUTELA", final_direction
             reasons.append("Edge Guard final: entrada rebaixada para observação")
@@ -520,6 +531,26 @@ class DecisionEngine:
         out["stake_value"] = round(float(out.get("stake_value", 0.0) or 0.0) * mult, 2)
         out["risk_pct"] = round(float(out.get("risk_pct", 0.0) or 0.0) * mult, 4)
         return out
+
+    def _resolve_execution_permission(self, decision, edge_guard):
+        permission = str(edge_guard.get("execution_permission") or "").upper().strip()
+        if permission:
+            return permission
+        if decision == "NAO_OPERAR":
+            return "BLOQUEADO"
+        if decision == "OBSERVAR":
+            return "CAUTELA_OPERAVEL"
+        return "LIBERADO"
+
+    def _pick_execution_block_reason(self, edge_guard, reasons):
+        dominant = str(edge_guard.get("dominant_reason") or "").strip()
+        if dominant:
+            return dominant
+        for reason in reversed(reasons or []):
+            text = str(reason or "")
+            if text.startswith(("Edge Guard final", "Edge Guard:", "Trader Council final", "Risk dominance final", "Orquestração final")):
+                return text
+        return "Execução controlada pela governança de risco"
 
     def decide(self, asset, indicators):
         regime = indicators.get("regime", "unknown")
@@ -695,7 +726,6 @@ class DecisionEngine:
         base_confidence = 50 + (adjusted_score * 10)
         base_confidence *= confidence_factor
         base_confidence += market_profile.get("confidence_shift", 0)
-        base_confidence += int(segment_adjustment.get("confidence_shift", 0) or 0)
         base_confidence += context_adj.get("confidence_shift", 0)
         base_confidence += pattern_conf_shift
         base_confidence += meta_conf_shift
@@ -861,14 +891,6 @@ class DecisionEngine:
         confidence = base_confidence + capital_plan.get("confidence_shift", 0)
         confidence = int(max(50, min(95, confidence)))
 
-        provider_trust_score = float(indicators.get("provider_trust_score", 1.0) or 1.0)
-        provider_is_fallback = bool(indicators.get("provider_is_fallback", False))
-        market_type = str(indicators.get("market_type", "unknown") or "unknown")
-
-        if market_type == "crypto" and provider_is_fallback and provider_trust_score < MIN_PROVIDER_TRUST_TO_TRADE and decision in ("ENTRADA_FORTE", "ENTRADA_CAUTELA"):
-            decision, direction = "NAO_OPERAR", None
-            reasons.append("Filtro operacional: feed alternativo fraco para cripto M1")
-
         edge_guard = self.edge_guard_engine.evaluate(
             asset=asset,
             regime=regime,
@@ -911,6 +933,11 @@ class DecisionEngine:
             f"Score ajustado: {round(adjusted_score, 2)}",
             "Modo: v13 etapa 12 adaptive behavioral orchestration",
         ])
+
+        execution_permission = self._resolve_execution_permission(decision, edge_guard)
+        execution_block_reason = self._pick_execution_block_reason(edge_guard, reasons)
+        setup_quality = "favoravel" if final_direction and adjusted_score >= 3.4 and discernment_quality in ("premium", "bom", "aceitavel") else ("monitorado" if final_direction and adjusted_score >= 2.4 else "fragil")
+        setup_bias = final_direction if final_direction in ("CALL", "PUT") else council.get("consensus_direction")
 
         return {
             "asset": asset,
@@ -956,21 +983,17 @@ class DecisionEngine:
             "edge_guard_decision_cap": edge_guard.get("decision_cap"),
             "edge_guard_stake_multiplier": edge_guard.get("stake_multiplier", 1.0),
             "edge_guard_report": edge_guard.get("report", {}),
+            "execution_permission": execution_permission,
+            "execution_block_reason": execution_block_reason,
+            "setup_quality": setup_quality,
+            "setup_bias": setup_bias,
             "trend_m1": indicators.get("trend_m1", indicators.get("trend", "neutral")),
             "trend_m5": indicators.get("trend_m5", "neutral"),
             "breakout": indicators.get("breakout", False),
             "rejection": indicators.get("rejection", False),
             "volatility": indicators.get("volatility", False),
             "moved_too_fast": indicators.get("moved_too_fast", False),
-            "explosive_expansion": indicators.get("explosive_expansion", False),
-            "late_entry_risk": indicators.get("late_entry_risk", False),
-            "extension_pct": indicators.get("extension_pct", 0.0),
             "is_sideways": indicators.get("is_sideways", False),
             "pattern": indicators.get("pattern"),
-            "provider": indicators.get("provider", "auto"),
-            "provider_trust_score": indicators.get("provider_trust_score", 1.0),
-            "provider_is_fallback": indicators.get("provider_is_fallback", False),
-            "market_type": indicators.get("market_type", "unknown"),
-            "payout": float(indicators.get("payout", DEFAULT_PAYOUT) or DEFAULT_PAYOUT),
             "analysis_session": analysis_time,
         }

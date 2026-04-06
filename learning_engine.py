@@ -9,7 +9,6 @@ from config import ADAPTIVE_MIN_TRADES, ADAPTIVE_STRONG_MIN_TRADES, ADAPTIVE_PRO
 STATE_FILE = os.path.join(DATA_DIR, "alpha_hive_learning.json")
 migrate_file(STATE_FILE, ["/tmp/nexus_learning.json", os.path.join("/opt/render/project/src/data", "alpha_hive_learning.json")])
 STORE_KEY = "learning_memory"
-SEGMENT_KEY = "__segments__"
 
 
 class LearningEngine:
@@ -39,31 +38,6 @@ class LearningEngine:
         self.store.set_json(STORE_KEY, self.memory)
         with open(STATE_FILE, "w", encoding="utf-8") as f:
             safe_dump(self.memory, f)
-
-
-    def _ensure_segments(self):
-        if SEGMENT_KEY not in self.memory or not isinstance(self.memory.get(SEGMENT_KEY), dict):
-            self.memory[SEGMENT_KEY] = {}
-        return self.memory[SEGMENT_KEY]
-
-    def _hour_bucket(self, analysis_time):
-        try:
-            hour = int(str(analysis_time).split(":")[0])
-            return f"{hour:02d}:00" if 0 <= hour <= 23 else "unknown"
-        except Exception:
-            return "unknown"
-
-    def _segment_id(self, *, asset, analysis_time, regime, strategy_name, direction, provider, market_type):
-        provider_text = str(provider or "auto").split("-")[0]
-        return "|".join([
-            str(asset or "N/A"),
-            self._hour_bucket(analysis_time),
-            str(regime or "unknown"),
-            str(strategy_name or "none"),
-            str(direction or "none"),
-            provider_text,
-            str(market_type or "unknown"),
-        ])
 
     def _ensure_asset(self, asset):
         if not asset:
@@ -107,22 +81,6 @@ class LearningEngine:
             self.memory[asset]["wins"] += 1
         else:
             self.memory[asset]["loss"] += 1
-
-        segment_id = self._segment_id(
-            asset=signal.get("asset"),
-            analysis_time=signal.get("analysis_time"),
-            regime=signal.get("regime"),
-            strategy_name=signal.get("strategy_name"),
-            direction=signal.get("signal") or signal.get("direction"),
-            provider=signal.get("provider"),
-            market_type=signal.get("market_type"),
-        )
-        segments = self._ensure_segments()
-        row = segments.setdefault(segment_id, {"wins": 0, "loss": 0})
-        if win:
-            row["wins"] += 1
-        else:
-            row["loss"] += 1
 
         self._save()
 
@@ -270,40 +228,3 @@ class LearningEngine:
         if total >= ADAPTIVE_STRONG_MIN_TRADES and winrate > 0.60:
             return -0.05
         return 0.0
-
-
-def get_segment_adjustment(self, *, asset, analysis_time, regime, strategy_name, direction, provider, market_type):
-    segments = self._ensure_segments()
-    segment_id = self._segment_id(
-        asset=asset,
-        analysis_time=analysis_time,
-        regime=regime,
-        strategy_name=strategy_name,
-        direction=direction,
-        provider=provider,
-        market_type=market_type,
-    )
-    data = segments.get(segment_id, {"wins": 0, "loss": 0})
-    wins = int(data.get("wins", 0) or 0)
-    loss = int(data.get("loss", 0) or 0)
-    total = wins + loss
-    if total < 8:
-        return {"score_boost": 0.0, "confidence_shift": 0, "sample": total, "reason": "Segmentação: amostra insuficiente"}
-
-    winrate = wins / total if total else 0.0
-    edge = winrate - 0.5
-    sample_factor = min(1.0, total / 40.0)
-    score_boost = max(-0.18, min(0.18, edge * 0.9 * sample_factor))
-    confidence_shift = int(max(-4, min(4, round(edge * 18 * sample_factor))))
-    if winrate >= 0.62:
-        reason = "Segmentação: contexto historicamente favorável"
-    elif winrate <= 0.42:
-        reason = "Segmentação: contexto historicamente fraco"
-    else:
-        reason = "Segmentação: contexto equilibrado"
-    return {
-        "score_boost": round(score_boost, 2),
-        "confidence_shift": confidence_shift,
-        "sample": total,
-        "reason": reason,
-    }
