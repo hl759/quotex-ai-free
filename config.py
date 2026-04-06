@@ -88,6 +88,4 @@ SCAN_ROUTE_ENABLED = os.getenv("SCAN_ROUTE_ENABLED", "1").strip().lower() not in
 SCAN_ALIGN_TO_INTERVAL = os.getenv("SCAN_ALIGN_TO_INTERVAL", "1").strip().lower() not in ("0", "false", "no")
 
 SCANNER_MAX_WORKERS = int(os.getenv("SCANNER_MAX_WORKERS", "3"))
-MIN_PAYOUT_TO_TRADE = float(os.getenv("MIN_PAYOUT_TO_TRADE", "0.72"))
-LOW_PAYOUT_SOFT_FLOOR = float(os.getenv("LOW_PAYOUT_SOFT_FLOOR", "0.78"))
 MIN_PROVIDER_TRUST_TO_TRADE = float(os.getenv("MIN_PROVIDER_TRUST_TO_TRADE", "0.74"))
