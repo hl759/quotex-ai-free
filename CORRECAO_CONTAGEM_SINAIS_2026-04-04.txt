@@ -1,7 +1,0 @@
-Correções reaplicadas nesta base:
-- UID único por decisão pendente para evitar colisão de sinais no mesmo minuto.
-- Journal agora respeita UID explícito ao gravar trade.
-- Payload do journal recebe o UID do sinal processado.
-- Processamento de pendências agora compara ativo sem diferença de caixa/espaços.
-- Refresh do cache de estatísticas é forçado quando pendências são processadas.
-- Aba Sinais continua espelhando a aba Decisão nesta base.
