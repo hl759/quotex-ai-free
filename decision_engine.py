@@ -324,11 +324,18 @@ class DecisionEngine:
         regime = indicators.get("regime", "unknown")
         rsi = indicators.get("rsi", 50)
         breakout = indicators.get("breakout", False)
+        breakout_quality = indicators.get("breakout_quality", "absent")
         rejection = indicators.get("rejection", False)
+        rejection_quality = indicators.get("rejection_quality", "absent")
         volatility = indicators.get("volatility", False)
         moved_fast = indicators.get("moved_too_fast", False)
+        late_entry_risk = indicators.get("late_entry_risk", False)
+        explosive_expansion = indicators.get("explosive_expansion", False)
         is_sideways = indicators.get("is_sideways", False)
         pattern = indicators.get("pattern")
+        trend_quality_signal = indicators.get("trend_quality_signal", "neutra")
+        provider = str(indicators.get("provider", "auto") or "auto").lower()
+        market_type = str(indicators.get("market_type", "unknown") or "unknown").lower()
 
         if trend_m1 in ("bull", "bear"):
             score += 1.0
@@ -339,36 +346,51 @@ class DecisionEngine:
                 score += 0.9
                 reasons.append("M1 e M5 alinhados")
             else:
-                score -= 0.35
+                score -= 0.40
                 reasons.append("Conflito entre M1 e M5")
 
         if breakout:
-            score += 0.40
-            reasons.append("Breakout limpo")
+            if breakout_quality == "strong":
+                score += 0.46
+                reasons.append("Breakout limpo")
+            else:
+                score += 0.10
+                reasons.append("Breakout presente, mas ainda frágil")
 
         if rejection:
-            score += 0.32
-            reasons.append("Rejeição relevante")
+            if rejection_quality == "strong":
+                score += 0.34
+                reasons.append("Rejeição relevante")
+            else:
+                score += 0.08
+                reasons.append("Rejeição existente, mas ainda incompleta")
 
         if pattern in ("bullish", "bearish"):
             score += 0.22
             reasons.append(f"Padrão {pattern}")
 
         if volatility:
-            score += 0.22
+            score += 0.18
             reasons.append("Volatilidade saudável")
+
+        if trend_quality_signal == "forte":
+            score += 0.24
+            reasons.append("Qualidade estrutural da tendência forte")
+        elif trend_quality_signal == "fragil":
+            score -= 0.26
+            reasons.append("Qualidade estrutural da tendência frágil")
 
         if regime == "trend":
             score += 0.32
             reasons.append("Regime trend favorável")
         elif regime == "mixed":
-            score += 0.18
+            score += 0.16
             reasons.append("Regime mixed operável")
         elif regime == "sideways":
-            score += 0.10
-            reasons.append("Regime sideways tratável")
+            score -= 0.06
+            reasons.append("Mercado em equilíbrio")
         elif regime == "chaotic":
-            score -= 0.80
+            score -= 0.90
             reasons.append("Regime chaotic bloqueando")
 
         if rsi <= 35 or rsi >= 65:
@@ -379,12 +401,31 @@ class DecisionEngine:
             reasons.append("RSI neutro")
 
         if moved_fast:
-            score -= 0.16
-            reasons.append("Preço já andou um pouco")
+            score -= 0.34
+            reasons.append("Preço já andou demais para M1")
+
+        if late_entry_risk:
+            score -= 0.38
+            reasons.append("Timing M1 tardio")
+
+        if explosive_expansion:
+            score -= 0.44
+            reasons.append("Expansão explosiva reduz qualidade da execução")
 
         if is_sideways:
-            score -= 0.04
-            reasons.append("Zona de ruído")
+            score -= 0.12
+            reasons.append("Mercado lateral/noisy reduz precisão")
+
+        if trend_quality_signal == "fragil" and regime in ("mixed", "sideways") and breakout_quality == "absent":
+            score -= 0.22
+            reasons.append("Estrutura frágil sem breakout limpo")
+
+        if market_type == "crypto" and any(token in provider for token in ("yahoo", "alpha", "finnhub")):
+            score -= 0.28
+            reasons.append("Provider fallback reduz precisão do timing em cripto")
+        elif market_type == "crypto" and "cache" in provider and "binance" not in provider:
+            score -= 0.10
+            reasons.append("Provider em cache reduz um pouco a sensibilidade do timing")
 
         return round(max(0.0, score), 2), reasons
 
@@ -461,34 +502,45 @@ class DecisionEngine:
         }
         return order.get(str(text), 0)
 
+    def _derive_setup_quality(self, score, confidence, direction, environment, discernment_quality, trend_quality, late_entry_risk, explosive_expansion):
+        if direction not in ("CALL", "PUT") or environment == "destructive":
+            return "fragil"
+        if (
+            score >= 4.1
+            and confidence >= 78
+            and discernment_quality in ("premium", "bom")
+            and trend_quality not in ("fragil", "fraca")
+            and not late_entry_risk
+            and not explosive_expansion
+        ):
+            return "premium"
+        if (
+            score >= 3.2
+            and confidence >= 68
+            and discernment_quality in ("premium", "bom", "aceitavel")
+            and not explosive_expansion
+        ):
+            return "favoravel"
+        if direction in ("CALL", "PUT") and score >= 2.4:
+            return "monitorado"
+        return "fragil"
+
     def _apply_edge_guard(self, decision, guard, final_direction, reasons):
         cap = guard.get("decision_cap")
-        permission = str(guard.get("execution_permission") or "").upper()
-        hard_block = bool(guard.get("hard_block", False))
-        stake_mult = float(guard.get("stake_multiplier", 0.0) or 0.0)
-
-        if hard_block or permission == "BLOQUEADO":
-            reasons.append("Edge Guard final: execução bloqueada")
-            return "NAO_OPERAR", None
-
-        if permission == "CAUTELA_OPERAVEL":
-            if decision in ("ENTRADA_FORTE", "ENTRADA_CAUTELA"):
-                reasons.append("Edge Guard final: cautela operável preservada")
-                return "ENTRADA_CAUTELA", final_direction
-            if cap == "OBSERVAR":
-                reasons.append("Edge Guard final: observação mantida por cautela estatística")
-                return "OBSERVAR", final_direction
-
         if not cap:
             return decision, final_direction
         if cap == "NAO_OPERAR":
-            if decision in ("ENTRADA_FORTE", "ENTRADA_CAUTELA") and stake_mult >= 0.12:
-                reasons.append("Edge Guard final: bloqueio rebaixado para cautela mínima")
+            if decision in ("ENTRADA_FORTE", "ENTRADA_CAUTELA") and float(guard.get("stake_multiplier", 0.0) or 0.0) >= 0.18:
+                reasons.append("Edge Guard final: bloqueio convertido em cautela por edge funcional")
                 return "ENTRADA_CAUTELA", final_direction
             reasons.append("Edge Guard final: bloqueio total")
             return "NAO_OPERAR", None
         if cap == "OBSERVAR" and decision in ("ENTRADA_FORTE", "ENTRADA_CAUTELA"):
-            if decision == "ENTRADA_CAUTELA" and stake_mult >= 0.18:
+            if (
+                decision == "ENTRADA_CAUTELA"
+                and bool(guard.get("live_allowed", True))
+                and float(guard.get("stake_multiplier", 0.0) or 0.0) >= 0.32
+            ):
                 reasons.append("Edge Guard final: observação convertida em cautela reduzida")
                 return "ENTRADA_CAUTELA", final_direction
             reasons.append("Edge Guard final: entrada rebaixada para observação")
@@ -694,6 +746,20 @@ class DecisionEngine:
 
         final_direction = self._vote_direction(candidates, fallback_direction)
 
+        segment_adjustment = self.learning.get_segment_adjustment(
+            asset=asset,
+            direction=final_direction,
+            regime=regime,
+            strategy_name=leader_name,
+            analysis_time=analysis_time,
+            provider=indicators.get("provider"),
+            market_type=indicators.get("market_type"),
+        )
+        adjusted_score += segment_adjustment.get("score_boost", 0.0)
+        reasons.append(segment_adjustment.get("reason", "Ajuste por segmento indisponível"))
+        segment_conf_shift = int(segment_adjustment.get("confidence_shift", 0) or 0)
+        segment_proof_state = segment_adjustment.get("proof_state", "building")
+
         try:
             boost = self.learning.get_score_boost(asset)
         except Exception:
@@ -729,6 +795,7 @@ class DecisionEngine:
         base_confidence += context_adj.get("confidence_shift", 0)
         base_confidence += pattern_conf_shift
         base_confidence += meta_conf_shift
+        base_confidence += segment_conf_shift
 
         if consensus_bonus > 0:
             base_confidence += 2
@@ -888,8 +955,41 @@ class DecisionEngine:
                     decision, direction = "ENTRADA_CAUTELA", final_direction
                     reasons.append("Rebalance final: contexto bom/premium preservou cautela operável")
 
+        if decision == "ENTRADA_FORTE" and (indicators.get("late_entry_risk", False) or indicators.get("explosive_expansion", False)):
+            decision = "ENTRADA_CAUTELA"
+            reasons.append("Disciplina M1: entrada forte rebaixada por timing agressivo demais")
+        if (
+            decision in ("ENTRADA_FORTE", "ENTRADA_CAUTELA")
+            and indicators.get("late_entry_risk", False)
+            and indicators.get("moved_too_fast", False)
+            and indicators.get("breakout_quality", "absent") != "strong"
+        ):
+            decision, direction = "OBSERVAR", final_direction
+            reasons.append("Disciplina M1: timing tardio tirou a operabilidade da rodada")
+        if (
+            decision == "ENTRADA_FORTE"
+            and indicators.get("trend_quality_signal", "neutra") == "fragil"
+            and environment in ("complex", "structured_chaos")
+        ):
+            decision = "ENTRADA_CAUTELA"
+            reasons.append("Disciplina M1: tendência frágil impediu agressão máxima")
+
         confidence = base_confidence + capital_plan.get("confidence_shift", 0)
         confidence = int(max(50, min(95, confidence)))
+
+        structural_direction_raw = direction if direction in ("CALL", "PUT") else (final_direction if final_direction in ("CALL", "PUT") else None)
+        structural_quality_raw = self._derive_setup_quality(
+            score=adjusted_score,
+            confidence=confidence,
+            direction=structural_direction_raw,
+            environment=environment,
+            discernment_quality=discernment_quality,
+            trend_quality=indicators.get("trend_quality_signal", "neutra"),
+            late_entry_risk=indicators.get("late_entry_risk", False),
+            explosive_expansion=indicators.get("explosive_expansion", False),
+        )
+        setup_operable_raw = structural_quality_raw in ("premium", "favoravel")
+        setup_strong_raw = structural_quality_raw == "premium"
 
         edge_guard = self.edge_guard_engine.evaluate(
             asset=asset,
@@ -899,6 +999,11 @@ class DecisionEngine:
             proposed_decision=decision,
             proposed_score=adjusted_score,
             proposed_confidence=confidence,
+            setup_operable_raw=setup_operable_raw,
+            setup_strong_raw=setup_strong_raw,
+            structural_score_raw=adjusted_score,
+            structural_direction_raw=structural_direction_raw,
+            structural_quality_raw=structural_quality_raw,
         )
         decision, direction = self._apply_edge_guard(decision, edge_guard, final_direction, reasons)
         capital_plan = self._apply_stake_multiplier(capital_plan, edge_guard.get("stake_multiplier", 1.0))
@@ -930,14 +1035,16 @@ class DecisionEngine:
             f"Evolução: {evolution_variant}",
             f"Capital Mind: {capital_plan.get('phase', 'neutral')}",
             f"Stake sugerida: {capital_plan.get('stake_value', 0.0)}",
+            f"Ajuste por segmento: {segment_proof_state}",
+            f"Setup estrutural: {structural_quality_raw}",
             f"Score ajustado: {round(adjusted_score, 2)}",
             "Modo: v13 etapa 12 adaptive behavioral orchestration",
         ])
 
         execution_permission = self._resolve_execution_permission(decision, edge_guard)
         execution_block_reason = self._pick_execution_block_reason(edge_guard, reasons)
-        setup_quality = "favoravel" if final_direction and adjusted_score >= 3.4 and discernment_quality in ("premium", "bom", "aceitavel") else ("monitorado" if final_direction and adjusted_score >= 2.4 else "fragil")
-        setup_bias = final_direction if final_direction in ("CALL", "PUT") else council.get("consensus_direction")
+        setup_quality = structural_quality_raw
+        setup_bias = structural_direction_raw if structural_direction_raw in ("CALL", "PUT") else council.get("consensus_direction")
 
         return {
             "asset": asset,
@@ -987,6 +1094,9 @@ class DecisionEngine:
             "execution_block_reason": execution_block_reason,
             "setup_quality": setup_quality,
             "setup_bias": setup_bias,
+            "provider": indicators.get("provider", "auto"),
+            "market_type": indicators.get("market_type", "unknown"),
+            "segment_proof_state": segment_proof_state,
             "trend_m1": indicators.get("trend_m1", indicators.get("trend", "neutral")),
             "trend_m5": indicators.get("trend_m5", "neutral"),
             "breakout": indicators.get("breakout", False),

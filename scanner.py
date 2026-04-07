@@ -1,7 +1,7 @@
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from config import CRYPTO_ASSETS, FOREX_ASSETS, METALS_ASSETS, TWELVE_BATCH_SIZE, TWELVE_SCAN_INTERVAL_SECONDS
+from config import CRYPTO_ASSETS, FOREX_ASSETS, METALS_ASSETS, SCANNER_MAX_WORKERS, TWELVE_BATCH_SIZE, TWELVE_SCAN_INTERVAL_SECONDS
 from indicators import IndicatorEngine
 
 
@@ -40,11 +40,13 @@ class MarketScanner:
         if not candles:
             return None
         indicators = self.indicators.calculate(candles)
+        market_type = "crypto" if asset in CRYPTO_ASSETS else ("forex" if asset in FOREX_ASSETS else "metals")
         return {
             "asset": asset,
             "candles": candles,
             "indicators": indicators,
             "provider": self.data.last_provider_used.get(asset, "auto"),
+            "market_type": market_type,
         }
 
     def scan_assets(self):
@@ -57,7 +59,7 @@ class MarketScanner:
         if not active_assets:
             return results
 
-        max_workers = max(1, min(6, len(active_assets)))
+        max_workers = max(1, min(max(1, int(SCANNER_MAX_WORKERS or 3)), len(active_assets)))
         ordered = []
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_map = {executor.submit(self._scan_one, asset): idx for idx, asset in enumerate(active_assets)}

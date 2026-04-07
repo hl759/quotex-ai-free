@@ -405,78 +405,70 @@ def _build_signal_summary(signal, reasons):
 def _build_decision_summary(decision, reasons):
     action = str(decision.get("decision", "NAO_OPERAR") or "NAO_OPERAR")
     direction = decision.get("direction")
-    setup_bias = str(decision.get("setup_bias") or direction or decision.get("council_consensus_direction") or "none")
-    setup_quality = str(decision.get("setup_quality") or decision.get("discernment_quality", "aceitavel") or "aceitavel")
-    execution_permission = str(decision.get("execution_permission") or ("LIBERADO" if action in ("ENTRADA_FORTE", "ENTRADA_CAUTELA") else "BLOQUEADO")).upper()
-    block_reason = str(decision.get("execution_block_reason") or "").strip()
+    setup_bias = decision.get("setup_bias") or direction
+    setup_quality = str(decision.get("setup_quality", "monitorado") or "monitorado")
+    execution_permission = str(decision.get("execution_permission", "") or "").upper().strip()
+    execution_block_reason = str(decision.get("execution_block_reason", "") or "").strip()
     regime = _compact_regime(decision.get("regime", "unknown"))
     environment = str(decision.get("environment_type", "unknown") or "unknown")
     council_quality = str(decision.get("council_quality", "neutro") or "neutro")
     head_action = str(decision.get("head_trader_action", "none") or "none")
     behavior_mode = str(decision.get("behavior_mode", "BALANCED") or "BALANCED")
     capital_phase = str(decision.get("capital_phase", "neutral") or "neutral")
-    edge_mode = str(decision.get("edge_guard_mode", "validation") or "validation")
-    decision_cap = decision.get("edge_guard_decision_cap")
     stake = float(decision.get("suggested_stake", 0.0) or 0.0)
     trend_quality = str(decision.get("trend_quality", "neutra") or "neutra")
-    conflict_type = str(decision.get("conflict_type", "neutro") or "neutro")
+    segment_state = str(decision.get("segment_proof_state", "building") or "building")
 
-    setup_text = f"Leitura {setup_bias}" if setup_bias and setup_bias != "none" else "Leitura sem direção dominante"
+    if not execution_permission:
+        if action == "NAO_OPERAR":
+            execution_permission = "BLOQUEADO"
+        elif action == "OBSERVAR":
+            execution_permission = "CAUTELA_OPERAVEL"
+        else:
+            execution_permission = "LIBERADO"
 
-    if action == "ENTRADA_FORTE":
-        main = "Confluência forte liberou entrada com risco controlado."
-    elif action == "ENTRADA_CAUTELA":
-        main = f"{setup_text} validada, mas com execução reduzida em cautela."
-    elif action == "OBSERVAR":
-        main = f"{setup_text} encontrada, mas a mesa optou por observação profissional."
-    else:
-        main = f"{setup_text} encontrada, mas a execução foi bloqueada para preservar capital."
+    bias_text = setup_bias if setup_bias in ("CALL", "PUT") else (direction if direction in ("CALL", "PUT") else "sem direção")
 
-    if action in ("NAO_OPERAR", "OBSERVAR"):
-        preferred = _pick_reason(
-            reasons,
-            keywords=["edge guard final", "kill-switch", "janela recente", "segmento fraco", "segmento sem prova", "global ainda", "trader council final", "risk dominance final", "orquestração final"],
-            exclude_prefixes=["boost", "strategy score", "stake sugerida", "score ajustado", "modo:"]
-        )
-    else:
-        preferred = _pick_reason(
-            reasons,
-            keywords=["head trader", "edge guard final", "orquestração final", "risk dominance final", "discernimento final", "consenso", "contexto com pouca amostra", "nenhuma estratégia forte"],
-            exclude_prefixes=["boost", "strategy score", "stake sugerida", "score ajustado", "modo:"]
-        )
-    if block_reason:
-        main = block_reason
-    elif preferred:
-        main = preferred
+    if execution_permission == "BLOQUEADO":
+        title = "Resumo do bloqueio"
+        main = execution_block_reason or "Execução bloqueada para preservar capital e qualidade estatística."
+        summary_points = [
+            f"Setup: leitura {bias_text} • qualidade {setup_quality} • regime {regime}",
+            f"Permissão operacional: bloqueada • ambiente {environment} • capital {capital_phase}",
+            f"Mesa: council {council_quality} • Head Trader {head_action} • comportamento {behavior_mode}",
+            f"Prova estatística: segmento {segment_state} • stake {round(stake, 2)}",
+        ]
+        return {"summary_title": title, "summary_main": main, "summary_points": summary_points}
 
-    permission_text = {
-        "LIBERADO": "liberada",
-        "CAUTELA_OPERAVEL": "cautela operável",
-        "BLOQUEADO": "bloqueada",
-    }.get(execution_permission, execution_permission.lower())
+    if execution_permission == "CAUTELA_OPERAVEL":
+        title = "Resumo da cautela operável"
+        main = execution_block_reason or "Setup válido, mas a mesa exige execução pequena e disciplinada."
+        summary_points = [
+            f"Setup: leitura {bias_text} • qualidade {setup_quality} • regime {regime}",
+            f"Permissão operacional: cautela operável • ambiente {environment} • capital {capital_phase}",
+            f"Mesa: council {council_quality} • Head Trader {head_action} • comportamento {behavior_mode}",
+            f"Prova estatística: segmento {segment_state} • stake {round(stake, 2)}",
+        ]
+        return {"summary_title": title, "summary_main": main, "summary_points": summary_points}
 
+    preferred = _pick_reason(
+        reasons,
+        keywords=["consenso", "contexto", "tendência", "romp", "revers", "mercado", "regime"],
+        exclude_prefixes=["boost", "strategy score", "stake sugerida", "score ajustado", "modo:"]
+    )
+    main = preferred or "Confluência alinhada com liberação operacional."
     summary_points = [
-        f"Setup: {setup_text} • qualidade {setup_quality} • regime {regime}",
-        f"Permissão operacional: {permission_text} • ambiente {environment} • tendência {trend_quality}",
-        f"Mesa: council {council_quality} • Head Trader {head_action or 'none'} • conflito {conflict_type}",
-        f"Risco: {behavior_mode} • capital {capital_phase} • stake {round(stake, 2)}",
+        f"Setup: leitura {bias_text} • qualidade {setup_quality} • regime {regime}",
+        f"Permissão operacional: liberada • ambiente {environment} • capital {capital_phase}",
+        f"Mesa: council {council_quality} • Head Trader {head_action} • comportamento {behavior_mode}",
+        f"Prova estatística: segmento {segment_state} • stake {round(stake, 2)}",
     ]
-    if decision_cap:
-        summary_points.append(f"Gate estatístico: modo {edge_mode} com limite {decision_cap}")
-    else:
-        summary_points.append(f"Gate estatístico: modo {edge_mode}")
-
-    title_map = {
-        "ENTRADA_FORTE": "Resumo da entrada forte",
-        "ENTRADA_CAUTELA": "Resumo da cautela operável",
-        "OBSERVAR": "Resumo da observação",
-        "NAO_OPERAR": "Resumo do bloqueio",
-    }
-    return {
-        "summary_title": title_map.get(action, "Resumo operacional"),
-        "summary_main": main,
-        "summary_points": summary_points,
-    }
+    title = "Resumo operacional"
+    if action == "ENTRADA_FORTE":
+        title = "Resumo da entrada forte"
+    elif action == "ENTRADA_CAUTELA":
+        title = "Resumo da entrada em cautela"
+    return {"summary_title": title, "summary_main": main, "summary_points": summary_points}
 
 
 def normalize_signals(signals):
@@ -549,10 +541,6 @@ def decorate_decision(decision):
         "edge_guard_mode": decision.get("edge_guard_mode", "validation"),
         "edge_guard_decision_cap": decision.get("edge_guard_decision_cap"),
         "edge_guard_stake_multiplier": decision.get("edge_guard_stake_multiplier", 1.0),
-        "execution_permission": decision.get("execution_permission", "LIBERADO" if decision.get("decision") in ("ENTRADA_FORTE", "ENTRADA_CAUTELA") else "BLOQUEADO"),
-        "execution_block_reason": decision.get("execution_block_reason", ""),
-        "setup_quality": decision.get("setup_quality", decision.get("discernment_quality", "aceitavel")),
-        "setup_bias": decision.get("setup_bias", decision.get("direction") or decision.get("council_consensus_direction")),
         "transition_probability": decision.get("transition_probability", "low"),
         "next_environment": decision.get("next_environment", "unknown"),
         "trend_m1": decision.get("trend_m1", "neutral"),
@@ -570,6 +558,13 @@ def decorate_decision(decision):
         "trader_council": decision.get("trader_council", {}),
         "council_participants": decision.get("council_participants", []),
         "case_memory": decision.get("case_memory", {}),
+        "execution_permission": decision.get("execution_permission", "LIBERADO"),
+        "execution_block_reason": decision.get("execution_block_reason", ""),
+        "setup_quality": decision.get("setup_quality", "monitorado"),
+        "setup_bias": decision.get("setup_bias"),
+        "provider": decision.get("provider", "auto"),
+        "market_type": decision.get("market_type", "unknown"),
+        "segment_proof_state": decision.get("segment_proof_state", "building"),
     }
 
 
@@ -638,6 +633,13 @@ def enqueue_pending_decision(current_decision, matched_market):
         "trader_council": current_decision.get("trader_council", {}),
         "council_participants": current_decision.get("council_participants", []),
         "case_memory": current_decision.get("case_memory", {}),
+        "provider": current_decision.get("provider", "auto"),
+        "market_type": current_decision.get("market_type", "unknown"),
+        "execution_permission": current_decision.get("execution_permission", "LIBERADO"),
+        "execution_block_reason": current_decision.get("execution_block_reason", ""),
+        "setup_quality": current_decision.get("setup_quality", "monitorado"),
+        "setup_bias": current_decision.get("setup_bias"),
+        "segment_proof_state": current_decision.get("segment_proof_state", "building"),
     }
 
     if record["uid"] not in existing:
@@ -1028,9 +1030,12 @@ def run_scan_once(trigger="loop"):
             indicators = dict(item.get("indicators", {}))
             indicators["analysis_time"] = analysis_time
             indicators["weekday"] = current_weekday
+            indicators["provider"] = item.get("provider", "auto")
+            indicators["market_type"] = item.get("market_type", "unknown")
             indicators.update(capital_state)
             decision = decision_engine.decide(item.get("asset"), indicators)
             decision["provider"] = item.get("provider", "auto")
+            decision["market_type"] = item.get("market_type", "unknown")
             decision_candidates.append((decision, item))
 
         if decision_candidates:

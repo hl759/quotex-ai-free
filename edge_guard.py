@@ -9,6 +9,7 @@ from config import (
     BOOTSTRAP_STAKE_MULTIPLIER,
     BOOTSTRAP_WARMUP_MAX_TRADES,
     BOOTSTRAP_WARMUP_STAKE_MULTIPLIER,
+    EDGE_EXPLORATION_STAKE_MULTIPLIER,
     EDGE_GUARD_ACTIVE,
     EDGE_LIVE_MIN_PROB,
     EDGE_MIN_PROFIT_FACTOR,
@@ -105,7 +106,7 @@ class EdgeGuardEngine:
             "Edge global",
             "Múltiplos segmentos",
             "Segmento fraco",
-            "Segmento sem prova",
+            "Segmento em formação",
             "Bootstrap",
             "Warmup",
             "Validação",
@@ -116,14 +117,32 @@ class EdgeGuardEngine:
                     return str(reason)
         return str(reasons[0]) if reasons else "Edge Guard neutro"
 
-    def _permission_from_state(self, decision_cap, stake_multiplier, live_allowed, hard_block=False):
-        if hard_block or decision_cap == "NAO_OPERAR" or (decision_cap == "OBSERVAR" and not live_allowed and stake_multiplier <= 0.12):
+    def _permission_from_state(self, decision_cap, stake_multiplier, live_allowed, hard_block=False, raw_operable=False):
+        if hard_block or decision_cap == "NAO_OPERAR":
             return "BLOQUEADO"
-        if decision_cap in ("OBSERVAR", "ENTRADA_CAUTELA") or stake_multiplier < 0.90 or not live_allowed:
+        if decision_cap == "OBSERVAR":
+            if raw_operable and stake_multiplier >= max(0.14, EDGE_EXPLORATION_STAKE_MULTIPLIER):
+                return "CAUTELA_OPERAVEL"
+            return "BLOQUEADO" if not live_allowed and stake_multiplier <= 0.12 else "CAUTELA_OPERAVEL"
+        if decision_cap in ("ENTRADA_CAUTELA",) or stake_multiplier < 0.90 or not live_allowed:
             return "CAUTELA_OPERAVEL"
         return "LIBERADO"
 
-    def evaluate(self, asset, regime, strategy_name, analysis_time, proposed_decision, proposed_score, proposed_confidence):
+    def evaluate(
+        self,
+        asset,
+        regime,
+        strategy_name,
+        analysis_time,
+        proposed_decision,
+        proposed_score,
+        proposed_confidence,
+        setup_operable_raw=None,
+        setup_strong_raw=None,
+        structural_score_raw=None,
+        structural_direction_raw=None,
+        structural_quality_raw=None,
+    ):
         if not self.active:
             return {
                 "active": False,
@@ -162,8 +181,13 @@ class EdgeGuardEngine:
         global_be = self._safe_float(summary.get("breakeven_winrate"), 100.0)
         global_prob = self._safe_float(summary.get("posterior_prob_edge"), 0.0)
 
-        operable_setup = self._operable_setup(proposed_decision, proposed_score, proposed_confidence)
-        strong_setup = self._strong_setup(proposed_decision, proposed_score, proposed_confidence)
+        raw_score = self._safe_float(structural_score_raw, proposed_score)
+        raw_confidence = self._safe_float(proposed_confidence, 0.0)
+        raw_operable = bool(setup_operable_raw) if setup_operable_raw is not None else self._operable_setup(proposed_decision, raw_score, raw_confidence)
+        raw_strong = bool(setup_strong_raw) if setup_strong_raw is not None else self._strong_setup(proposed_decision, raw_score, raw_confidence)
+        raw_direction = str(structural_direction_raw or "").upper()
+        raw_quality = str(structural_quality_raw or ("favoravel" if raw_operable else "fragil")).strip().lower()
+        raw_fragile = raw_quality in ("fragil", "duvidoso", "fraco")
 
         if self.mode == "shadow":
             decision_cap = "OBSERVAR"
@@ -191,14 +215,14 @@ class EdgeGuardEngine:
                 and recent_prob < 0.24
             )
             if severe_kill:
-                if strong_setup and not catastrophic_recent:
+                if raw_strong and not catastrophic_recent and raw_direction in ("CALL", "PUT"):
                     decision_cap = self._merge_cap(decision_cap, "ENTRADA_CAUTELA")
-                    stake_multiplier = min(stake_multiplier, 0.18 if self.mode == "live" else 0.24)
-                    reasons.append("Kill-switch recente severo: setup premium preservou cautela operável para continuar aprendendo")
-                elif operable_setup and global_total < max(EDGE_PROOF_MIN_TRADES * 2, BOOTSTRAP_WARMUP_MAX_TRADES * 2) and not catastrophic_recent:
+                    stake_multiplier = min(stake_multiplier, 0.22 if self.mode == "live" else 0.28)
+                    reasons.append("Kill-switch recente severo: setup premium preservou cautela operável")
+                elif raw_operable and not raw_fragile and not catastrophic_recent and raw_direction in ("CALL", "PUT"):
                     decision_cap = self._merge_cap(decision_cap, "ENTRADA_CAUTELA")
-                    stake_multiplier = min(stake_multiplier, 0.14 if self.mode == "live" else 0.20)
-                    reasons.append("Kill-switch recente severo: execução mínima mantida para reaprendizado controlado")
+                    stake_multiplier = min(stake_multiplier, max(EDGE_EXPLORATION_STAKE_MULTIPLIER, 0.16))
+                    reasons.append("Kill-switch recente severo: fluxo mínimo de aprendizado foi preservado")
                 else:
                     decision_cap = self._merge_cap(decision_cap, "NAO_OPERAR" if self.mode == "live" else "OBSERVAR")
                     stake_multiplier = min(stake_multiplier, 0.0 if self.mode == "live" else 0.16)
@@ -208,18 +232,18 @@ class EdgeGuardEngine:
                     reasons.append("Kill-switch recente: drift negativo forte detectado")
             elif moderate_kill:
                 decision_cap = self._merge_cap(decision_cap, "ENTRADA_CAUTELA")
-                stake_multiplier = min(stake_multiplier, 0.26 if self.mode == "live" else 0.32)
+                stake_multiplier = min(stake_multiplier, 0.28 if self.mode == "live" else 0.34)
                 reasons.append("Kill-switch recente: drift negativo detectado, mantendo apenas cautela")
 
         if recent_total >= max(12, EDGE_RECENT_WINDOW // 2) and (recent_exp <= EDGE_RECENT_WARN_EXPECTANCY_R or recent_pf < 1.0 or recent_prob < 0.50):
             decision_cap = self._merge_cap(decision_cap, "ENTRADA_CAUTELA")
-            stake_multiplier = min(stake_multiplier, 0.78)
+            stake_multiplier = min(stake_multiplier, 0.80)
             reasons.append("Janela recente fraca: reduzindo agressividade")
 
         bootstrap_ready = self._bootstrap_ready(
             proposed_decision=proposed_decision,
-            proposed_score=proposed_score,
-            proposed_confidence=proposed_confidence,
+            proposed_score=raw_score,
+            proposed_confidence=raw_confidence,
             kill_locked=kill_locked,
         )
 
@@ -229,8 +253,8 @@ class EdgeGuardEngine:
                 if bootstrap_ready:
                     stake_multiplier = min(stake_multiplier, max(BOOTSTRAP_STAKE_MULTIPLIER, 0.26))
                     reasons.append("Bootstrap inteligente: consenso forte pode operar pequeno para construir amostra")
-                elif operable_setup:
-                    stake_multiplier = min(stake_multiplier, 0.20)
+                elif raw_operable:
+                    stake_multiplier = min(stake_multiplier, max(EDGE_EXPLORATION_STAKE_MULTIPLIER, 0.18))
                     reasons.append("Bootstrap: histórico curto, mas setup bom manteve cautela operável")
                 else:
                     stake_multiplier = min(stake_multiplier, max(0.14, BOOTSTRAP_STAKE_MULTIPLIER * 0.80))
@@ -240,24 +264,24 @@ class EdgeGuardEngine:
                 if bootstrap_ready:
                     stake_multiplier = min(stake_multiplier, BOOTSTRAP_WARMUP_STAKE_MULTIPLIER)
                     reasons.append("Warmup: amostra curta, mas consenso forte libera cautela")
-                elif global_expectancy > -0.05 and global_pf >= 0.92 and operable_setup:
-                    stake_multiplier = min(stake_multiplier, 0.24)
+                elif global_expectancy > -0.05 and global_pf >= 0.92 and raw_operable:
+                    stake_multiplier = min(stake_multiplier, 0.26)
                     reasons.append("Warmup defensivo: histórico curto, porém setup ainda operável")
                 else:
                     stake_multiplier = min(stake_multiplier, 0.18)
                     reasons.append("Warmup: histórico curto e sem força suficiente para agressão, mantendo cautela")
             elif global_total < EDGE_PROOF_MIN_TRADES:
-                if global_expectancy > -0.05 and global_pf >= 0.92 and global_prob >= 0.47:
+                if global_expectancy > -0.05 and global_pf >= 0.92 and global_prob >= 0.44 and raw_operable:
                     decision_cap = self._merge_cap(decision_cap, "ENTRADA_CAUTELA")
-                    stake_multiplier = min(stake_multiplier, 0.70)
+                    stake_multiplier = min(stake_multiplier, 0.72)
                     reasons.append("Edge ainda em validação: cautela operável e stake reduzida")
-                elif strong_setup and recent_exp > (EDGE_RECENT_WARN_EXPECTANCY_R - 0.04):
+                elif raw_strong and recent_exp > (EDGE_RECENT_WARN_EXPECTANCY_R - 0.04):
                     decision_cap = self._merge_cap(decision_cap, "ENTRADA_CAUTELA")
-                    stake_multiplier = min(stake_multiplier, 0.28)
+                    stake_multiplier = min(stake_multiplier, 0.30)
                     reasons.append("Validação inicial: setup forte manteve fluxo mínimo de aprendizado")
-                elif operable_setup:
+                elif raw_operable:
                     decision_cap = self._merge_cap(decision_cap, "ENTRADA_CAUTELA")
-                    stake_multiplier = min(stake_multiplier, 0.18)
+                    stake_multiplier = min(stake_multiplier, max(EDGE_EXPLORATION_STAKE_MULTIPLIER, 0.18))
                     reasons.append("Validação curta: contexto operável manteve cautela de baixa exposição")
                 else:
                     decision_cap = self._merge_cap(decision_cap, "OBSERVAR")
@@ -269,21 +293,21 @@ class EdgeGuardEngine:
                 fully_proven = (global_expectancy > 0 and global_pf >= EDGE_MIN_PROFIT_FACTOR and global_wr > global_be and global_prob >= required_prob)
                 near_proven = (global_expectancy > -0.04 and global_pf >= 0.95 and global_prob >= max(0.45, required_prob - 0.05))
                 if not fully_proven:
-                    if near_proven and str(proposed_decision) in ("ENTRADA_FORTE", "ENTRADA_CAUTELA"):
+                    if near_proven and raw_operable:
                         decision_cap = self._merge_cap(decision_cap, "ENTRADA_CAUTELA")
-                        stake_multiplier = min(stake_multiplier, 0.42 if self.mode == "live" else 0.50)
+                        stake_multiplier = min(stake_multiplier, 0.46 if self.mode == "live" else 0.54)
                         reasons.append("Edge global quase provado: mantendo cautela tática")
-                    elif strong_setup:
+                    elif raw_strong:
                         decision_cap = self._merge_cap(decision_cap, "ENTRADA_CAUTELA")
-                        stake_multiplier = min(stake_multiplier, 0.28)
-                        reasons.append("Edge global ainda incompleto, mas score alto preservou cautela operável")
-                    elif operable_setup and recent_exp > (EDGE_RECENT_KILL_EXPECTANCY_R - 0.12):
+                        stake_multiplier = min(stake_multiplier, 0.32)
+                        reasons.append("Edge global ainda incompleto, mas setup forte preservou cautela operável")
+                    elif raw_operable and recent_exp > (EDGE_RECENT_KILL_EXPECTANCY_R - 0.12):
                         decision_cap = self._merge_cap(decision_cap, "ENTRADA_CAUTELA")
-                        stake_multiplier = min(stake_multiplier, 0.20)
+                        stake_multiplier = min(stake_multiplier, max(EDGE_EXPLORATION_STAKE_MULTIPLIER, 0.18))
                         reasons.append("Edge global fraco, porém sem colapso severo: mantendo exploração mínima")
                     else:
                         decision_cap = self._merge_cap(decision_cap, "OBSERVAR")
-                        stake_multiplier = min(stake_multiplier, 0.14 if self.mode == "live" else 0.18)
+                        stake_multiplier = min(stake_multiplier, 0.16 if self.mode == "live" else 0.20)
                         live_allowed = False if self.mode == "live" else live_allowed
                         reasons.append("Edge global ainda não está totalmente provado, exigindo observação")
                 else:
@@ -302,11 +326,13 @@ class EdgeGuardEngine:
         ]
         weak_segments = 0
         strong_segments = 0
+        no_proof_segments = 0
         for label, row in segment_checks:
             good = self._segment_good(row)
             if good is None:
-                stake_multiplier = min(stake_multiplier, 0.98)
-                reasons.append(f"Segmento sem prova suficiente: {label}")
+                no_proof_segments += 1
+                stake_multiplier = min(stake_multiplier, 0.96)
+                reasons.append(f"Segmento em formação: {label}")
             elif good:
                 strong_segments += 1
                 reasons.append(f"Segmento favorece execução: {label}")
@@ -318,14 +344,18 @@ class EdgeGuardEngine:
                 reasons.append(f"Segmento fraco: {label}")
 
         if weak_segments >= 3 and not hard_block:
-            if strong_setup or operable_setup:
+            if raw_strong or raw_operable:
                 decision_cap = self._merge_cap(decision_cap, "ENTRADA_CAUTELA")
-                stake_multiplier = min(stake_multiplier, 0.46 if strong_setup else 0.38)
+                stake_multiplier = min(stake_multiplier, 0.46 if raw_strong else 0.38)
                 reasons.append("Múltiplos segmentos fracos: contexto ainda operável manteve cautela profissional")
             else:
                 decision_cap = self._merge_cap(decision_cap, "OBSERVAR")
                 stake_multiplier = min(stake_multiplier, 0.20)
                 reasons.append("Múltiplos segmentos fracos: entrada permanece em observação")
+        elif no_proof_segments >= 3 and weak_segments == 0 and raw_operable and not hard_block:
+            decision_cap = self._merge_cap(decision_cap, "ENTRADA_CAUTELA")
+            stake_multiplier = min(stake_multiplier, max(0.18, EDGE_EXPLORATION_STAKE_MULTIPLIER))
+            reasons.append("Múltiplos segmentos ainda em formação: mantendo aprendizado controlado")
 
         if strong_segments >= 3 and global_total >= EDGE_PROOF_MIN_TRADES and global_expectancy > 0 and recent_exp > 0:
             stake_multiplier = min(1.0, max(stake_multiplier, 0.90))
@@ -355,6 +385,7 @@ class EdgeGuardEngine:
             stake_multiplier=stake_multiplier,
             live_allowed=live_allowed,
             hard_block=hard_block,
+            raw_operable=raw_operable,
         )
         dominant_reason = self._pick_dominant_reason(reasons)
 
@@ -365,10 +396,14 @@ class EdgeGuardEngine:
             "bootstrap_ready": bool(bootstrap_ready),
             "decision_cap": decision_cap,
             "stake_multiplier": round(max(0.0, min(1.0, stake_multiplier)), 2),
-            "live_allowed": bool(live_allowed and (decision_cap != "NAO_OPERAR")),
+            "live_allowed": bool(live_allowed and (decision_cap != "NAO_OPERAR") and not hard_block),
             "hard_block": bool(hard_block),
             "execution_permission": execution_permission,
             "dominant_reason": dominant_reason,
+            "raw_setup_operable": raw_operable,
+            "raw_setup_strong": raw_strong,
+            "raw_setup_quality": raw_quality,
+            "raw_direction": raw_direction,
             "reasons": reasons,
             "report": {
                 "summary": summary,

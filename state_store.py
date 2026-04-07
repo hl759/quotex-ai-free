@@ -375,90 +375,91 @@ class StateStore:
 
 
 
-    def prune_scans(self, keep_latest=1200, max_age_days=14):
-        keep_latest = max(50, int(keep_latest or 1200))
-        removed = 0
-        cutoff_iso = (datetime.utcnow() - timedelta(days=max(1, int(max_age_days or 14)))).isoformat()
-        with self._lock:
-            with self._connect() as conn:
-                if self.use_postgres:
-                    with conn.cursor() as cur:
-                        cur.execute(
-                            """
-                            DELETE FROM scans
-                            WHERE id IN (
-                                SELECT id FROM scans
-                                WHERE created_at < %s
-                                   OR id NOT IN (SELECT id FROM scans ORDER BY id DESC LIMIT %s)
-                            )
-                            """,
-                            (cutoff_iso, keep_latest),
-                        )
-                        removed = cur.rowcount or 0
-                else:
-                    cur = conn.execute(
+
+def prune_scans(self, keep_latest=1200, max_age_days=14):
+    keep_latest = max(50, int(keep_latest or 1200))
+    removed = 0
+    cutoff_iso = (datetime.utcnow() - timedelta(days=max(1, int(max_age_days or 14)))).isoformat()
+    with self._lock:
+        with self._connect() as conn:
+            if self.use_postgres:
+                with conn.cursor() as cur:
+                    cur.execute(
                         """
                         DELETE FROM scans
-                        WHERE created_at < ?
-                           OR id NOT IN (SELECT id FROM scans ORDER BY id DESC LIMIT ?)
+                        WHERE id IN (
+                            SELECT id FROM scans
+                            WHERE created_at < %s
+                               OR id NOT IN (SELECT id FROM scans ORDER BY id DESC LIMIT %s)
+                        )
                         """,
                         (cutoff_iso, keep_latest),
                     )
                     removed = cur.rowcount or 0
-        return int(removed or 0)
+            else:
+                cur = conn.execute(
+                    """
+                    DELETE FROM scans
+                    WHERE created_at < ?
+                       OR id NOT IN (SELECT id FROM scans ORDER BY id DESC LIMIT ?)
+                    """,
+                    (cutoff_iso, keep_latest),
+                )
+                removed = cur.rowcount or 0
+    return int(removed or 0)
 
-    def prune_collection(self, collection_name, keep_latest=4000, max_age_days=90):
-        keep_latest = max(100, int(keep_latest or 4000))
-        cutoff_iso = (datetime.utcnow() - timedelta(days=max(1, int(max_age_days or 90)))).isoformat()
-        removed = 0
-        with self._lock:
-            with self._connect() as conn:
-                if self.use_postgres:
-                    with conn.cursor() as cur:
-                        cur.execute(
-                            """
-                            DELETE FROM collection_items
-                            WHERE collection_name = %s
-                              AND (
-                                created_at < %s
-                                OR uid NOT IN (
-                                    SELECT uid FROM collection_items
-                                    WHERE collection_name = %s
-                                    ORDER BY updated_at DESC
-                                    LIMIT %s
-                                )
-                              )
-                            """,
-                            (str(collection_name), cutoff_iso, str(collection_name), keep_latest),
-                        )
-                        removed = cur.rowcount or 0
-                else:
-                    cur = conn.execute(
+def prune_collection(self, collection_name, keep_latest=4000, max_age_days=90):
+    keep_latest = max(100, int(keep_latest or 4000))
+    cutoff_iso = (datetime.utcnow() - timedelta(days=max(1, int(max_age_days or 90)))).isoformat()
+    removed = 0
+    with self._lock:
+        with self._connect() as conn:
+            if self.use_postgres:
+                with conn.cursor() as cur:
+                    cur.execute(
                         """
                         DELETE FROM collection_items
-                        WHERE collection_name = ?
+                        WHERE collection_name = %s
                           AND (
-                            created_at < ?
+                            created_at < %s
                             OR uid NOT IN (
                                 SELECT uid FROM collection_items
-                                WHERE collection_name = ?
+                                WHERE collection_name = %s
                                 ORDER BY updated_at DESC
-                                LIMIT ?
+                                LIMIT %s
                             )
                           )
                         """,
                         (str(collection_name), cutoff_iso, str(collection_name), keep_latest),
                     )
                     removed = cur.rowcount or 0
-        return int(removed or 0)
+            else:
+                cur = conn.execute(
+                    """
+                    DELETE FROM collection_items
+                    WHERE collection_name = ?
+                      AND (
+                        created_at < ?
+                        OR uid NOT IN (
+                            SELECT uid FROM collection_items
+                            WHERE collection_name = ?
+                            ORDER BY updated_at DESC
+                            LIMIT ?
+                        )
+                      )
+                    """,
+                    (str(collection_name), cutoff_iso, str(collection_name), keep_latest),
+                )
+                removed = cur.rowcount or 0
+    return int(removed or 0)
 
-    def vacuum_if_sqlite(self):
-        if self.use_postgres:
-            return False
-        with self._lock:
-            with self._connect() as conn:
-                conn.execute('VACUUM')
-        return True
+def vacuum_if_sqlite(self):
+    if self.use_postgres:
+        return False
+    with self._lock:
+        with self._connect() as conn:
+            conn.execute('VACUUM')
+    return True
 
 def get_state_store():
     return StateStore()

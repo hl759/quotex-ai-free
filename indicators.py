@@ -69,22 +69,55 @@ class IndicatorEngine:
             return "sideways"
         return "mixed"
 
-    def _breakout(self, df):
+    def _breakout_quality(self, df, trend_m1):
         if len(df) < 6:
-            return False
+            return False, "absent"
         prev_high = df["high"].iloc[-6:-1].max()
         prev_low = df["low"].iloc[-6:-1].min()
         last = df.iloc[-1]
-        return bool(last["close"] > prev_high or last["close"] < prev_low)
+        candle_range = max(last["high"] - last["low"], 1e-9)
+        body = abs(last["close"] - last["open"])
+        body_ratio = body / candle_range
+        close_position = (last["close"] - last["low"]) / candle_range
+        recent_moves = (df["close"].tail(6) - df["open"].tail(6)).abs() / df["close"].tail(6).replace(0, 1e-9)
+        move_now = abs(last["close"] - last["open"]) / max(last["close"], 1e-9)
+        recent_mean_move = float(recent_moves.iloc[:-1].mean()) if len(recent_moves) > 1 else move_now
+        expansion_ratio = move_now / max(recent_mean_move, 1e-9)
 
-    def _rejection(self, df):
+        broke_up = last["close"] > prev_high
+        broke_down = last["close"] < prev_low
+        breakout = bool(broke_up or broke_down)
+        if not breakout:
+            return False, "absent"
+
+        directional_close = close_position >= 0.72 if broke_up else close_position <= 0.28
+        if body_ratio >= 0.58 and directional_close and expansion_ratio >= 1.18:
+            return True, "strong"
+        return True, "weak"
+
+    def _rejection_quality(self, df):
         if len(df) < 2:
-            return False
+            return False, "absent"
         last = df.iloc[-1]
         candle_range = max(last["high"] - last["low"], 1e-9)
+        body = abs(last["close"] - last["open"])
+        body_ratio = body / candle_range
         upper_wick = last["high"] - max(last["open"], last["close"])
         lower_wick = min(last["open"], last["close"]) - last["low"]
-        return bool(upper_wick / candle_range > 0.45 or lower_wick / candle_range > 0.45)
+        upper_ratio = upper_wick / candle_range
+        lower_ratio = lower_wick / candle_range
+        close_position = (last["close"] - last["low"]) / candle_range
+
+        strong_upper = upper_ratio > 0.52 and body_ratio < 0.42 and close_position < 0.42
+        strong_lower = lower_ratio > 0.52 and body_ratio < 0.42 and close_position > 0.58
+        weak_upper = upper_ratio > 0.42
+        weak_lower = lower_ratio > 0.42
+
+        if strong_upper or strong_lower:
+            return True, "strong"
+        if weak_upper or weak_lower:
+            return True, "weak"
+        return False, "absent"
 
     def calculate(self, candles):
         df = pd.DataFrame(candles)
@@ -100,12 +133,23 @@ class IndicatorEngine:
         pattern = self._detect_pattern(df)
         volatility = bool(df["close"].pct_change().tail(10).std() > 0.0012)
         regime = self._regime(df)
-        breakout = self._breakout(df)
-        rejection = self._rejection(df)
+        breakout, breakout_quality = self._breakout_quality(df, trend_m1)
+        rejection, rejection_quality = self._rejection_quality(df)
 
         last = df.iloc[-1]
-        candle_move = abs(last["close"] - last["open"]) / max(last["close"], 1e-9)
-        moved_too_fast = candle_move > 0.0025
+        candle_range = max(last["high"] - last["low"], 1e-9)
+        body = abs(last["close"] - last["open"])
+        body_ratio = body / candle_range
+        close_position = (last["close"] - last["low"]) / candle_range
+        candle_move = body / max(last["close"], 1e-9)
+
+        recent_moves = (df["close"].tail(8) - df["open"].tail(8)).abs() / df["close"].tail(8).replace(0, 1e-9)
+        baseline_move = float(recent_moves.iloc[:-1].mean()) if len(recent_moves) > 1 else candle_move
+        expansion_ratio = candle_move / max(baseline_move, 1e-9)
+
+        moved_too_fast = candle_move > 0.0022 or (body_ratio > 0.68 and expansion_ratio > 1.5)
+        explosive_expansion = candle_move > 0.0034 or expansion_ratio > 1.9
+        late_entry_risk = moved_too_fast and ((trend_m1 == "bull" and close_position > 0.78) or (trend_m1 == "bear" and close_position < 0.22))
 
         recent_range = (df["high"].tail(8).max() - df["low"].tail(8).min()) / max(df["close"].iloc[-1], 1e-9)
         is_sideways = recent_range < 0.0022
@@ -116,6 +160,14 @@ class IndicatorEngine:
             m5["ema9"] = m5["close"].ewm(span=9).mean()
             m5["ema21"] = m5["close"].ewm(span=21).mean()
             trend_m5 = "bull" if m5["ema9"].iloc[-1] > m5["ema21"].iloc[-1] else "bear"
+
+        ema_spread = abs(df["ema9"].iloc[-1] - df["ema21"].iloc[-1]) / max(df["close"].iloc[-1], 1e-9)
+        if trend_m5 == trend_m1 and ema_spread >= 0.0010:
+            trend_quality_signal = "forte"
+        elif trend_m5 == trend_m1 and ema_spread >= 0.00045:
+            trend_quality_signal = "aceitavel"
+        else:
+            trend_quality_signal = "fragil"
 
         return {
             "trend_m1": trend_m1,
@@ -128,7 +180,15 @@ class IndicatorEngine:
             "volatility": volatility,
             "regime": regime,
             "breakout": breakout,
+            "breakout_quality": breakout_quality,
             "rejection": rejection,
+            "rejection_quality": rejection_quality,
+            "trend_quality_signal": trend_quality_signal,
             "moved_too_fast": moved_too_fast,
-            "is_sideways": is_sideways
+            "late_entry_risk": late_entry_risk,
+            "explosive_expansion": explosive_expansion,
+            "is_sideways": is_sideways,
+            "candle_body_ratio": round(body_ratio, 4),
+            "close_position": round(close_position, 4),
+            "expansion_ratio": round(float(expansion_ratio), 4),
         }
