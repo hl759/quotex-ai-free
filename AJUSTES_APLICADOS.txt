@@ -1,8 +1,0 @@
-AJUSTES APLICADOS
-
-1. Removidos arquivos compilados .pyc e caches __pycache__
-2. Adicionado .gitignore para evitar versionar lixo de ambiente
-3. Reforçado adaptive_behavioral_orchestration_engine.py com criação segura do DATA_DIR
-
-Nenhuma lógica central da IA foi alterada.
-O decision_engine.py e a estrutura comportamental foram preservados.
