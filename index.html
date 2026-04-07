@@ -1,1 +1,32 @@
-<!doctype html><html><body>Use /</body></html>
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Alpha Hive AI</title>
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <div class="wrap">
+    <h1>Alpha Hive AI</h1>
+    <p class="sub">Infraestrutura broker-agnostic de decisão operacional</p>
+    <div class="actions">
+      <button onclick="runScan()">Rodar scan</button>
+      <button onclick="refresh()">Atualizar</button>
+    </div>
+    <section class="card">
+      <h2>Decisão atual</h2>
+      <pre id="decision">Carregando...</pre>
+    </section>
+    <section class="card">
+      <h2>Sinais</h2>
+      <pre id="signals">[]</pre>
+    </section>
+    <section class="card">
+      <h2>Meta</h2>
+      <pre id="meta">...</pre>
+    </section>
+  </div>
+  <script src="/js/app.js"></script>
+</body>
+</html>
