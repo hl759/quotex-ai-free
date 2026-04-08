@@ -6,6 +6,7 @@ from alpha_hive.core.enums import DecisionLabel
 from alpha_hive.risk.execution_permission import resolve_execution_permission
 from alpha_hive.risk.kill_switch import evaluate_kill_switch
 
+
 class EdgeGuard:
     def evaluate(self, snapshot: MarketSnapshot, features: MarketFeatures, council: CouncilDecision, audit_summary: dict, setup_quality: str) -> RiskDecision:
         reasons = []
@@ -52,7 +53,7 @@ class EdgeGuard:
             decision_cap = DecisionLabel.NO_TRADE.value
             stake_multiplier = 0.0
         elif council.conflict_level == "high":
-            reasons.append("Conflito alto: entrada limitada a cautela")
+            reasons.append("Conflito alto, mas não destrutivo: limitando a cautela")
             decision_cap = DecisionLabel.ENTRY_CAUTION.value
             stake_multiplier = min(stake_multiplier, 0.40)
 
@@ -68,6 +69,7 @@ class EdgeGuard:
 
         state = "DEFENSE" if hard_block else "CAUTION" if decision_cap in (DecisionLabel.OBSERVE.value, DecisionLabel.ENTRY_CAUTION.value) else "OFFENSE"
         permission = resolve_execution_permission(decision_cap, hard_block, stake_multiplier)
+
         return RiskDecision(
             state=state,
             execution_permission=permission,

@@ -22,6 +22,7 @@ from alpha_hive.specialists.timing_specialist import TimingSpecialist
 from alpha_hive.specialists.trend_specialist import TrendSpecialist
 from alpha_hive.specialists.volatility_specialist import VolatilitySpecialist
 
+
 class DecisionEngine:
     def __init__(self):
         self.feature_engine = FeatureEngine()
@@ -67,6 +68,7 @@ class DecisionEngine:
         base_score = sum(v.vote_strength for v in votes if not v.veto)
         calibration = self.learning.calibration_profile(snapshot.asset)
         score = round(base_score + self.learning.asset_boost(snapshot.asset), 2)
+
         if council.consensus_direction:
             lead_specialist = council.top_specialists[0] if council.top_specialists else "trend"
             segment_adj = self.learning.segment_adjustment(
@@ -80,6 +82,7 @@ class DecisionEngine:
                 setup_quality=setup_quality,
             )
             score = round(score + float(segment_adj["score_boost"]), 2)
+
         confidence = int(max(50, min(95, (50 + score * 8) * calibration["confidence_factor"])))
         audit_summary = self.audit.compute_report()
         risk = self.edge_guard.evaluate(snapshot, features, council, audit_summary, setup_quality)
@@ -92,19 +95,23 @@ class DecisionEngine:
             and score >= 4.5
             and confidence >= 88
             and setup_quality in ("favoravel", "premium")
-            and snapshot.data_quality_score >= 0.80
+            and snapshot.data_quality_score >= max(0.80, SETTINGS.data_quality_min_offense)
             and council.support_weight > council.opposition_weight
             and council.consensus_strength >= 0.50
             and not risk.hard_block
-            and not risk.kill_switch
+            and risk.execution_permission != "BLOQUEADO"
         )
 
         decision = DecisionLabel.NO_TRADE.value
         direction = None
+
         if not risk.hard_block and council.consensus_direction:
             direction = council.consensus_direction
-            if risk.decision_cap == DecisionLabel.OBSERVE.value:
-                decision = DecisionLabel.ENTRY_CAUTION.value if strong_exception else DecisionLabel.OBSERVE.value
+
+            if strong_exception:
+                decision = DecisionLabel.ENTRY_CAUTION.value
+            elif risk.decision_cap == DecisionLabel.OBSERVE.value:
+                decision = DecisionLabel.OBSERVE.value
             elif risk.decision_cap == DecisionLabel.ENTRY_CAUTION.value:
                 decision = DecisionLabel.ENTRY_CAUTION.value
             else:
@@ -115,6 +122,7 @@ class DecisionEngine:
                     decision = DecisionLabel.OBSERVE.value
                 else:
                     decision = DecisionLabel.NO_TRADE.value
+
         if features.regime == "sideways":
             if decision == DecisionLabel.ENTRY_STRONG.value:
                 decision = DecisionLabel.ENTRY_CAUTION.value
@@ -128,14 +136,23 @@ class DecisionEngine:
             or features.regime == "chaotic"
         )
 
-        state = risk.state if decision != DecisionLabel.NO_TRADE.value else "DEFENSE" if danger_context else "OBSERVE"
+        if decision == DecisionLabel.ENTRY_CAUTION.value:
+            state = "CAUTION"
+        elif decision != DecisionLabel.NO_TRADE.value:
+            state = risk.state
+        else:
+            state = "DEFENSE" if danger_context else "OBSERVE"
+
         if features.regime == "sideways" and state == "OFFENSE":
             state = "CAUTION"
+
         reasons = []
         for vote in votes:
             reasons.extend([f"{vote.specialist}: {reason}" for reason in vote.reasons[:2]])
         reasons.extend(council.reasons)
         reasons.extend(risk.reasons)
+        if strong_exception:
+            reasons.append("Exceção forte: setup premium/favorável liberado em cautela controlada")
 
         return FinalDecision(
             asset=snapshot.asset,
