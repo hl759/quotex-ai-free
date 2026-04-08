@@ -72,7 +72,7 @@ class ScanService:
             decisions = [self.decision_engine.decide(snapshot, capital) for snapshot in snapshots]
             decisions.sort(key=lambda item: (item.score, item.confidence), reverse=True)
             current = decisions[0] if decisions else None
-            signals = [self.signal_engine.to_payload(d) for d in decisions if d.direction and d.execution_permission != "BLOQUEADO"][:3]
+            signals = [self.signal_engine.to_payload(current)] if current and current.direction and current.execution_permission != "BLOQUEADO" else []
             if current:
                 matched = next((snap for snap in snapshots if snap.asset == current.asset), None)
                 if matched:
