@@ -16,12 +16,12 @@ class EdgeGuard:
 
         recent = audit_summary.get("recent_20", {})
         summary = audit_summary.get("summary", {})
+
         kill_switch = evaluate_kill_switch(recent)
         if kill_switch:
             reasons.append("Kill-switch recente ativado")
-            hard_block = True
-            decision_cap = DecisionLabel.NO_TRADE.value
-            stake_multiplier = 0.0
+            decision_cap = DecisionLabel.ENTRY_CAUTION.value
+            stake_multiplier = min(stake_multiplier, 0.20)
 
         if snapshot.data_quality_score < SETTINGS.data_quality_min_operable:
             reasons.append("Qualidade de dado abaixo do mínimo operável")
@@ -31,7 +31,7 @@ class EdgeGuard:
         elif snapshot.data_quality_score < SETTINGS.data_quality_min_offense:
             reasons.append("Qualidade de dado reduz agressividade")
             decision_cap = DecisionLabel.ENTRY_CAUTION.value
-            stake_multiplier = min(stake_multiplier, 0.65)
+            stake_multiplier = min(stake_multiplier, 0.55)
 
         total = int(summary.get("total", 0) or 0)
         expectancy = float(summary.get("expectancy_r", 0.0) or 0.0)
@@ -39,8 +39,8 @@ class EdgeGuard:
 
         if total >= 20 and (expectancy <= -0.08 or profit_factor < 0.95):
             reasons.append("Edge global ainda fraco")
-            decision_cap = DecisionLabel.OBSERVE.value if council.quality == "split" else DecisionLabel.ENTRY_CAUTION.value
-            stake_multiplier = min(stake_multiplier, 0.45)
+            decision_cap = DecisionLabel.ENTRY_CAUTION.value if council.quality in ("fragile", "measured", "prime") else DecisionLabel.OBSERVE.value
+            stake_multiplier = min(stake_multiplier, 0.40)
 
         if features.regime == "chaotic":
             reasons.append("Regime caótico/destrutivo")
@@ -78,4 +78,4 @@ class EdgeGuard:
             hard_block=hard_block,
             kill_switch=kill_switch,
             reasons=reasons or ["Edge guard neutro"],
-        )
+            )
