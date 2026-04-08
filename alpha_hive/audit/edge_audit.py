@@ -80,6 +80,51 @@ class EdgeAuditEngine:
         out.sort(key=lambda item: (item.get("expectancy_r", 0.0), item.get("winrate", 0.0), item.get("total", 0)), reverse=True)
         return out
 
+    def _extract_hour(self, row: Dict[str, Any]) -> str:
+        hour_bucket = str(row.get("hour_bucket", "") or "").strip()
+        if hour_bucket:
+            if ":" in hour_bucket:
+                return hour_bucket.split(":")[0].zfill(2)
+            return hour_bucket[:2].zfill(2)
+
+        analysis_time = str(row.get("analysis_time", "") or "").strip()
+        if analysis_time and ":" in analysis_time:
+            return analysis_time.split(":")[0].zfill(2)
+
+        entry_time = str(row.get("entry_time", "") or "").strip()
+        if entry_time and ":" in entry_time:
+            return entry_time.split(":")[0].zfill(2)
+
+        expiration = str(row.get("expiration", "") or "").strip()
+        if expiration and ":" in expiration:
+            return expiration.split(":")[0].zfill(2)
+
+        return "unknown"
+
+    def _group_hours(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        groups: Dict[str, List[Dict[str, Any]]] = {}
+        for row in rows:
+            hour = self._extract_hour(row)
+            if hour == "unknown":
+                continue
+            groups.setdefault(hour, []).append(row)
+
+        out = []
+        for hour, bucket in groups.items():
+            stats = self._summary(bucket)
+            stats["hour"] = hour
+            out.append(stats)
+
+        out.sort(
+            key=lambda item: (
+                item.get("expectancy_r", 0.0),
+                item.get("winrate", 0.0),
+                item.get("total", 0),
+            ),
+            reverse=True,
+        )
+        return out
+
     def compute_report(self) -> Dict[str, Any]:
         rows = self.load_ledger()
         return {
@@ -90,4 +135,5 @@ class EdgeAuditEngine:
             "by_provider": self._group(rows, "provider")[:10],
             "by_specialist": self._group(rows, "dominant_specialist")[:10],
             "by_state": self._group(rows, "state")[:10],
+            "by_hour": self._group_hours(rows)[:12],
         }

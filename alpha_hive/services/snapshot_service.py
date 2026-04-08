@@ -168,7 +168,7 @@ class SnapshotService:
             "meta": meta,
             "learning_stats": self.journal.stats(),
             "best_assets": report.get("by_asset", []),
-            "best_hours": [],
+            "best_hours": report.get("by_hour", []),
             "capital_state": self.capital.get(),
             "specialist_leaders": report.get("by_specialist", []),
         }
