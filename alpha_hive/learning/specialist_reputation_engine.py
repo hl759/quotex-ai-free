@@ -1,20 +1,27 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict
 
 from alpha_hive.learning.segment_learning import segment_key
 from alpha_hive.storage.state_store import get_state_store
 
 STORE_KEY = "specialist_reputation_v2"
+LEGACY_STORE_KEY = "specialist_reputation"
 
 class SpecialistReputationEngine:
     def __init__(self):
         self.store = get_state_store()
-        self.memory = self.store.get_json(STORE_KEY, {"segments": {}})
+        memory = self.store.get_json(STORE_KEY, None)
+        if not isinstance(memory, dict) or not memory:
+            memory = self.store.get_json(LEGACY_STORE_KEY, {"segments": {}})
+        if not isinstance(memory, dict):
+            memory = {"segments": {}}
+        memory.setdefault("segments", {})
+        self.memory = memory
 
     def _save(self) -> None:
         self.store.set_json(STORE_KEY, self.memory)
+        self.store.set_json(LEGACY_STORE_KEY, self.memory)
 
     def register_outcome(self, specialist: str, asset: str, direction: str, regime: str, provider: str, market_type: str, hour_bucket: str, setup_quality: str, result: str) -> None:
         key = segment_key(asset, direction, regime, specialist, provider, market_type, hour_bucket, setup_quality)

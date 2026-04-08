@@ -5,6 +5,7 @@ from typing import Dict
 from alpha_hive.storage.state_store import get_state_store
 
 KEY = "capital_state_v2"
+LEGACY_KEY = "capital_state"
 
 DEFAULT = {
     "capital_current": 0.0,
@@ -20,7 +21,9 @@ class CapitalService:
         self.store = get_state_store()
 
     def get(self) -> Dict[str, float]:
-        data = self.store.get_json(KEY, DEFAULT.copy())
+        data = self.store.get_json(KEY, None)
+        if not isinstance(data, dict) or not data:
+            data = self.store.get_json(LEGACY_KEY, DEFAULT.copy())
         if not isinstance(data, dict):
             return DEFAULT.copy()
         out = DEFAULT.copy()
@@ -35,4 +38,5 @@ class CapitalService:
         if float(current["capital_peak"]) < float(current["capital_current"]):
             current["capital_peak"] = float(current["capital_current"])
         self.store.set_json(KEY, current)
+        self.store.set_json(LEGACY_KEY, current)
         return current

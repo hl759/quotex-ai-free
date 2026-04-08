@@ -7,14 +7,23 @@ from alpha_hive.learning.segment_learning import segment_key
 from alpha_hive.storage.state_store import get_state_store
 
 STORE_KEY = "learning_memory_v2"
+LEGACY_STORE_KEY = "learning_memory"
 
 class LearningEngine:
     def __init__(self):
         self.store = get_state_store()
-        self.memory = self.store.get_json(STORE_KEY, {"assets": {}, "segments": {}})
+        memory = self.store.get_json(STORE_KEY, None)
+        if not isinstance(memory, dict) or not memory:
+            memory = self.store.get_json(LEGACY_STORE_KEY, {"assets": {}, "segments": {}})
+        if not isinstance(memory, dict):
+            memory = {"assets": {}, "segments": {}}
+        memory.setdefault("assets", {})
+        memory.setdefault("segments", {})
+        self.memory = memory
 
     def _save(self) -> None:
         self.store.set_json(STORE_KEY, self.memory)
+        self.store.set_json(LEGACY_STORE_KEY, self.memory)
 
     def _asset_stats(self, asset: str) -> Dict[str, int]:
         assets = self.memory.setdefault("assets", {})

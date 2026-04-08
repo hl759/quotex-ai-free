@@ -1,28 +1,42 @@
 from __future__ import annotations
 
-import math
 from typing import Any, Dict, List
 
 from alpha_hive.storage.state_store import get_state_store
 
 COLLECTION = "edge_trade_ledger_v2"
+LEGACY_COLLECTION = "trade_ledger"
 
 class EdgeAuditEngine:
     def __init__(self):
         self.store = get_state_store()
 
     def record_trade(self, payload: Dict[str, Any]) -> None:
-        uid = str(payload.get("uid"))
+        uid = str(payload.get("uid") or "")
+        if not uid:
+            uid = f"{payload.get('asset','NA')}-{payload.get('direction', payload.get('signal','NA'))}-{payload.get('analysis_time','--:--')}"
         self.store.upsert_collection_item(COLLECTION, uid, payload)
+        self.store.upsert_collection_item(LEGACY_COLLECTION, uid, payload)
 
     def load_ledger(self, limit: int = 10000) -> List[Dict[str, Any]]:
-        return self.store.list_collection(COLLECTION, limit=limit)
+        rows = self.store.list_collection(COLLECTION, limit=limit)
+        if rows:
+            return rows
+        return self.store.list_collection(LEGACY_COLLECTION, limit=limit)
 
     def _summary(self, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         valid = [row for row in rows if str(row.get("result", "")).upper() in ("WIN", "LOSS")]
         total = len(valid)
         if not total:
-            return {"total": 0, "wins": 0, "losses": 0, "winrate": 0.0, "expectancy_r": 0.0, "profit_factor": 0.0}
+            return {
+                "total": 0,
+                "wins": 0,
+                "losses": 0,
+                "winrate": 0.0,
+                "expectancy_r": 0.0,
+                "profit_factor": 0.0,
+                "total_pnl": 0.0,
+            }
         wins = sum(1 for row in valid if str(row.get("result", "")).upper() == "WIN")
         losses = total - wins
         rs = [float(row.get("gross_r", 0.0) or 0.0) for row in valid]
