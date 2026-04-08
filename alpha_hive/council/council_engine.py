@@ -44,8 +44,13 @@ class CouncilEngine:
         opposition_weight = support["PUT" if direction == "CALL" else "CALL"]
         strength = round(support_weight / max(total_weight, 1e-9), 2)
         quality = classify_quality(strength, support_weight, opposition_weight)
+        destructive_conflict = strength < 0.52 and support_weight <= (opposition_weight * 1.03)
         if quality == "split":
-            decision_cap = "OBSERVAR"
+            decision_cap = "OBSERVAR" if destructive_conflict else "ENTRADA_CAUTELA"
+            if destructive_conflict:
+                reasons.append("Split destrutivo: observação forçada")
+            else:
+                reasons.append("Split controlado: liberando cautela")
         elif quality == "fragile":
             decision_cap = "ENTRADA_CAUTELA"
         top_specialists = [name for _, name, side in sorted(specialists_ranked, reverse=True) if side == direction][:3]

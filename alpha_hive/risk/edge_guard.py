@@ -41,11 +41,20 @@ class EdgeGuard:
             decision_cap = DecisionLabel.OBSERVE.value if council.quality == "split" else DecisionLabel.ENTRY_CAUTION.value
             stake_multiplier = min(stake_multiplier, 0.45)
 
-        if features.regime == "chaotic" or council.conflict_level == "high":
-            reasons.append("Conflito alto ou regime destrutivo")
+        if features.regime == "chaotic":
+            reasons.append("Regime caótico/destrutivo")
             hard_block = True
             decision_cap = DecisionLabel.NO_TRADE.value
             stake_multiplier = 0.0
+        elif council.conflict_level == "high" and float(council.consensus_strength) < 0.50:
+            reasons.append("Conflito destrutivo com consenso muito fraco")
+            hard_block = True
+            decision_cap = DecisionLabel.NO_TRADE.value
+            stake_multiplier = 0.0
+        elif council.conflict_level == "high":
+            reasons.append("Conflito alto: entrada limitada a cautela")
+            decision_cap = DecisionLabel.ENTRY_CAUTION.value
+            stake_multiplier = min(stake_multiplier, 0.40)
 
         if council.quality == "fragile" and not hard_block:
             reasons.append("Consenso frágil")

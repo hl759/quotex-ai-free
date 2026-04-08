@@ -87,12 +87,24 @@ class DecisionEngine:
         suggested_stake = round(float(capital_plan["stake_value"]) * risk.stake_multiplier, 2)
         risk_pct = round(float(capital_plan["risk_pct"]) * risk.stake_multiplier, 4)
 
+        strong_exception = (
+            council.consensus_direction in ("CALL", "PUT")
+            and score >= 4.5
+            and confidence >= 88
+            and setup_quality in ("favoravel", "premium")
+            and snapshot.data_quality_score >= 0.80
+            and council.support_weight > council.opposition_weight
+            and council.consensus_strength >= 0.50
+            and not risk.hard_block
+            and not risk.kill_switch
+        )
+
         decision = DecisionLabel.NO_TRADE.value
         direction = None
         if not risk.hard_block and council.consensus_direction:
             direction = council.consensus_direction
             if risk.decision_cap == DecisionLabel.OBSERVE.value:
-                decision = DecisionLabel.OBSERVE.value
+                decision = DecisionLabel.ENTRY_CAUTION.value if strong_exception else DecisionLabel.OBSERVE.value
             elif risk.decision_cap == DecisionLabel.ENTRY_CAUTION.value:
                 decision = DecisionLabel.ENTRY_CAUTION.value
             else:
@@ -103,7 +115,22 @@ class DecisionEngine:
                     decision = DecisionLabel.OBSERVE.value
                 else:
                     decision = DecisionLabel.NO_TRADE.value
-        state = risk.state if decision != DecisionLabel.NO_TRADE.value else "DEFENSE" if risk.hard_block else "OBSERVE"
+        if features.regime == "sideways":
+            if decision == DecisionLabel.ENTRY_STRONG.value:
+                decision = DecisionLabel.ENTRY_CAUTION.value
+            suggested_stake = round(min(suggested_stake, float(capital_plan["stake_value"]) * 0.35), 2)
+            risk_pct = round(min(risk_pct, float(capital_plan["risk_pct"]) * 0.35), 4)
+
+        danger_context = (
+            risk.hard_block
+            or snapshot.data_quality_score < 0.65
+            or (council.conflict_level == "high" and council.consensus_strength < 0.50)
+            or features.regime == "chaotic"
+        )
+
+        state = risk.state if decision != DecisionLabel.NO_TRADE.value else "DEFENSE" if danger_context else "OBSERVE"
+        if features.regime == "sideways" and state == "OFFENSE":
+            state = "CAUTION"
         reasons = []
         for vote in votes:
             reasons.extend([f"{vote.specialist}: {reason}" for reason in vote.reasons[:2]])
