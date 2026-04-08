@@ -90,6 +90,8 @@ class DecisionEngine:
         suggested_stake = round(float(capital_plan["stake_value"]) * risk.stake_multiplier, 2)
         risk_pct = round(float(capital_plan["risk_pct"]) * risk.stake_multiplier, 4)
 
+        provider_lower = str(snapshot.provider or "").lower()
+
         regular_exception = (
             council.consensus_direction in ("CALL", "PUT")
             and score >= 4.5
@@ -102,8 +104,21 @@ class DecisionEngine:
             and features.regime != "chaotic"
         )
 
+        cache_exception = (
+            "-cache" in provider_lower
+            and snapshot.data_quality_score >= 0.52
+            and score >= 5.20
+            and confidence >= 90
+            and setup_quality in ("favoravel", "premium")
+            and council.support_weight > council.opposition_weight
+            and council.consensus_strength >= 0.60
+            and council.quality in ("measured", "prime")
+            and not risk.kill_switch
+            and features.regime != "chaotic"
+        )
+
         sideways_cache_exception = (
-            "-cache" in str(snapshot.provider or "").lower()
+            "-cache" in provider_lower
             and (features.regime == "sideways" or features.is_sideways)
             and features.trend_m1 != features.trend_m5
             and features.rejection
@@ -118,20 +133,7 @@ class DecisionEngine:
             and not risk.kill_switch
         )
 
-        cache_fallback_exception = (
-            "-cache" in str(snapshot.provider or "").lower()
-            and snapshot.data_quality_score >= 0.52
-            and score >= 5.20
-            and confidence >= 90
-            and setup_quality in ("favoravel", "premium")
-            and council.support_weight > council.opposition_weight
-            and council.consensus_strength >= 0.60
-            and council.quality in ("measured", "prime")
-            and not risk.kill_switch
-            and features.regime != "chaotic"
-        )
-
-        strong_exception = regular_exception or cache_fallback_exception or sideways_cache_exception
+        strong_exception = regular_exception or cache_exception or sideways_cache_exception
 
         decision = DecisionLabel.NO_TRADE.value
         direction = None
@@ -161,8 +163,7 @@ class DecisionEngine:
             risk_pct = round(min(risk_pct, float(capital_plan["risk_pct"]) * 0.35), 4)
 
         danger_context = (
-            risk.hard_block
-            or snapshot.data_quality_score < 0.65
+            snapshot.data_quality_score < SETTINGS.data_quality_min_operable
             or (council.conflict_level == "high" and council.consensus_strength < 0.50)
             or features.regime == "chaotic"
         )
@@ -188,9 +189,10 @@ class DecisionEngine:
             reasons.extend([f"{vote.specialist}: {reason}" for reason in vote.reasons[:2]])
         reasons.extend(council.reasons)
         reasons.extend(risk.reasons)
-        if strong_exception:
+
+        if regular_exception:
             reasons.append("Exceção forte: setup premium/favorável liberado em cautela controlada")
-        if cache_fallback_exception:
+        if cache_exception:
             reasons.append("Exceção de cache: fallback operável apenas em cautela controlada")
         if sideways_cache_exception:
             reasons.append("Exceção sideways+cache: conflito M1/M5 com rejeição liberado apenas em cautela")
@@ -214,4 +216,4 @@ class DecisionEngine:
             council=council.to_dict(),
             risk=risk.to_dict(),
             features=features.to_dict(),
-        )
+            )
