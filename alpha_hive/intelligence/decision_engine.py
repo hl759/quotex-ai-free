@@ -90,7 +90,7 @@ class DecisionEngine:
         suggested_stake = round(float(capital_plan["stake_value"]) * risk.stake_multiplier, 2)
         risk_pct = round(float(capital_plan["risk_pct"]) * risk.stake_multiplier, 4)
 
-        strong_exception = (
+        regular_exception = (
             council.consensus_direction in ("CALL", "PUT")
             and score >= 4.5
             and confidence >= 88
@@ -101,6 +101,21 @@ class DecisionEngine:
             and not risk.kill_switch
             and features.regime != "chaotic"
         )
+
+        cache_fallback_exception = (
+            "-cache" in str(snapshot.provider or "").lower()
+            and snapshot.data_quality_score >= 0.52
+            and score >= 5.20
+            and confidence >= 90
+            and setup_quality in ("favoravel", "premium")
+            and council.support_weight > council.opposition_weight
+            and council.consensus_strength >= 0.60
+            and council.quality in ("measured", "prime")
+            and not risk.kill_switch
+            and features.regime != "chaotic"
+        )
+
+        strong_exception = regular_exception or cache_fallback_exception
 
         decision = DecisionLabel.NO_TRADE.value
         direction = None
@@ -159,6 +174,8 @@ class DecisionEngine:
         reasons.extend(risk.reasons)
         if strong_exception:
             reasons.append("Exceção forte: setup premium/favorável liberado em cautela controlada")
+        if cache_fallback_exception:
+            reasons.append("Exceção de cache: fallback operável apenas em cautela controlada")
 
         return FinalDecision(
             asset=snapshot.asset,
