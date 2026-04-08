@@ -92,97 +92,159 @@ class DecisionEngine:
 
         provider_lower = str(snapshot.provider or "").lower()
 
+        veto_names = {vote.specialist for vote in votes if vote.veto}
+        hard_context_veto = any(name in veto_names for name in ("volatility", "data_quality"))
+        soft_context_veto = any(name in veto_names for name in ("timing",))
+
+        stretched_context = bool(features.moved_too_fast or features.late_entry_risk or features.explosive_expansion)
+        multi_tf_conflict = str(features.trend_m1) != str(features.trend_m5)
+        breakout_chase = bool(features.breakout and str(features.breakout_quality) == "strong" and (stretched_context or multi_tf_conflict))
+        sideways_context = bool(features.regime == "sideways" or features.is_sideways)
+
         regular_exception = (
             council.consensus_direction in ("CALL", "PUT")
-            and score >= 4.5
-            and confidence >= 88
+            and council.quality in ("measured", "prime")
+            and score >= 4.8
+            and confidence >= 89
             and setup_quality in ("favoravel", "premium")
             and snapshot.data_quality_score >= SETTINGS.data_quality_min_operable
             and council.support_weight > council.opposition_weight
-            and council.consensus_strength >= 0.54
+            and council.consensus_strength >= 0.58
             and not risk.kill_switch
+            and not risk.hard_block
             and features.regime != "chaotic"
+            and not hard_context_veto
+            and not soft_context_veto
+            and not stretched_context
+            and not breakout_chase
         )
 
         cache_exception = (
             "-cache" in provider_lower
-            and snapshot.data_quality_score >= 0.52
-            and score >= 5.20
-            and confidence >= 90
-            and setup_quality in ("favoravel", "premium")
-            and council.support_weight > council.opposition_weight
-            and council.consensus_strength >= 0.60
+            and council.consensus_direction in ("CALL", "PUT")
             and council.quality in ("measured", "prime")
+            and snapshot.data_quality_score >= 0.55
+            and score >= 5.40
+            and confidence >= 91
+            and setup_quality == "premium"
+            and council.support_weight > council.opposition_weight
+            and council.consensus_strength >= 0.66
             and not risk.kill_switch
+            and not risk.hard_block
             and features.regime != "chaotic"
+            and not hard_context_veto
+            and not soft_context_veto
+            and not stretched_context
+            and not breakout_chase
         )
 
-        sideways_cache_exception = (
+        sideways_mean_reversion_exception = (
             "-cache" in provider_lower
-            and (features.regime == "sideways" or features.is_sideways)
-            and features.trend_m1 != features.trend_m5
-            and features.rejection
+            and sideways_context
+            and council.consensus_direction in ("CALL", "PUT")
+            and council.quality == "prime"
+            and snapshot.data_quality_score >= 0.58
+            and score >= 5.80
+            and confidence >= 92
+            and setup_quality == "premium"
+            and bool(features.rejection)
+            and multi_tf_conflict
             and not features.moved_too_fast
+            and not features.late_entry_risk
             and not features.explosive_expansion
-            and score >= 5.20
-            and confidence >= 90
-            and setup_quality in ("favoravel", "premium")
-            and council.support_weight > council.opposition_weight
-            and council.consensus_strength >= 0.62
-            and council.quality in ("measured", "prime")
             and not risk.kill_switch
+            and not risk.hard_block
+            and not hard_context_veto
+            and not soft_context_veto
         )
 
-        strong_exception = regular_exception or cache_exception or sideways_cache_exception
+        operable_exception = regular_exception or cache_exception or sideways_mean_reversion_exception
 
         decision = DecisionLabel.NO_TRADE.value
         direction = None
 
-        if (not risk.hard_block or strong_exception) and council.consensus_direction:
+        if not risk.hard_block and council.consensus_direction:
             direction = council.consensus_direction
+            min_score = float(calibration["min_score"])
 
-            if strong_exception:
+            if hard_context_veto:
+                decision = DecisionLabel.OBSERVE.value
+            elif breakout_chase or stretched_context:
+                decision = DecisionLabel.OBSERVE.value
+            elif sideways_context and council.quality == "fragile":
+                decision = DecisionLabel.OBSERVE.value
+            elif operable_exception:
                 decision = DecisionLabel.ENTRY_CAUTION.value
             elif risk.decision_cap == DecisionLabel.OBSERVE.value:
                 decision = DecisionLabel.OBSERVE.value
             elif risk.decision_cap == DecisionLabel.ENTRY_CAUTION.value:
-                decision = DecisionLabel.ENTRY_CAUTION.value
+                if council.quality in ("measured", "prime") and setup_quality in ("favoravel", "premium") and not multi_tf_conflict:
+                    decision = DecisionLabel.ENTRY_CAUTION.value
+                else:
+                    decision = DecisionLabel.OBSERVE.value
             else:
-                min_score = float(calibration["min_score"])
-                if council.quality in ("prime", "measured") and score >= min_score and setup_quality in ("premium", "favoravel"):
-                    decision = DecisionLabel.ENTRY_STRONG.value if council.quality == "prime" and risk.execution_permission == "LIBERADO" else DecisionLabel.ENTRY_CAUTION.value
+                if (
+                    council.quality == "prime"
+                    and score >= (min_score + 0.35)
+                    and setup_quality == "premium"
+                    and features.regime == "trend"
+                    and not multi_tf_conflict
+                    and not hard_context_veto
+                    and not stretched_context
+                    and not breakout_chase
+                    and not risk.kill_switch
+                ):
+                    decision = DecisionLabel.ENTRY_STRONG.value
+                elif (
+                    council.quality in ("measured", "prime")
+                    and score >= min_score
+                    and setup_quality in ("favoravel", "premium")
+                    and not hard_context_veto
+                    and not stretched_context
+                    and not breakout_chase
+                ):
+                    decision = DecisionLabel.ENTRY_CAUTION.value
                 elif score >= max(2.0, min_score - 0.4):
                     decision = DecisionLabel.OBSERVE.value
                 else:
                     decision = DecisionLabel.NO_TRADE.value
 
-        if features.regime == "sideways":
+        if sideways_context:
             if decision == DecisionLabel.ENTRY_STRONG.value:
                 decision = DecisionLabel.ENTRY_CAUTION.value
             suggested_stake = round(min(suggested_stake, float(capital_plan["stake_value"]) * 0.35), 2)
             risk_pct = round(min(risk_pct, float(capital_plan["risk_pct"]) * 0.35), 4)
 
         danger_context = (
-            snapshot.data_quality_score < SETTINGS.data_quality_min_operable
+            risk.hard_block
+            or snapshot.data_quality_score < SETTINGS.data_quality_min_operable
             or (council.conflict_level == "high" and council.consensus_strength < 0.50)
             or features.regime == "chaotic"
+            or risk.kill_switch
         )
 
-        if decision == DecisionLabel.ENTRY_CAUTION.value:
+        if decision == DecisionLabel.ENTRY_STRONG.value:
+            state = "OFFENSE"
+        elif decision == DecisionLabel.ENTRY_CAUTION.value:
             state = "CAUTION"
-        elif decision != DecisionLabel.NO_TRADE.value:
-            state = risk.state
+        elif danger_context:
+            state = "DEFENSE"
         else:
-            state = "DEFENSE" if danger_context else "OBSERVE"
+            state = "OBSERVE"
 
-        if features.regime == "sideways" and state == "OFFENSE":
+        if sideways_context and state == "OFFENSE":
             state = "CAUTION"
 
-        final_execution_permission = (
-            ExecutionPermission.CAUTION_OPERABLE.value
-            if strong_exception and decision == DecisionLabel.ENTRY_CAUTION.value
-            else risk.execution_permission
-        )
+        if decision == DecisionLabel.ENTRY_STRONG.value:
+            final_execution_permission = (
+                ExecutionPermission.RELEASED.value
+                if not sideways_context and "-cache" not in provider_lower and council.quality == "prime"
+                else ExecutionPermission.CAUTION_OPERABLE.value
+            )
+        elif decision == DecisionLabel.ENTRY_CAUTION.value:
+            final_execution_permission = ExecutionPermission.CAUTION_OPERABLE.value
+        else:
+            final_execution_permission = ExecutionPermission.BLOCKED.value
 
         reasons = []
         for vote in votes:
@@ -190,12 +252,18 @@ class DecisionEngine:
         reasons.extend(council.reasons)
         reasons.extend(risk.reasons)
 
+        if hard_context_veto:
+            reasons.append("Veto contextual sério impediu execução")
+        if breakout_chase:
+            reasons.append("Breakout esticado/conflitante rebaixado para observação")
+        if stretched_context:
+            reasons.append("Movimento já correu: execução tardia evitada")
         if regular_exception:
-            reasons.append("Exceção forte: setup premium/favorável liberado em cautela controlada")
+            reasons.append("Exceção forte: setup liberado em cautela disciplinada")
         if cache_exception:
-            reasons.append("Exceção de cache: fallback operável apenas em cautela controlada")
-        if sideways_cache_exception:
-            reasons.append("Exceção sideways+cache: conflito M1/M5 com rejeição liberado apenas em cautela")
+            reasons.append("Exceção de cache: operável apenas em cautela")
+        if sideways_mean_reversion_exception:
+            reasons.append("Exceção lateral com rejeição: operável apenas em cautela")
 
         return FinalDecision(
             asset=snapshot.asset,
@@ -216,4 +284,4 @@ class DecisionEngine:
             council=council.to_dict(),
             risk=risk.to_dict(),
             features=features.to_dict(),
-            )
+        )
