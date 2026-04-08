@@ -5,7 +5,7 @@ from typing import List
 from alpha_hive.config import SETTINGS
 from alpha_hive.core.clock import now_brazil
 from alpha_hive.core.contracts import FinalDecision, MarketSnapshot, SpecialistVote
-from alpha_hive.core.enums import DecisionLabel
+from alpha_hive.core.enums import DecisionLabel, ExecutionPermission
 from alpha_hive.council.council_engine import CouncilEngine
 from alpha_hive.audit.edge_audit import EdgeAuditEngine
 from alpha_hive.intelligence.feature_engine import FeatureEngine
@@ -95,17 +95,17 @@ class DecisionEngine:
             and score >= 4.5
             and confidence >= 88
             and setup_quality in ("favoravel", "premium")
-            and snapshot.data_quality_score >= max(0.80, SETTINGS.data_quality_min_offense)
+            and snapshot.data_quality_score >= SETTINGS.data_quality_min_operable
             and council.support_weight > council.opposition_weight
-            and council.consensus_strength >= 0.50
-            and not risk.hard_block
-            and risk.execution_permission != "BLOQUEADO"
+            and council.consensus_strength >= 0.54
+            and not risk.kill_switch
+            and features.regime != "chaotic"
         )
 
         decision = DecisionLabel.NO_TRADE.value
         direction = None
 
-        if not risk.hard_block and council.consensus_direction:
+        if (not risk.hard_block or strong_exception) and council.consensus_direction:
             direction = council.consensus_direction
 
             if strong_exception:
@@ -146,6 +146,12 @@ class DecisionEngine:
         if features.regime == "sideways" and state == "OFFENSE":
             state = "CAUTION"
 
+        final_execution_permission = (
+            ExecutionPermission.CAUTION_OPERABLE.value
+            if strong_exception and decision == DecisionLabel.ENTRY_CAUTION.value
+            else risk.execution_permission
+        )
+
         reasons = []
         for vote in votes:
             reasons.extend([f"{vote.specialist}: {reason}" for reason in vote.reasons[:2]])
@@ -163,7 +169,7 @@ class DecisionEngine:
             score=score,
             setup_quality=setup_quality,
             consensus_quality=council.quality,
-            execution_permission=risk.execution_permission,
+            execution_permission=final_execution_permission,
             suggested_stake=suggested_stake,
             risk_pct=risk_pct,
             provider=snapshot.provider,
