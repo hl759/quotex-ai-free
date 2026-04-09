@@ -69,6 +69,14 @@ class DecisionEngine:
         calibration = self.learning.calibration_profile(snapshot.asset)
         score = round(base_score + self.learning.asset_boost(snapshot.asset), 2)
 
+        segment_adj = {
+            "score_boost": 0.0,
+            "confidence_shift": 0,
+            "proof_state": "building",
+            "trades": 0,
+            "winrate": 0.0,
+        }
+
         if council.consensus_direction:
             lead_specialist = council.top_specialists[0] if council.top_specialists else "trend"
             segment_adj = self.learning.segment_adjustment(
@@ -83,7 +91,21 @@ class DecisionEngine:
             )
             score = round(score + float(segment_adj["score_boost"]), 2)
 
-        confidence = int(max(50, min(95, (50 + score * 8) * calibration["confidence_factor"])))
+        proof_state = str(segment_adj.get("proof_state", "building"))
+        segment_conf_shift = int(segment_adj.get("confidence_shift", 0) or 0)
+        segment_trades = float(segment_adj.get("trades", 0) or 0)
+        segment_winrate = float(segment_adj.get("winrate", 0.0) or 0.0)
+
+        confidence = int(
+            max(
+                50,
+                min(
+                    95,
+                    round(((50 + score * 8) * calibration["confidence_factor"]) + segment_conf_shift),
+                ),
+            )
+        )
+
         audit_summary = self.audit.compute_report()
         risk = self.edge_guard.evaluate(snapshot, features, council, audit_summary, setup_quality)
         capital_plan = self.capital_mind.get_plan(capital_state, confidence, setup_quality)
@@ -101,15 +123,18 @@ class DecisionEngine:
         breakout_chase = bool(features.breakout and str(features.breakout_quality) == "strong" and (stretched_context or multi_tf_conflict))
         sideways_context = bool(features.regime == "sideways" or features.is_sideways)
 
+        positive_proof = proof_state == "proven_positive"
+        negative_proof = proof_state == "proven_negative"
+
         regular_exception = (
             council.consensus_direction in ("CALL", "PUT")
             and council.quality in ("measured", "prime")
-            and score >= 4.8
-            and confidence >= 89
+            and score >= (4.6 if positive_proof else 4.8)
+            and confidence >= (87 if positive_proof else 89)
             and setup_quality in ("favoravel", "premium")
             and snapshot.data_quality_score >= SETTINGS.data_quality_min_operable
             and council.support_weight > council.opposition_weight
-            and council.consensus_strength >= 0.58
+            and council.consensus_strength >= (0.56 if positive_proof else 0.58)
             and not risk.kill_switch
             and not risk.hard_block
             and features.regime != "chaotic"
@@ -117,6 +142,7 @@ class DecisionEngine:
             and not soft_context_veto
             and not stretched_context
             and not breakout_chase
+            and not negative_proof
         )
 
         cache_exception = (
@@ -124,11 +150,11 @@ class DecisionEngine:
             and council.consensus_direction in ("CALL", "PUT")
             and council.quality in ("measured", "prime")
             and snapshot.data_quality_score >= 0.55
-            and score >= 5.40
-            and confidence >= 91
+            and score >= (5.15 if positive_proof else 5.40)
+            and confidence >= (89 if positive_proof else 91)
             and setup_quality == "premium"
             and council.support_weight > council.opposition_weight
-            and council.consensus_strength >= 0.66
+            and council.consensus_strength >= (0.63 if positive_proof else 0.66)
             and not risk.kill_switch
             and not risk.hard_block
             and features.regime != "chaotic"
@@ -136,6 +162,7 @@ class DecisionEngine:
             and not soft_context_veto
             and not stretched_context
             and not breakout_chase
+            and not negative_proof
         )
 
         sideways_mean_reversion_exception = (
@@ -144,8 +171,8 @@ class DecisionEngine:
             and council.consensus_direction in ("CALL", "PUT")
             and council.quality == "prime"
             and snapshot.data_quality_score >= 0.58
-            and score >= 5.80
-            and confidence >= 92
+            and score >= (5.55 if positive_proof else 5.80)
+            and confidence >= (90 if positive_proof else 92)
             and setup_quality == "premium"
             and bool(features.rejection)
             and multi_tf_conflict
@@ -156,6 +183,7 @@ class DecisionEngine:
             and not risk.hard_block
             and not hard_context_veto
             and not soft_context_veto
+            and not negative_proof
         )
 
         operable_exception = regular_exception or cache_exception or sideways_mean_reversion_exception
@@ -167,9 +195,16 @@ class DecisionEngine:
             direction = council.consensus_direction
             min_score = float(calibration["min_score"])
 
+            if positive_proof:
+                min_score -= 0.18
+            elif negative_proof:
+                min_score += 0.28
+
             if hard_context_veto:
                 decision = DecisionLabel.OBSERVE.value
             elif breakout_chase or stretched_context:
+                decision = DecisionLabel.OBSERVE.value
+            elif negative_proof and council.quality != "prime":
                 decision = DecisionLabel.OBSERVE.value
             elif sideways_context and council.quality == "fragile":
                 decision = DecisionLabel.OBSERVE.value
@@ -178,7 +213,12 @@ class DecisionEngine:
             elif risk.decision_cap == DecisionLabel.OBSERVE.value:
                 decision = DecisionLabel.OBSERVE.value
             elif risk.decision_cap == DecisionLabel.ENTRY_CAUTION.value:
-                if council.quality in ("measured", "prime") and setup_quality in ("favoravel", "premium") and not multi_tf_conflict:
+                if (
+                    council.quality in ("measured", "prime")
+                    and setup_quality in ("favoravel", "premium")
+                    and not multi_tf_conflict
+                    and not negative_proof
+                ):
                     decision = DecisionLabel.ENTRY_CAUTION.value
                 else:
                     decision = DecisionLabel.OBSERVE.value
@@ -193,6 +233,7 @@ class DecisionEngine:
                     and not stretched_context
                     and not breakout_chase
                     and not risk.kill_switch
+                    and not negative_proof
                 ):
                     decision = DecisionLabel.ENTRY_STRONG.value
                 elif (
@@ -202,6 +243,7 @@ class DecisionEngine:
                     and not hard_context_veto
                     and not stretched_context
                     and not breakout_chase
+                    and not negative_proof
                 ):
                     decision = DecisionLabel.ENTRY_CAUTION.value
                 elif score >= max(2.0, min_score - 0.4):
@@ -258,6 +300,10 @@ class DecisionEngine:
             reasons.append("Breakout esticado/conflitante rebaixado para observação")
         if stretched_context:
             reasons.append("Movimento já correu: execução tardia evitada")
+        if positive_proof:
+            reasons.append(f"Contexto aprendido positivamente ({segment_trades:.1f} trades, {segment_winrate:.2f}% winrate)")
+        if negative_proof:
+            reasons.append(f"Contexto aprendido negativamente ({segment_trades:.1f} trades, {segment_winrate:.2f}% winrate)")
         if regular_exception:
             reasons.append("Exceção forte: setup liberado em cautela disciplinada")
         if cache_exception:
