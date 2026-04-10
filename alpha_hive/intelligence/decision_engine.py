@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List
+from typing import Any, Dict, List
 
 from alpha_hive.config import SETTINGS
 from alpha_hive.core.clock import now_brazil
@@ -59,11 +59,26 @@ class DecisionEngine:
                 best = vote.setup_quality
         return best
 
+    def _learning_context(self, features, council) -> Dict[str, Any]:
+        return {
+            "trend_m1": getattr(features, "trend_m1", "unknown"),
+            "trend_m5": getattr(features, "trend_m5", "unknown"),
+            "multi_tf_conflict": str(getattr(features, "trend_m1", "unknown")) != str(getattr(features, "trend_m5", "unknown")),
+            "breakout_quality": getattr(features, "breakout_quality", "unknown"),
+            "rejection_quality": getattr(features, "rejection_quality", "unknown"),
+            "explosive_expansion": bool(getattr(features, "explosive_expansion", False)),
+            "late_entry_risk": bool(getattr(features, "late_entry_risk", False)),
+            "is_sideways": bool(getattr(features, "is_sideways", False)),
+            "trend_quality_signal": getattr(features, "trend_quality_signal", "unknown"),
+            "consensus_quality": getattr(council, "quality", "split"),
+        }
+
     def decide(self, snapshot: MarketSnapshot, capital_state: dict | None = None) -> FinalDecision:
         capital_state = capital_state or {}
         features, votes = self._votes(snapshot)
         setup_quality = self._setup_quality(votes)
         council = self.council.evaluate(snapshot, features, votes)
+        learning_context = self._learning_context(features, council)
 
         base_score = sum(v.vote_strength for v in votes if not v.veto)
         calibration = self.learning.calibration_profile(snapshot.asset)
@@ -75,6 +90,10 @@ class DecisionEngine:
             "proof_state": "building",
             "trades": 0,
             "winrate": 0.0,
+            "reverse_bias": 0.0,
+            "cause_pressure": 0.0,
+            "cooldown_state": "none",
+            "loss_cause_leader": "none",
         }
 
         if council.consensus_direction:
@@ -88,20 +107,31 @@ class DecisionEngine:
                 market_type=snapshot.market_type,
                 hour_bucket=self._hour_bucket(),
                 setup_quality=setup_quality,
+                extra_context=learning_context,
             )
-            score = round(score + float(segment_adj["score_boost"]), 2)
+            score = round(
+                score
+                + float(segment_adj.get("score_boost", 0.0) or 0.0)
+                + float(segment_adj.get("reverse_bias", 0.0) or 0.0)
+                - float(segment_adj.get("cause_pressure", 0.0) or 0.0),
+                2,
+            )
 
         proof_state = str(segment_adj.get("proof_state", "building"))
         segment_conf_shift = int(segment_adj.get("confidence_shift", 0) or 0)
         segment_trades = float(segment_adj.get("trades", 0) or 0)
         segment_winrate = float(segment_adj.get("winrate", 0.0) or 0.0)
+        reverse_bias = float(segment_adj.get("reverse_bias", 0.0) or 0.0)
+        cause_pressure = float(segment_adj.get("cause_pressure", 0.0) or 0.0)
+        cooldown_state = str(segment_adj.get("cooldown_state", "none"))
+        loss_cause_leader = str(segment_adj.get("loss_cause_leader", "none"))
 
         confidence = int(
             max(
                 50,
                 min(
                     95,
-                    round(((50 + score * 8) * calibration["confidence_factor"]) + segment_conf_shift),
+                    round(((50 + score * 8) * calibration["confidence_factor"]) + segment_conf_shift - (cause_pressure * 18)),
                 ),
             )
         )
@@ -113,7 +143,6 @@ class DecisionEngine:
         risk_pct = round(float(capital_plan["risk_pct"]) * risk.stake_multiplier, 4)
 
         provider_lower = str(snapshot.provider or "").lower()
-
         veto_names = {vote.specialist for vote in votes if vote.veto}
         hard_context_veto = any(name in veto_names for name in ("volatility", "data_quality"))
         soft_context_veto = any(name in veto_names for name in ("timing",))
@@ -129,8 +158,8 @@ class DecisionEngine:
         regular_exception = (
             council.consensus_direction in ("CALL", "PUT")
             and council.quality in ("measured", "prime")
-            and score >= (4.6 if positive_proof else 4.8)
-            and confidence >= (87 if positive_proof else 89)
+            and score >= (4.55 if positive_proof else 4.8)
+            and confidence >= (86 if positive_proof else 89)
             and setup_quality in ("favoravel", "premium")
             and snapshot.data_quality_score >= SETTINGS.data_quality_min_operable
             and council.support_weight > council.opposition_weight
@@ -143,6 +172,8 @@ class DecisionEngine:
             and not stretched_context
             and not breakout_chase
             and not negative_proof
+            and cooldown_state != "hard"
+            and reverse_bias > -0.18
         )
 
         cache_exception = (
@@ -150,8 +181,8 @@ class DecisionEngine:
             and council.consensus_direction in ("CALL", "PUT")
             and council.quality in ("measured", "prime")
             and snapshot.data_quality_score >= 0.55
-            and score >= (5.15 if positive_proof else 5.40)
-            and confidence >= (89 if positive_proof else 91)
+            and score >= (5.10 if positive_proof else 5.40)
+            and confidence >= (88 if positive_proof else 91)
             and setup_quality == "premium"
             and council.support_weight > council.opposition_weight
             and council.consensus_strength >= (0.63 if positive_proof else 0.66)
@@ -163,6 +194,7 @@ class DecisionEngine:
             and not stretched_context
             and not breakout_chase
             and not negative_proof
+            and cooldown_state != "hard"
         )
 
         sideways_mean_reversion_exception = (
@@ -171,7 +203,7 @@ class DecisionEngine:
             and council.consensus_direction in ("CALL", "PUT")
             and council.quality == "prime"
             and snapshot.data_quality_score >= 0.58
-            and score >= (5.55 if positive_proof else 5.80)
+            and score >= (5.50 if positive_proof else 5.80)
             and confidence >= (90 if positive_proof else 92)
             and setup_quality == "premium"
             and bool(features.rejection)
@@ -184,6 +216,7 @@ class DecisionEngine:
             and not hard_context_veto
             and not soft_context_veto
             and not negative_proof
+            and reverse_bias > -0.12
         )
 
         operable_exception = regular_exception or cache_exception or sideways_mean_reversion_exception
@@ -194,15 +227,21 @@ class DecisionEngine:
         if not risk.hard_block and council.consensus_direction:
             direction = council.consensus_direction
             min_score = float(calibration["min_score"])
-
             if positive_proof:
                 min_score -= 0.18
             elif negative_proof:
                 min_score += 0.28
+            min_score += cause_pressure * 0.8
+            if cooldown_state == "soft":
+                min_score += 0.10
 
             if hard_context_veto:
                 decision = DecisionLabel.OBSERVE.value
             elif breakout_chase or stretched_context:
+                decision = DecisionLabel.OBSERVE.value
+            elif cooldown_state == "hard" and council.quality != "prime":
+                decision = DecisionLabel.OBSERVE.value
+            elif reverse_bias <= -0.16 and council.quality != "prime":
                 decision = DecisionLabel.OBSERVE.value
             elif negative_proof and council.quality != "prime":
                 decision = DecisionLabel.OBSERVE.value
@@ -218,6 +257,7 @@ class DecisionEngine:
                     and setup_quality in ("favoravel", "premium")
                     and not multi_tf_conflict
                     and not negative_proof
+                    and cooldown_state != "hard"
                 ):
                     decision = DecisionLabel.ENTRY_CAUTION.value
                 else:
@@ -234,6 +274,7 @@ class DecisionEngine:
                     and not breakout_chase
                     and not risk.kill_switch
                     and not negative_proof
+                    and cooldown_state == "none"
                 ):
                     decision = DecisionLabel.ENTRY_STRONG.value
                 elif (
@@ -244,12 +285,20 @@ class DecisionEngine:
                     and not stretched_context
                     and not breakout_chase
                     and not negative_proof
+                    and reverse_bias > -0.18
                 ):
                     decision = DecisionLabel.ENTRY_CAUTION.value
                 elif score >= max(2.0, min_score - 0.4):
                     decision = DecisionLabel.OBSERVE.value
                 else:
                     decision = DecisionLabel.NO_TRADE.value
+
+        if cooldown_state == "soft":
+            suggested_stake = round(suggested_stake * 0.82, 2)
+            risk_pct = round(risk_pct * 0.82, 4)
+        elif cooldown_state == "hard":
+            suggested_stake = round(suggested_stake * 0.55, 2)
+            risk_pct = round(risk_pct * 0.55, 4)
 
         if sideways_context:
             if decision == DecisionLabel.ENTRY_STRONG.value:
@@ -275,6 +324,8 @@ class DecisionEngine:
             state = "OBSERVE"
 
         if sideways_context and state == "OFFENSE":
+            state = "CAUTION"
+        if cooldown_state == "hard" and state == "OFFENSE":
             state = "CAUTION"
 
         if decision == DecisionLabel.ENTRY_STRONG.value:
@@ -304,6 +355,12 @@ class DecisionEngine:
             reasons.append(f"Contexto aprendido positivamente ({segment_trades:.1f} trades, {segment_winrate:.2f}% winrate)")
         if negative_proof:
             reasons.append(f"Contexto aprendido negativamente ({segment_trades:.1f} trades, {segment_winrate:.2f}% winrate)")
+        if reverse_bias <= -0.12:
+            reasons.append("Memória contrafactual negativa: esse lado tem histórico recente de direção falha")
+        if cause_pressure >= 0.10 and loss_cause_leader != "none":
+            reasons.append(f"Pressão de falha recorrente: {loss_cause_leader}")
+        if cooldown_state != "none":
+            reasons.append(f"Cooldown contextual ativo: {cooldown_state}")
         if regular_exception:
             reasons.append("Exceção forte: setup liberado em cautela disciplinada")
         if cache_exception:

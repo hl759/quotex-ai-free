@@ -143,6 +143,19 @@ class TradeOutcome:
     consensus_strength: float = 0.0
     timing_quality: str = "unknown"
     delay_seconds: int = 0
+    loss_cause: str = "none"
+    reverse_would_win: bool = False
+    reverse_direction: Optional[str] = None
+    reverse_result: str = "DRAW"
+    counterfactual_better: bool = False
+    entry_efficiency: str = "normal"
+    followthrough_quality: str = "normal"
+    weak_followthrough: bool = False
+    regime_shift_detected: bool = False
+    overextension_detected: bool = False
+    timing_failure_mode: str = "none"
+    mae: float = 0.0
+    mfe: float = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

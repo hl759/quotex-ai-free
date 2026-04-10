@@ -130,26 +130,31 @@ class ScanService:
         bucket = str(row.get("analysis_hour_bucket", "") or "").strip()
         if bucket and ":" in bucket:
             return f"{bucket.split(':')[0].zfill(2)}:00"
-
         analysis_time = str(row.get("analysis_time", "") or "").strip()
         if analysis_time and ":" in analysis_time:
             return f"{analysis_time.split(':')[0].zfill(2)}:00"
-
         return now_brazil().strftime("%H:00")
 
-    def _invert_result_if_needed(self, final_direction: str, specialist_direction: str, result: str) -> str:
-        result_upper = str(result).upper()
-        if specialist_direction == final_direction:
-            return result_upper
-        if result_upper == "WIN":
-            return "LOSS"
-        if result_upper == "LOSS":
-            return "WIN"
-        return "DRAW"
+    def _learning_context(self, decision: FinalDecision, row: Dict[str, Any]) -> Dict[str, Any]:
+        features = dict(decision.features or {})
+        trend_m1 = str(features.get("trend_m1", "unknown"))
+        trend_m5 = str(features.get("trend_m5", "unknown"))
+        return {
+            "trend_m1": trend_m1,
+            "trend_m5": trend_m5,
+            "multi_tf_conflict": trend_m1 != trend_m5,
+            "breakout_quality": features.get("breakout_quality", "unknown"),
+            "rejection_quality": features.get("rejection_quality", "unknown"),
+            "explosive_expansion": bool(features.get("explosive_expansion", False)),
+            "late_entry_risk": bool(features.get("late_entry_risk", False)),
+            "is_sideways": bool(features.get("is_sideways", False)),
+            "trend_quality_signal": features.get("trend_quality_signal", "unknown"),
+            "consensus_quality": row.get("consensus_quality") or decision.consensus_quality,
+        }
 
     def _register_outcome(self, row: Dict[str, Any], snapshot: MarketSnapshot) -> None:
         decision = self._decision_from_pending(row)
-        outcome = self.result_engine.evaluate_expired_decision(decision, snapshot.candles_m1[-2:])
+        outcome = self.result_engine.evaluate_expired_decision(decision, snapshot.candles_m1[-5:])
         if not outcome:
             return
 
@@ -157,6 +162,7 @@ class ScanService:
         regime = str(decision.features.get("regime", "unknown"))
         provider_root = str(decision.provider or "unknown").split("-")[0]
         hour_bucket = self._hour_bucket_from_row(row)
+        learning_context = self._learning_context(decision, row)
 
         payload = {
             **outcome.to_dict(),
@@ -190,48 +196,26 @@ class ScanService:
             hour_bucket,
             decision.setup_quality,
             outcome.result,
+            loss_cause=outcome.loss_cause,
+            reverse_would_win=outcome.reverse_would_win,
+            counterfactual_better=outcome.counterfactual_better,
+            entry_efficiency=outcome.entry_efficiency,
+            operating_state=decision.state,
+            signal_type=decision.decision,
+            extra_context=learning_context,
         )
 
-        seen_specialists = set()
-        specialist_votes = list(row.get("specialist_votes", []) or [])
-
-        for vote in specialist_votes:
-            specialist = str(vote.get("specialist", "") or "").strip()
-            specialist_direction = str(vote.get("direction", "") or "").strip()
-            specialist_setup = str(vote.get("setup_quality", decision.setup_quality) or decision.setup_quality)
-
-            if not specialist or specialist in seen_specialists:
-                continue
-            if specialist_direction not in ("CALL", "PUT"):
-                continue
-
-            specialist_result = self._invert_result_if_needed(str(decision.direction), specialist_direction, outcome.result)
-
-            self.specialists.register_outcome(
-                specialist,
-                decision.asset,
-                specialist_direction,
-                regime,
-                provider_root,
-                decision.market_type,
-                hour_bucket,
-                specialist_setup,
-                specialist_result,
-            )
-            seen_specialists.add(specialist)
-
-        if not seen_specialists:
-            self.specialists.register_outcome(
-                dominant_specialist,
-                decision.asset,
-                str(decision.direction),
-                regime,
-                provider_root,
-                decision.market_type,
-                hour_bucket,
-                decision.setup_quality,
-                outcome.result,
-            )
+        self.specialists.register_outcome(
+            dominant_specialist,
+            decision.asset,
+            str(decision.direction),
+            regime,
+            provider_root,
+            decision.market_type,
+            hour_bucket,
+            decision.setup_quality,
+            outcome.result,
+        )
 
         self.store.upsert_collection_item(
             PENDING_COLLECTION,
