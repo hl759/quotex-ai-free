@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from alpha_hive.audit.edge_audit import EdgeAuditEngine
 from alpha_hive.audit.journal_manager import JournalManager
@@ -152,6 +152,88 @@ class ScanService:
             "consensus_quality": row.get("consensus_quality") or decision.consensus_quality,
         }
 
+    def _truthy(self, value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in ("1", "true", "yes", "y", "sim")
+
+    def _specialist_merit(self, vote: Dict[str, Any], decision: FinalDecision, outcome) -> Tuple[str, float, str] | None:
+        specialist = str(vote.get("specialist", "") or "").strip()
+        specialist_direction = str(vote.get("direction", "") or "").strip()
+        setup_quality = str(vote.get("setup_quality", decision.setup_quality) or decision.setup_quality)
+        confidence = int(vote.get("confidence", 50) or 50)
+        market_fit = float(vote.get("market_fit", 0.0) or 0.0)
+        veto = self._truthy(vote.get("veto", False))
+
+        if not specialist:
+            return None
+
+        base_weight = max(0.35, min(1.20, 0.45 + (market_fit * 0.45) + max(0, confidence - 50) / 100.0))
+
+        features = dict(decision.features or {})
+        sideways = bool(features.get("is_sideways", False))
+        clean_trend = str(features.get("trend_m1", "unknown")) == str(features.get("trend_m5", "unknown")) and not sideways
+
+        if veto:
+            if outcome.result == "LOSS" or outcome.loss_cause in (
+                "wrong_direction",
+                "conflict_ignored",
+                "regime_transition",
+                "volatility_trap",
+                "breakout_exhaustion",
+            ):
+                return "WIN", min(1.15, base_weight), "correct_veto"
+            return "LOSS", min(0.55, base_weight), "unnecessary_veto"
+
+        if specialist_direction not in ("CALL", "PUT"):
+            return None
+
+        if specialist_direction == str(decision.direction):
+            if outcome.result == "WIN":
+                if sideways and specialist in ("mean_reversion", "reversal", "regime"):
+                    merit = "good_sideways_reading"
+                elif clean_trend and specialist in ("trend", "breakout", "regime", "session"):
+                    merit = "good_trend_reading"
+                elif setup_quality == "premium" or market_fit >= 0.80:
+                    merit = "high_quality_contribution"
+                else:
+                    merit = "aligned_good_consensus"
+                return "WIN", min(1.20, base_weight), merit
+
+            if outcome.loss_cause in (
+                "late_entry",
+                "overextended_move",
+                "followthrough_failure",
+                "timing_degradation",
+            ):
+                return "LOSS", max(0.30, min(0.55, base_weight * 0.55)), "correct_direction_bad_timing"
+
+            if outcome.loss_cause == "conflict_ignored":
+                return "LOSS", min(1.10, base_weight), "conflict_ignored"
+
+            if outcome.loss_cause == "breakout_exhaustion" and specialist == "breakout":
+                return "LOSS", min(1.10, base_weight), "breakout_chase_failure"
+
+            if outcome.loss_cause == "reversal_ignored" and specialist in ("trend", "breakout", "timing"):
+                return "LOSS", min(1.00, base_weight), "reversal_without_proof"
+
+            if outcome.loss_cause == "regime_transition":
+                return "LOSS", min(1.00, base_weight), "regime_transition_misread"
+
+            return "LOSS", min(1.20, base_weight), "wrong_direction"
+
+        if outcome.reverse_would_win and specialist_direction == outcome.reverse_direction:
+            if sideways and specialist in ("mean_reversion", "reversal", "regime"):
+                merit = "good_sideways_reading"
+            else:
+                merit = "counterfactual_correct_direction"
+            return "WIN", min(1.00, base_weight * 0.95), merit
+
+        if outcome.result == "WIN":
+            return "LOSS", min(0.85, base_weight), "aligned_bad_consensus"
+
+        return "LOSS", max(0.30, min(0.60, base_weight * 0.70)), "structurally_fragile_contribution"
+
     def _register_outcome(self, row: Dict[str, Any], snapshot: MarketSnapshot) -> None:
         decision = self._decision_from_pending(row)
         outcome = self.result_engine.evaluate_expired_decision(decision, snapshot.candles_m1[-5:])
@@ -205,17 +287,53 @@ class ScanService:
             extra_context=learning_context,
         )
 
-        self.specialists.register_outcome(
-            dominant_specialist,
-            decision.asset,
-            str(decision.direction),
-            regime,
-            provider_root,
-            decision.market_type,
-            hour_bucket,
-            decision.setup_quality,
-            outcome.result,
-        )
+        seen_specialists = set()
+        specialist_votes = list(row.get("specialist_votes", []) or [])
+
+        for vote in specialist_votes:
+            specialist = str(vote.get("specialist", "") or "").strip()
+            if not specialist or specialist in seen_specialists:
+                continue
+
+            merit = self._specialist_merit(vote, decision, outcome)
+            if merit is None:
+                continue
+
+            specialist_result, specialist_weight, merit_mode = merit
+            specialist_direction = str(vote.get("direction") or decision.direction or "CALL")
+            specialist_setup = str(vote.get("setup_quality") or decision.setup_quality)
+
+            self.specialists.register_outcome(
+                specialist,
+                decision.asset,
+                specialist_direction,
+                regime,
+                provider_root,
+                decision.market_type,
+                hour_bucket,
+                specialist_setup,
+                specialist_result,
+                weight=specialist_weight,
+                merit_mode=merit_mode,
+                extra_context=learning_context,
+            )
+            seen_specialists.add(specialist)
+
+        if not seen_specialists:
+            self.specialists.register_outcome(
+                dominant_specialist,
+                decision.asset,
+                str(decision.direction),
+                regime,
+                provider_root,
+                decision.market_type,
+                hour_bucket,
+                decision.setup_quality,
+                outcome.result,
+                weight=1.0,
+                merit_mode="standard",
+                extra_context=learning_context,
+            )
 
         self.store.upsert_collection_item(
             PENDING_COLLECTION,
