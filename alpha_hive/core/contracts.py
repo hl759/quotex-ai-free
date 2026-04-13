@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict, field
 from typing import Any, Dict, List, Optional
 
+
 @dataclass(frozen=True)
 class Candle:
     ts: str
@@ -15,6 +16,7 @@ class Candle:
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
+
 @dataclass
 class MarketSnapshot:
     asset: str
@@ -26,6 +28,9 @@ class MarketSnapshot:
     candles_m1: List[Candle]
     candles_m5: List[Candle]
     warnings: List[str] = field(default_factory=list)
+    display_asset: Optional[str] = None
+    source_symbol: Optional[str] = None
+    source_kind: str = "standard"
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -33,6 +38,7 @@ class MarketSnapshot:
             "candles_m1": [c.to_dict() for c in self.candles_m1],
             "candles_m5": [c.to_dict() for c in self.candles_m5],
         }
+
 
 @dataclass
 class MarketFeatures:
@@ -59,6 +65,7 @@ class MarketFeatures:
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
+
 @dataclass
 class SpecialistVote:
     specialist: str
@@ -72,6 +79,7 @@ class SpecialistVote:
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
+
 
 @dataclass
 class CouncilDecision:
@@ -88,6 +96,7 @@ class CouncilDecision:
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
+
 @dataclass
 class RiskDecision:
     state: str
@@ -100,6 +109,7 @@ class RiskDecision:
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
+
 
 @dataclass
 class FinalDecision:
@@ -124,6 +134,7 @@ class FinalDecision:
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
+
 
 @dataclass
 class TradeOutcome:

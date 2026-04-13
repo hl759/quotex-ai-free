@@ -13,6 +13,7 @@ from alpha_hive.market.normalizers import alpha_vantage, binance, finnhub, twelv
 from alpha_hive.market.provider_health import ProviderHealthRegistry
 from alpha_hive.market.provider_router import ProviderRouter
 
+
 class DataManager:
     def __init__(self) -> None:
         self.cache: Dict[str, Dict[str, object]] = {}
@@ -24,7 +25,10 @@ class DataManager:
             "User-Agent": "AlphaHiveAI/2.0",
             "Accept": "application/json,text/plain,*/*",
         }
-        self.key_usage = [{"key": key, "daily": 0, "minute": 0, "minute_window_start": time.time()} for key in SETTINGS.twelvedata_keys]
+        self.key_usage = [
+            {"key": key, "daily": 0, "minute": 0, "minute_window_start": time.time()}
+            for key in SETTINGS.twelvedata_keys
+        ]
         self.day_marker = datetime.now().astimezone().strftime("%Y-%m-%d")
 
     def _cache_key(self, provider: str, symbol: str, interval: str) -> str:
@@ -40,7 +44,10 @@ class DataManager:
     def _set_cache(self, provider: str, symbol: str, interval: str, data: List[Candle]) -> None:
         ttl = 295 if interval == "5min" else 58
         with self.cache_lock:
-            self.cache[self._cache_key(provider, symbol, interval)] = {"data": data, "expires_at": time.time() + ttl}
+            self.cache[self._cache_key(provider, symbol, interval)] = {
+                "data": data,
+                "expires_at": time.time() + ttl,
+            }
 
     def _http_get_json(self, url: str, params: Optional[Dict[str, object]] = None, timeout: int = 4) -> Optional[dict]:
         try:
@@ -55,27 +62,85 @@ class DataManager:
 
     def _to_twelve_symbol(self, symbol: str) -> str:
         return {
-            "EURUSD": "EUR/USD", "GBPUSD": "GBP/USD", "USDJPY": "USD/JPY",
-            "AUDUSD": "AUD/USD", "USDCAD": "USD/CAD", "USDCHF": "USD/CHF",
-            "NZDUSD": "NZD/USD", "EURJPY": "EUR/JPY", "GBPJPY": "GBP/JPY",
-            "EURGBP": "EUR/GBP", "GOLD": "XAU/USD", "SILVER": "XAG/USD",
+            "EURUSD": "EUR/USD",
+            "GBPUSD": "GBP/USD",
+            "USDJPY": "USD/JPY",
+            "AUDUSD": "AUD/USD",
+            "USDCAD": "USD/CAD",
+            "USDCHF": "USD/CHF",
+            "NZDUSD": "NZD/USD",
+            "EURJPY": "EUR/JPY",
+            "GBPJPY": "GBP/JPY",
+            "EURGBP": "EUR/GBP",
+            "GOLD": "XAU/USD",
+            "SILVER": "XAG/USD",
         }.get(symbol, symbol)
 
     def _to_finnhub_symbol(self, symbol: str) -> Optional[str]:
         return {
-            "EURUSD": "OANDA:EUR_USD", "GBPUSD": "OANDA:GBP_USD", "USDJPY": "OANDA:USD_JPY",
-            "AUDUSD": "OANDA:AUD_USD", "USDCAD": "OANDA:USD_CAD", "USDCHF": "OANDA:USD_CHF",
-            "NZDUSD": "OANDA:NZD_USD", "EURJPY": "OANDA:EUR_JPY", "GBPJPY": "OANDA:GBP_JPY",
+            "EURUSD": "OANDA:EUR_USD",
+            "GBPUSD": "OANDA:GBP_USD",
+            "USDJPY": "OANDA:USD_JPY",
+            "AUDUSD": "OANDA:AUD_USD",
+            "USDCAD": "OANDA:USD_CAD",
+            "USDCHF": "OANDA:USD_CHF",
+            "NZDUSD": "OANDA:NZD_USD",
+            "EURJPY": "OANDA:EUR_JPY",
+            "GBPJPY": "OANDA:GBP_JPY",
             "EURGBP": "OANDA:EUR_GBP",
         }.get(symbol)
 
     def _to_yahoo_symbol(self, symbol: str) -> Optional[str]:
         return {
-            "BTCUSDT": "BTC-USD", "ETHUSDT": "ETH-USD", "BNBUSDT": "BNB-USD", "SOLUSDT": "SOL-USD", "XRPUSDT": "XRP-USD",
-            "EURUSD": "EURUSD=X", "GBPUSD": "GBPUSD=X", "USDJPY": "USDJPY=X", "AUDUSD": "AUDUSD=X", "USDCAD": "USDCAD=X",
-            "USDCHF": "USDCHF=X", "NZDUSD": "NZDUSD=X", "EURJPY": "EURJPY=X", "GBPJPY": "GBPJPY=X", "EURGBP": "EURGBP=X",
-            "GOLD": "GC=F", "SILVER": "SI=F",
+            "BTCUSDT": "BTC-USD",
+            "ETHUSDT": "ETH-USD",
+            "BNBUSDT": "BNB-USD",
+            "SOLUSDT": "SOL-USD",
+            "XRPUSDT": "XRP-USD",
+            "ADAUSDT": "ADA-USD",
+            "DOGEUSDT": "DOGE-USD",
+
+            "BITCOIN": "BTC-USD",
+            "ETHEREUM": "ETH-USD",
+            "SOLANA": "SOL-USD",
+            "RIPPLE": "XRP-USD",
+            "CARDANO": "ADA-USD",
+            "DOGECOIN": "DOGE-USD",
+
+            "EURUSD": "EURUSD=X",
+            "GBPUSD": "GBPUSD=X",
+            "USDJPY": "USDJPY=X",
+            "AUDUSD": "AUDUSD=X",
+            "USDCAD": "USDCAD=X",
+            "USDCHF": "USDCHF=X",
+            "NZDUSD": "NZDUSD=X",
+            "EURJPY": "EURJPY=X",
+            "GBPJPY": "GBPJPY=X",
+            "EURGBP": "EURGBP=X",
+            "GOLD": "GC=F",
+            "SILVER": "SI=F",
         }.get(symbol)
+
+    def resolve_source_symbol(self, symbol: str, provider: Optional[str] = None) -> str:
+        root = (provider or "").split("-")[0].strip().lower()
+        if root == "yahoo":
+            return self._to_yahoo_symbol(symbol) or symbol
+        if root == "twelve":
+            return self._to_twelve_symbol(symbol)
+        if root == "finnhub":
+            return self._to_finnhub_symbol(symbol) or symbol
+        return symbol
+
+    def source_kind_for(self, symbol: str) -> str:
+        if symbol in SETTINGS.assets_pure_crypto:
+            return "pure_crypto"
+        if symbol in SETTINGS.assets_crypto:
+            return "crypto_pair"
+        if symbol in SETTINGS.assets_forex:
+            return "forex"
+        if symbol in SETTINGS.assets_metals:
+            return "metals"
+        return "unknown"
 
     def _fetch_binance(self, symbol: str, interval: str, limit: int) -> List[Candle]:
         cached = self._get_cache("binance", symbol, interval)
@@ -83,8 +148,15 @@ class DataManager:
             self._remember(symbol, "binance-cache")
             return cached
         interval_value = "5m" if interval == "5min" else "1m"
-        for url in ("https://data-api.binance.vision/api/v3/klines", "https://api.binance.com/api/v3/klines"):
-            data = self._http_get_json(url, params={"symbol": symbol, "interval": interval_value, "limit": limit}, timeout=4)
+        for url in (
+            "https://data-api.binance.vision/api/v3/klines",
+            "https://api.binance.com/api/v3/klines",
+        ):
+            data = self._http_get_json(
+                url,
+                params={"symbol": symbol, "interval": interval_value, "limit": limit},
+                timeout=4,
+            )
             if isinstance(data, list):
                 candles = binance.normalize(data)
                 if candles:
@@ -109,7 +181,13 @@ class DataManager:
         from_ts = to_ts - (60 * 50)
         data = self._http_get_json(
             "https://finnhub.io/api/v1/forex/candle",
-            params={"symbol": fh_symbol, "resolution": "1", "from": from_ts, "to": to_ts, "token": SETTINGS.finnhub_api_key},
+            params={
+                "symbol": fh_symbol,
+                "resolution": "1",
+                "from": from_ts,
+                "to": to_ts,
+                "token": SETTINGS.finnhub_api_key,
+            },
             timeout=4,
         )
         candles = finnhub.normalize(data or {})
@@ -152,7 +230,12 @@ class DataManager:
             return []
         data = self._http_get_json(
             "https://api.twelvedata.com/time_series",
-            params={"symbol": self._to_twelve_symbol(symbol), "interval": interval, "outputsize": outputsize, "apikey": self.key_usage[idx]["key"]},
+            params={
+                "symbol": self._to_twelve_symbol(symbol),
+                "interval": interval,
+                "outputsize": outputsize,
+                "apikey": self.key_usage[idx]["key"],
+            },
             timeout=4,
         )
         if isinstance(data, dict) and "values" in data:
@@ -176,7 +259,14 @@ class DataManager:
             return cached
         data = self._http_get_json(
             "https://www.alphavantage.co/query",
-            params={"function": "FX_INTRADAY", "from_symbol": symbol[:3], "to_symbol": symbol[3:], "interval": "1min", "outputsize": "compact", "apikey": SETTINGS.alpha_vantage_api_key},
+            params={
+                "function": "FX_INTRADAY",
+                "from_symbol": symbol[:3],
+                "to_symbol": symbol[3:],
+                "interval": "1min",
+                "outputsize": "compact",
+                "apikey": SETTINGS.alpha_vantage_api_key,
+            },
             timeout=5,
         )
         candles = alpha_vantage.normalize(data or {})
@@ -198,7 +288,11 @@ class DataManager:
             return []
         data = self._http_get_json(
             f"https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_symbol}",
-            params={"interval": "5m" if interval == "5min" else "1m", "range": "1d", "includePrePost": "true"},
+            params={
+                "interval": "5m" if interval == "5min" else "1m",
+                "range": "1d",
+                "includePrePost": "true",
+            },
             timeout=4,
         )
         candles = yahoo.normalize(data or {}, limit=outputsize)
