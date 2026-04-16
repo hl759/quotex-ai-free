@@ -62,6 +62,16 @@ class MarketFeatures:
     provider: str
     market_type: str
 
+    regime_transition_state: str = "stable"
+    trend_persistence: float = 0.0
+    exhaustion_risk: float = 0.0
+    fake_move_risk: float = 0.0
+    compression_state: str = "normal"
+    followthrough_bias: float = 0.0
+    provider_confidence: float = 1.0
+    source_kind: str = "standard"
+    source_symbol: str = ""
+
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
@@ -131,6 +141,9 @@ class FinalDecision:
     council: Dict[str, Any] = field(default_factory=dict)
     risk: Dict[str, Any] = field(default_factory=dict)
     features: Dict[str, Any] = field(default_factory=dict)
+    meta_rank_score: float = 0.0
+    meta_state: str = "neutral"
+    meta_reasons: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

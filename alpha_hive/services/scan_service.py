@@ -11,6 +11,7 @@ from alpha_hive.config import SETTINGS
 from alpha_hive.core.clock import now_brazil
 from alpha_hive.core.contracts import FinalDecision, MarketSnapshot
 from alpha_hive.intelligence.decision_engine import DecisionEngine
+from alpha_hive.intelligence.meta_decision_engine import MetaDecisionEngine
 from alpha_hive.intelligence.signal_engine import SignalEngine
 from alpha_hive.learning.learning_engine import LearningEngine
 from alpha_hive.learning.specialist_reputation_engine import SpecialistReputationEngine
@@ -25,6 +26,7 @@ class ScanService:
     def __init__(self):
         self.scanner = MarketScanner()
         self.decision_engine = DecisionEngine()
+        self.meta_engine = MetaDecisionEngine()
         self.signal_engine = SignalEngine()
         self.result_engine = ResultEngine()
         self.capital_service = CapitalService()
@@ -55,13 +57,13 @@ class ScanService:
     def _find_snapshot(self, snapshots: List[MarketSnapshot], asset: str) -> Optional[MarketSnapshot]:
         return next((snap for snap in snapshots if snap.asset == asset), None)
 
-    def _build_pending_payload(self, decision: FinalDecision) -> Dict[str, Any]:
+    def _build_pending_payload(self, decision: FinalDecision, shadow_only: bool = False, selection_rank: int = 0) -> Dict[str, Any]:
         base = now_brazil().replace(second=0, microsecond=0)
         entry_epoch = base.timestamp() + 60
         expiration_epoch = base.timestamp() + 120
         analysis_key = base.strftime("%Y%m%d%H%M")
         direction = str(decision.direction or "NA")
-        uid = f"{decision.asset}-{direction}-{analysis_key}"
+        uid = f"{decision.asset}-{direction}-{analysis_key}-{'shadow' if shadow_only else 'live'}"
         dominant_specialist = decision.council.get("top_specialists", ["unknown"])[0] if decision.council else "unknown"
         return {
             "uid": uid,
@@ -90,6 +92,11 @@ class ScanService:
             "expiration": time.strftime("%H:%M", time.localtime(expiration_epoch)),
             "created_at_ts": time.time(),
             "expires_at_ts": expiration_epoch,
+            "shadow_only": shadow_only,
+            "selection_rank": selection_rank,
+            "meta_rank_score": decision.meta_rank_score,
+            "meta_state": decision.meta_state,
+            "meta_reasons": decision.meta_reasons,
         }
 
     def _schedule_pending(self, decision: Optional[FinalDecision]) -> None:
@@ -97,11 +104,22 @@ class ScanService:
             return
         if decision.execution_permission == "BLOQUEADO":
             return
-        payload = self._build_pending_payload(decision)
+        payload = self._build_pending_payload(decision, shadow_only=False, selection_rank=0)
         self.store.upsert_collection_item(PENDING_COLLECTION, payload["uid"], payload)
 
+    def _schedule_shadows(self, ranked: List[FinalDecision]) -> None:
+        shadow_rank = 1
+        for candidate in ranked[1:4]:
+            if candidate.direction not in ("CALL", "PUT"):
+                continue
+            if candidate.meta_rank_score < 4.9:
+                continue
+            payload = self._build_pending_payload(candidate, shadow_only=True, selection_rank=shadow_rank)
+            self.store.upsert_collection_item(PENDING_COLLECTION, payload["uid"], payload)
+            shadow_rank += 1
+
     def _pending_rows(self) -> List[Dict[str, Any]]:
-        rows = self.store.list_collection(PENDING_COLLECTION, limit=300)
+        rows = self.store.list_collection(PENDING_COLLECTION, limit=400)
         return [row for row in rows if str(row.get("status", "pending")) == "pending"]
 
     def _decision_from_pending(self, row: Dict[str, Any]) -> FinalDecision:
@@ -124,6 +142,9 @@ class ScanService:
             council=dict(row.get("council", {}) or {}),
             risk={},
             features=dict(row.get("features", {}) or {}),
+            meta_rank_score=float(row.get("meta_rank_score", 0.0) or 0.0),
+            meta_state=str(row.get("meta_state", "neutral")),
+            meta_reasons=list(row.get("meta_reasons", []) or []),
         )
 
     def _hour_bucket_from_row(self, row: Dict[str, Any]) -> str:
@@ -169,7 +190,6 @@ class ScanService:
             return None
 
         base_weight = max(0.35, min(1.20, 0.45 + (market_fit * 0.45) + max(0, confidence - 50) / 100.0))
-
         features = dict(decision.features or {})
         sideways = bool(features.get("is_sideways", False))
         clean_trend = str(features.get("trend_m1", "unknown")) == str(features.get("trend_m5", "unknown")) and not sideways
@@ -207,26 +227,18 @@ class ScanService:
                 "timing_degradation",
             ):
                 return "LOSS", max(0.30, min(0.55, base_weight * 0.55)), "correct_direction_bad_timing"
-
             if outcome.loss_cause == "conflict_ignored":
                 return "LOSS", min(1.10, base_weight), "conflict_ignored"
-
             if outcome.loss_cause == "breakout_exhaustion" and specialist == "breakout":
                 return "LOSS", min(1.10, base_weight), "breakout_chase_failure"
-
             if outcome.loss_cause == "reversal_ignored" and specialist in ("trend", "breakout", "timing"):
                 return "LOSS", min(1.00, base_weight), "reversal_without_proof"
-
             if outcome.loss_cause == "regime_transition":
                 return "LOSS", min(1.00, base_weight), "regime_transition_misread"
-
             return "LOSS", min(1.20, base_weight), "wrong_direction"
 
         if outcome.reverse_would_win and specialist_direction == outcome.reverse_direction:
-            if sideways and specialist in ("mean_reversion", "reversal", "regime"):
-                merit = "good_sideways_reading"
-            else:
-                merit = "counterfactual_correct_direction"
+            merit = "good_sideways_reading" if sideways and specialist in ("mean_reversion", "reversal", "regime") else "counterfactual_correct_direction"
             return "WIN", min(1.00, base_weight * 0.95), merit
 
         if outcome.result == "WIN":
@@ -245,45 +257,59 @@ class ScanService:
         provider_root = str(decision.provider or "unknown").split("-")[0]
         hour_bucket = self._hour_bucket_from_row(row)
         learning_context = self._learning_context(decision, row)
+        shadow_only = self._truthy(row.get("shadow_only", False))
 
-        payload = {
-            **outcome.to_dict(),
-            "asset": decision.asset,
-            "signal": decision.direction,
-            "direction": decision.direction,
-            "provider": decision.provider,
-            "state": decision.state,
-            "dominant_specialist": dominant_specialist,
-            "analysis_time": row.get("analysis_time"),
-            "entry_time": row.get("entry_time"),
-            "expiration": row.get("expiration"),
-            "hour_bucket": hour_bucket,
-            "setup_quality": decision.setup_quality,
-            "regime": regime,
-            "risk_pct": decision.risk_pct,
-            "score": decision.score,
-            "confidence": decision.confidence,
-        }
+        if not shadow_only:
+            payload = {
+                **outcome.to_dict(),
+                "asset": decision.asset,
+                "signal": decision.direction,
+                "direction": decision.direction,
+                "provider": decision.provider,
+                "state": decision.state,
+                "dominant_specialist": dominant_specialist,
+                "analysis_time": row.get("analysis_time"),
+                "entry_time": row.get("entry_time"),
+                "expiration": row.get("expiration"),
+                "hour_bucket": hour_bucket,
+                "setup_quality": decision.setup_quality,
+                "regime": regime,
+                "risk_pct": decision.risk_pct,
+                "score": decision.score,
+                "confidence": decision.confidence,
+            }
+            self.audit.record_trade(payload)
+            self.journal.add_trade(payload)
 
-        self.audit.record_trade(payload)
-        self.journal.add_trade(payload)
+            self.learning.register_outcome(
+                decision.asset,
+                str(decision.direction),
+                regime,
+                dominant_specialist,
+                provider_root,
+                decision.market_type,
+                hour_bucket,
+                decision.setup_quality,
+                outcome.result,
+                loss_cause=outcome.loss_cause,
+                reverse_would_win=outcome.reverse_would_win,
+                counterfactual_better=outcome.counterfactual_better,
+                entry_efficiency=outcome.entry_efficiency,
+                operating_state=decision.state,
+                signal_type=decision.decision,
+                extra_context=learning_context,
+            )
 
-        self.learning.register_outcome(
-            decision.asset,
-            str(decision.direction),
-            regime,
-            dominant_specialist,
-            provider_root,
-            decision.market_type,
-            hour_bucket,
-            decision.setup_quality,
-            outcome.result,
-            loss_cause=outcome.loss_cause,
-            reverse_would_win=outcome.reverse_would_win,
-            counterfactual_better=outcome.counterfactual_better,
-            entry_efficiency=outcome.entry_efficiency,
-            operating_state=decision.state,
-            signal_type=decision.decision,
+        self.learning.register_opportunity_feedback(
+            asset=decision.asset,
+            direction=str(decision.direction),
+            regime=regime,
+            provider=provider_root,
+            market_type=decision.market_type,
+            hour_bucket=hour_bucket,
+            setup_quality=decision.setup_quality,
+            result=outcome.result,
+            selected=not shadow_only,
             extra_context=learning_context,
         )
 
@@ -319,7 +345,7 @@ class ScanService:
             )
             seen_specialists.add(specialist)
 
-        if not seen_specialists:
+        if not seen_specialists and not shadow_only:
             self.specialists.register_outcome(
                 dominant_specialist,
                 decision.asset,
@@ -361,13 +387,21 @@ class ScanService:
             self._liquidate_pending(snapshots)
 
             capital = self.capital_service.get()
-            decisions = [self.decision_engine.decide(snapshot, capital) for snapshot in snapshots]
-            decisions.sort(key=lambda item: (item.score, item.confidence), reverse=True)
+            audit_report = self.audit.compute_report()
 
-            current = decisions[0] if decisions else None
+            ranked_decisions: List[FinalDecision] = []
+            for snapshot in snapshots:
+                decision = self.decision_engine.decide(snapshot, capital)
+                adjusted = self.meta_engine.validate(decision, snapshot, audit_report)
+                ranked_decisions.append(adjusted)
+
+            ranked_decisions.sort(key=lambda item: (item.meta_rank_score, item.score, item.confidence), reverse=True)
+
+            current = ranked_decisions[0] if ranked_decisions else None
             signals = [self.signal_engine.to_payload(current)] if current and current.direction and current.execution_permission != "BLOQUEADO" else []
 
             self._schedule_pending(current)
+            self._schedule_shadows(ranked_decisions)
 
             history = self.runtime.get("history", [])
             if current:

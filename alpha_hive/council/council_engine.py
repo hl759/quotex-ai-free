@@ -71,6 +71,15 @@ class CouncilEngine:
             elif vote.setup_quality == "premium":
                 weighted *= 1.04
 
+            if features.regime_transition_state in ("transition", "exhaustion") and vote.specialist in ("timing", "volatility", "regime"):
+                weighted *= 1.06
+
+            if bool(features.is_sideways) and vote.specialist in ("mean_reversion", "reversal", "regime"):
+                weighted *= 1.08
+
+            if features.trend_m1 == features.trend_m5 and vote.specialist in ("trend", "breakout", "timing"):
+                weighted *= 1.06
+
             support[vote.direction] += weighted
             ranked.append((weighted, vote.specialist, vote.direction))
 
@@ -127,15 +136,16 @@ class CouncilEngine:
         strength = round(support_weight / max(total_weight, 1e-9), 2)
         quality = classify_quality(strength, support_weight, opposition_weight)
 
+        if features.regime_transition_state in ("transition", "exhaustion") and quality == "prime":
+            quality = "measured"
+            reasons.append("Transição/exaustão reduziu qualidade do consenso")
+
         destructive_conflict = strength < 0.52 and support_weight <= (opposition_weight * 1.03)
         decision_cap = None
 
         if quality == "split":
             decision_cap = "OBSERVAR" if destructive_conflict else "ENTRADA_CAUTELA"
-            if destructive_conflict:
-                reasons.append("Split destrutivo: observação forçada")
-            else:
-                reasons.append("Split controlado: liberando cautela")
+            reasons.append("Split destrutivo: observação forçada" if destructive_conflict else "Split controlado: liberando cautela")
         elif quality == "fragile":
             decision_cap = "ENTRADA_CAUTELA"
 
@@ -157,5 +167,5 @@ class CouncilEngine:
             conflict_level=conflict_level(strength),
             decision_cap=decision_cap,
             top_specialists=top_specialists,
-            reasons=reasons,
+            reasons=reasons[:12],
         )

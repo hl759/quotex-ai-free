@@ -17,13 +17,14 @@ class LearningEngine:
         if not isinstance(memory, dict) or not memory:
             memory = self.store.get_json(
                 LEGACY_STORE_KEY,
-                {"assets": {}, "segments": {}, "loss_causes": {}},
+                {"assets": {}, "segments": {}, "loss_causes": {}, "opportunities": {}},
             )
         if not isinstance(memory, dict):
-            memory = {"assets": {}, "segments": {}, "loss_causes": {}}
+            memory = {"assets": {}, "segments": {}, "loss_causes": {}, "opportunities": {}}
         memory.setdefault("assets", {})
         memory.setdefault("segments", {})
         memory.setdefault("loss_causes", {})
+        memory.setdefault("opportunities", {})
         self.memory = memory
 
     def _save(self) -> None:
@@ -50,13 +51,22 @@ class LearningEngine:
         if elapsed_days <= 0:
             return
         factor = daily_decay ** elapsed_days
-        row["wins"] = round(float(row.get("wins", 0.0) or 0.0) * factor, 4)
-        row["losses"] = round(float(row.get("losses", 0.0) or 0.0) * factor, 4)
-        row["reverse_would_win_count"] = round(float(row.get("reverse_would_win_count", 0.0) or 0.0) * factor, 4)
-        row["counterfactual_better_count"] = round(float(row.get("counterfactual_better_count", 0.0) or 0.0) * factor, 4)
-        row["late_failures"] = round(float(row.get("late_failures", 0.0) or 0.0) * factor, 4)
-        row["weak_followthrough_count"] = round(float(row.get("weak_followthrough_count", 0.0) or 0.0) * factor, 4)
-        row["critical_failures"] = round(float(row.get("critical_failures", 0.0) or 0.0) * factor, 4)
+
+        for key in (
+            "wins",
+            "losses",
+            "reverse_would_win_count",
+            "counterfactual_better_count",
+            "late_failures",
+            "weak_followthrough_count",
+            "critical_failures",
+            "selected_wins",
+            "selected_losses",
+            "shadow_wins",
+            "shadow_losses",
+        ):
+            if key in row:
+                row[key] = round(float(row.get(key, 0.0) or 0.0) * factor, 4)
 
         cause_counts = dict(row.get("cause_counts", {}) or {})
         if cause_counts:
@@ -70,9 +80,6 @@ class LearningEngine:
         if asset not in assets:
             assets[asset] = {"wins": 0.0, "losses": 0.0, "updated_at": ""}
         return assets[asset]
-
-    def _merged_context(self, extra_context: Dict[str, Any] | None) -> Dict[str, Any]:
-        return dict(extra_context or {})
 
     def register_outcome(
         self,
@@ -94,10 +101,9 @@ class LearningEngine:
         extra_context: Dict[str, Any] | None = None,
     ) -> None:
         result_upper = str(result).upper()
-        merged_context = self._merged_context(extra_context)
-
         asset_row = self._asset_stats(asset)
         self._apply_decay(asset_row)
+
         if result_upper == "WIN":
             asset_row["wins"] = float(asset_row.get("wins", 0.0) or 0.0) + 1.0
         elif result_upper == "LOSS":
@@ -113,7 +119,7 @@ class LearningEngine:
             market_type,
             hour_bucket,
             setup_quality,
-            extra_context=merged_context,
+            extra_context=extra_context,
         )
         row = self.memory.setdefault("segments", {}).setdefault(
             key,
@@ -171,17 +177,7 @@ class LearningEngine:
         row["operating_state"] = operating_state
         row["signal_type"] = signal_type
 
-        cause_key = segment_key(
-            asset,
-            direction,
-            regime,
-            specialist,
-            provider,
-            market_type,
-            hour_bucket,
-            setup_quality,
-            extra_context=merged_context,
-        )
+        cause_key = key
         cause_row = self.memory.setdefault("loss_causes", {}).setdefault(cause_key, {"counts": {}, "updated_at": ""})
         if result_upper == "LOSS" and loss_cause and loss_cause != "none":
             counts = dict(cause_row.get("counts", {}) or {})
@@ -190,6 +186,116 @@ class LearningEngine:
             cause_row["updated_at"] = datetime.now(timezone.utc).isoformat()
 
         self._save()
+
+    def register_opportunity_feedback(
+        self,
+        asset: str,
+        direction: str,
+        regime: str,
+        provider: str,
+        market_type: str,
+        hour_bucket: str,
+        setup_quality: str,
+        result: str,
+        selected: bool,
+        extra_context: Dict[str, Any] | None = None,
+    ) -> None:
+        key = segment_key(
+            asset,
+            direction,
+            regime,
+            "opportunity",
+            provider,
+            market_type,
+            hour_bucket,
+            setup_quality,
+            extra_context=extra_context,
+        )
+        row = self.memory.setdefault("opportunities", {}).setdefault(
+            key,
+            {
+                "selected_wins": 0.0,
+                "selected_losses": 0.0,
+                "shadow_wins": 0.0,
+                "shadow_losses": 0.0,
+                "updated_at": "",
+            },
+        )
+        self._apply_decay(row)
+
+        result_upper = str(result).upper()
+        if selected:
+            if result_upper == "WIN":
+                row["selected_wins"] = float(row.get("selected_wins", 0.0) or 0.0) + 1.0
+            elif result_upper == "LOSS":
+                row["selected_losses"] = float(row.get("selected_losses", 0.0) or 0.0) + 1.0
+        else:
+            if result_upper == "WIN":
+                row["shadow_wins"] = float(row.get("shadow_wins", 0.0) or 0.0) + 1.0
+            elif result_upper == "LOSS":
+                row["shadow_losses"] = float(row.get("shadow_losses", 0.0) or 0.0) + 1.0
+
+        row["updated_at"] = datetime.now(timezone.utc).isoformat()
+        self._save()
+
+    def opportunity_adjustment(
+        self,
+        asset: str,
+        direction: str,
+        regime: str,
+        provider: str,
+        market_type: str,
+        hour_bucket: str,
+        setup_quality: str,
+        extra_context: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        key = segment_key(
+            asset,
+            direction,
+            regime,
+            "opportunity",
+            provider,
+            market_type,
+            hour_bucket,
+            setup_quality,
+            extra_context=extra_context,
+        )
+        row = self.memory.setdefault("opportunities", {}).get(key, {})
+        selected_wins = float(row.get("selected_wins", 0.0) or 0.0)
+        selected_losses = float(row.get("selected_losses", 0.0) or 0.0)
+        shadow_wins = float(row.get("shadow_wins", 0.0) or 0.0)
+        shadow_losses = float(row.get("shadow_losses", 0.0) or 0.0)
+
+        selected_total = selected_wins + selected_losses
+        shadow_total = shadow_wins + shadow_losses
+        total = selected_total + shadow_total
+
+        if total < 5:
+            return {"score_bonus": 0.0, "mode": "building", "selected_total": selected_total, "shadow_total": shadow_total}
+
+        score_bonus = 0.0
+        if selected_total >= 4:
+            selected_wr = selected_wins / max(selected_total, 1.0)
+            score_bonus += max(-0.12, min(0.12, (selected_wr - 0.5) * 0.26))
+
+        if shadow_total >= 3:
+            shadow_wr = shadow_wins / max(shadow_total, 1.0)
+            score_bonus += max(-0.08, min(0.10, (shadow_wr - 0.5) * 0.18))
+            if shadow_wins >= 2 and selected_losses >= 2:
+                score_bonus += 0.04
+
+        mode = "balanced"
+        if score_bonus >= 0.08:
+            mode = "missed_edge_positive"
+        elif score_bonus <= -0.08:
+            mode = "missed_edge_negative"
+
+        return {
+            "score_bonus": round(score_bonus, 3),
+            "mode": mode,
+            "selected_total": round(selected_total, 2),
+            "shadow_total": round(shadow_total, 2),
+        }
 
     def asset_boost(self, asset: str) -> float:
         row = self._asset_stats(asset)
@@ -215,7 +321,6 @@ class LearningEngine:
         setup_quality: str,
         extra_context: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
-        merged_context = self._merged_context(extra_context)
         key = segment_key(
             asset,
             direction,
@@ -225,7 +330,7 @@ class LearningEngine:
             market_type,
             hour_bucket,
             setup_quality,
-            extra_context=merged_context,
+            extra_context=extra_context,
         )
         row = self.memory.setdefault("segments", {}).get(key, {})
         wins = float(row.get("wins", 0.0) or 0.0)
