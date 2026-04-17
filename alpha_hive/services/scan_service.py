@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from alpha_hive.audit.edge_audit import EdgeAuditEngine
@@ -87,14 +88,81 @@ class ScanService:
                 expired += 1
         return len(rows), expired
 
-    def _build_pending_payload(self, decision: FinalDecision, shadow_only: bool = False, selection_rank: int = 0) -> Dict[str, Any]:
+    def _planned_signal_window(self, analysis_ts: Optional[float] = None) -> Dict[str, Any]:
+        analysis_ts = float(analysis_ts or time.time())
         now_local = now_brazil()
-        analysis_ts = time.time()
-        base = now_local.replace(second=0, microsecond=0)
-        entry_epoch = base.timestamp() + 60
-        expiration_epoch = base.timestamp() + 120
+        min_lead = max(8, int(getattr(SETTINGS, "signal_min_lead_seconds", 18) or 18))
+        target_epoch = max(analysis_ts + min_lead, now_local.timestamp() + min_lead)
+        entry_epoch = int(((target_epoch + 59) // 60) * 60)
+        expiration_epoch = entry_epoch + 60
+        tz = now_local.tzinfo
+        entry_dt = datetime.fromtimestamp(entry_epoch, tz=tz)
+        expiration_dt = datetime.fromtimestamp(expiration_epoch, tz=tz)
+        return {
+            "analysis_ts": analysis_ts,
+            "analysis_time": now_local.strftime("%H:%M"),
+            "analysis_time_exact": now_local.strftime("%H:%M:%S"),
+            "entry_ts": entry_epoch,
+            "entry_time": entry_dt.strftime("%H:%M"),
+            "expiration_ts": expiration_epoch,
+            "expiration": expiration_dt.strftime("%H:%M"),
+            "lead_seconds": max(0, int(entry_epoch - analysis_ts)),
+        }
 
-        slot_key = base.strftime("%Y%m%d%H%M")
+    def _is_operable_candidate(self, decision: Optional[FinalDecision]) -> bool:
+        if not decision:
+            return False
+        return bool(
+            decision.direction in ("CALL", "PUT")
+            and decision.execution_permission in ("LIBERADO", "CAUTELA_OPERAVEL")
+            and decision.decision in ("ENTRADA_FORTE", "ENTRADA_CAUTELA")
+        )
+
+    def _decorate_signal_payload(self, payload: Dict[str, Any], planned: Dict[str, Any]) -> Dict[str, Any]:
+        out = dict(payload)
+        out.update(
+            {
+                "analysis_time": planned["analysis_time"],
+                "analysis_time_exact": planned["analysis_time_exact"],
+                "analysis_ts": planned["analysis_ts"],
+                "entry_time": planned["entry_time"],
+                "entry_ts": planned["entry_ts"],
+                "expiration": planned["expiration"],
+                "expiration_ts": planned["expiration_ts"],
+                "lead_seconds": planned["lead_seconds"],
+            }
+        )
+        return out
+
+    def _decorate_current_decision(self, decision: Optional[FinalDecision], planned: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        if not decision:
+            return {}
+        out = decision.to_dict()
+        if planned and self._is_operable_candidate(decision):
+            out.update(
+                {
+                    "analysis_time": planned["analysis_time"],
+                    "analysis_time_exact": planned["analysis_time_exact"],
+                    "analysis_ts": planned["analysis_ts"],
+                    "entry_time": planned["entry_time"],
+                    "entry_ts": planned["entry_ts"],
+                    "expiration": planned["expiration"],
+                    "expiration_ts": planned["expiration_ts"],
+                    "lead_seconds": planned["lead_seconds"],
+                }
+            )
+        else:
+            out.setdefault("analysis_time", "--:--")
+            out.setdefault("entry_time", "--:--")
+            out.setdefault("expiration", "--:--")
+            out.setdefault("lead_seconds", 0)
+        return out
+
+    def _build_pending_payload(self, decision: FinalDecision, planned: Optional[Dict[str, Any]] = None, shadow_only: bool = False, selection_rank: int = 0) -> Dict[str, Any]:
+        analysis_ts = time.time()
+        planned = planned or self._planned_signal_window(analysis_ts=analysis_ts)
+
+        slot_key = datetime.fromtimestamp(planned["entry_ts"], tz=now_brazil().tzinfo).strftime("%Y%m%d%H%M")
         fingerprint = "-".join(
             [
                 str(decision.asset or "NA"),
@@ -131,16 +199,17 @@ class ScanService:
             "reasons": decision.reasons,
             "dominant_specialist": dominant_specialist,
             "specialist_votes": decision.specialist_votes,
-            "analysis_time": base.strftime("%H:%M"),
-            "analysis_time_exact": now_local.strftime("%H:%M:%S"),
-            "analysis_hour_bucket": base.strftime("%H:00"),
-            "analysis_ts": analysis_ts,
-            "entry_time": time.strftime("%H:%M", time.localtime(entry_epoch)),
-            "entry_ts": entry_epoch,
-            "expiration": time.strftime("%H:%M", time.localtime(expiration_epoch)),
-            "expiration_ts": expiration_epoch,
-            "created_at_ts": analysis_ts,
-            "expires_at_ts": expiration_epoch,
+            "analysis_time": planned["analysis_time"],
+            "analysis_time_exact": planned["analysis_time_exact"],
+            "analysis_hour_bucket": planned["analysis_time"][:2] + ":00",
+            "analysis_ts": planned["analysis_ts"],
+            "entry_time": planned["entry_time"],
+            "entry_ts": planned["entry_ts"],
+            "expiration": planned["expiration"],
+            "expiration_ts": planned["expiration_ts"],
+            "created_at_ts": planned["analysis_ts"],
+            "expires_at_ts": planned["expiration_ts"],
+            "lead_seconds": planned["lead_seconds"],
             "shadow_only": shadow_only,
             "selection_rank": selection_rank,
             "meta_rank_score": decision.meta_rank_score,
@@ -150,13 +219,11 @@ class ScanService:
             "source_kind_at_signal": str(features.get("source_kind", "standard") or "standard"),
         }
 
-    def _schedule_pending(self, decision: Optional[FinalDecision]) -> None:
-        if not decision or decision.direction not in ("CALL", "PUT"):
-            return
-        if decision.execution_permission == "BLOQUEADO":
+    def _schedule_pending(self, decision: Optional[FinalDecision], planned: Optional[Dict[str, Any]] = None) -> None:
+        if not self._is_operable_candidate(decision):
             return
 
-        payload = self._build_pending_payload(decision, shadow_only=False, selection_rank=0)
+        payload = self._build_pending_payload(decision, planned=planned, shadow_only=False, selection_rank=0)
         existing = self.store.get_collection_item(PENDING_COLLECTION, payload["uid"], None)
         if isinstance(existing, dict) and str(existing.get("status", "pending")) == "pending":
             return
@@ -165,8 +232,8 @@ class ScanService:
 
     def _schedule_shadows(self, ranked: List[FinalDecision]) -> None:
         shadow_rank = 1
-        for candidate in ranked[1:4]:
-            if candidate.direction not in ("CALL", "PUT"):
+        for candidate in ranked[:3]:
+            if not self._is_operable_candidate(candidate):
                 continue
             if candidate.meta_rank_score < 4.9:
                 continue
@@ -196,7 +263,6 @@ class ScanService:
         now_ts = time.time()
         scan_count = int(meta.get("scan_count", 0) or 0)
         scan_age = self._scan_age_seconds(now_ts)
-        force_after = int(meta.get("ui_force_scan_after_seconds", SETTINGS.ui_force_scan_after_seconds) or SETTINGS.ui_force_scan_after_seconds)
 
         if scan_count <= 0:
             return True
@@ -204,7 +270,11 @@ class ScanService:
         if self._has_expired_pending(now_ts):
             return True
 
-        if not SETTINGS.run_background_scanner and scan_age >= max(15, force_after):
+        if not SETTINGS.run_background_scanner:
+            request_min_interval = max(15, int(getattr(SETTINGS, "request_scan_min_interval_seconds", 25) or 25))
+            if scan_age >= request_min_interval:
+                return True
+        elif scan_age >= max(15, SETTINGS.scan_interval_seconds):
             return True
 
         return False
@@ -568,15 +638,25 @@ class ScanService:
 
                 ranked_decisions.sort(key=lambda item: (item.meta_rank_score, item.score, item.confidence), reverse=True)
 
-                current = ranked_decisions[0] if ranked_decisions else None
-                signals = [self.signal_engine.to_payload(current)] if current and current.direction and current.execution_permission != "BLOQUEADO" else []
+                current_analysis = ranked_decisions[0] if ranked_decisions else None
+                primary_signal = next((item for item in ranked_decisions if self._is_operable_candidate(item)), None)
+                planned = self._planned_signal_window(analysis_ts=time.time()) if primary_signal else None
 
-                self._schedule_pending(current)
-                self._schedule_shadows(ranked_decisions)
+                signals: List[Dict[str, Any]] = []
+                if primary_signal and planned:
+                    signals = [self._decorate_signal_payload(self.signal_engine.to_payload(primary_signal), planned)]
+
+                self._schedule_pending(primary_signal, planned=planned)
+                operable_followups = [item for item in ranked_decisions if item is not primary_signal and self._is_operable_candidate(item)]
+                self._schedule_shadows(operable_followups)
+
+                current_payload = self._decorate_current_decision(primary_signal or current_analysis, planned=planned)
 
                 history = self.runtime.get("history", [])
-                if current:
-                    history = [current.to_dict(), *history][:40]
+                if primary_signal:
+                    history = [current_payload, *history][:40]
+                elif current_analysis:
+                    history = [self._decorate_current_decision(current_analysis), *history][:40]
 
                 pending_total, pending_expired = self._count_pending_state()
                 finished_at = time.time()
@@ -594,12 +674,12 @@ class ScanService:
 
                 self.runtime["signals"] = signals
                 self.runtime["history"] = history
-                self.runtime["current_decision"] = current.to_dict() if current else {}
+                self.runtime["current_decision"] = current_payload
 
                 return {
                     "ok": True,
                     "signals": len(signals),
-                    "decision": current.to_dict() if current else {},
+                    "decision": current_payload,
                     "trigger": trigger,
                     "evaluated": evaluated_count,
                 }
