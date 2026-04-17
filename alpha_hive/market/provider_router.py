@@ -10,15 +10,18 @@ class ProviderRouter:
         if symbol in SETTINGS.assets_pure_crypto:
             return ["yahoo"]
 
-        if symbol.endswith(("USDT", "BUSD", "BTC", "ETH", "BNB")):
+        if symbol in SETTINGS.assets_crypto:
             return ["binance", "yahoo"]
 
-        chain = []
-        if SETTINGS.finnhub_api_key:
-            chain.append("finnhub")
-        if SETTINGS.twelvedata_keys:
-            chain.append("twelve")
-        if SETTINGS.alpha_vantage_api_key:
-            chain.append("alpha")
-        chain.append("yahoo")
-        return chain
+        if symbol in SETTINGS.assets_forex or symbol in SETTINGS.assets_metals:
+            chain: List[str] = []
+            if SETTINGS.finnhub_api_key:
+                chain.append("finnhub")
+            if SETTINGS.twelvedata_keys:
+                chain.append("twelve")
+            if SETTINGS.alpha_vantage_api_key:
+                chain.append("alpha")
+            chain.append("yahoo")
+            return chain
+
+        return ["yahoo"]

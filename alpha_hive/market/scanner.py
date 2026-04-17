@@ -22,11 +22,20 @@ class MarketScanner:
         return "metals"
 
     def scan_asset(self, asset: str) -> Optional[MarketSnapshot]:
-        candles_m1, chain = self.data.get_candles(asset, interval="1min", outputsize=50)
+        candles_m1, chain = self.data.get_candles(asset, interval="1min", outputsize=260)
         if not candles_m1:
             return None
 
-        candles_m5, _ = self.data.get_candles(asset, interval="5min", outputsize=50)
+        candles_m5 = self.data.build_m5_from_m1(candles_m1, outputsize=50)
+
+        if len(candles_m5) < 12:
+            direct_m5, _ = self.data.get_candles(asset, interval="5min", outputsize=50)
+            if len(direct_m5) > len(candles_m5):
+                candles_m5 = direct_m5
+
+        if not candles_m5:
+            candles_m5 = self.data.build_m5_from_m1(candles_m1, outputsize=10) or candles_m1[-10:]
+
         provider = self.data.last_provider_used.get(asset, chain[0] if chain else "unknown")
         provider_root = provider.split("-")[0] if provider else "unknown"
         health_score = self.data.health.get(provider_root).score() if provider else 0.5
@@ -40,7 +49,7 @@ class MarketScanner:
             data_quality_score=dq_score,
             data_quality_state=dq_state,
             candles_m1=candles_m1,
-            candles_m5=candles_m5 or candles_m1[-10:],
+            candles_m5=candles_m5,
             warnings=warnings,
             display_asset=asset,
             source_symbol=self.data.resolve_source_symbol(asset, provider),
@@ -59,5 +68,6 @@ class MarketScanner:
                 if snapshot:
                     out.append(snapshot)
 
-        out.sort(key=lambda item: item.asset)
+        asset_order = {asset: idx for idx, asset in enumerate(assets)}
+        out.sort(key=lambda item: asset_order.get(item.asset, 10**9))
         return out
