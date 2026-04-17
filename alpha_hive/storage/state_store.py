@@ -20,6 +20,10 @@ SQLITE_DB_PATH = os.getenv("ALPHA_HIVE_DB_PATH", str(DATA_DIR / "alpha_hive_stat
 DATABASE_URL = (os.getenv("ALPHA_HIVE_DATABASE_URL", "").strip() or os.getenv("DATABASE_URL", "").strip())
 ensure_parent(SQLITE_DB_PATH)
 
+_SINGLETON_LOCK = threading.Lock()
+_SINGLETON_STORE: Optional["StateStore"] = None
+
+
 class StateStore:
     def __init__(self, db_path: str = SQLITE_DB_PATH, database_url: str = DATABASE_URL):
         self.db_path = db_path
@@ -50,6 +54,7 @@ class StateStore:
                 self.backend_target = self.db_path
                 self.fallback_reason = "postgres_connect_failed"
                 self.last_error = repr(exc)
+
         conn = sqlite3.connect(self.db_path, timeout=15, isolation_level=None, check_same_thread=False)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
@@ -63,10 +68,14 @@ class StateStore:
             if self.use_postgres:
                 with conn.cursor() as cur:
                     cur.execute("CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value_json JSONB NOT NULL, updated_at TEXT NOT NULL)")
-                    cur.execute("CREATE TABLE IF NOT EXISTS collection_items (collection_name TEXT NOT NULL, uid TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, payload_json JSONB NOT NULL, PRIMARY KEY(collection_name, uid))")
+                    cur.execute(
+                        "CREATE TABLE IF NOT EXISTS collection_items (collection_name TEXT NOT NULL, uid TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, payload_json JSONB NOT NULL, PRIMARY KEY(collection_name, uid))"
+                    )
             else:
                 conn.execute("CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL)")
-                conn.execute("CREATE TABLE IF NOT EXISTS collection_items (collection_name TEXT NOT NULL, uid TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, payload_json TEXT NOT NULL, PRIMARY KEY(collection_name, uid))")
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS collection_items (collection_name TEXT NOT NULL, uid TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, payload_json TEXT NOT NULL, PRIMARY KEY(collection_name, uid))"
+                )
 
     def _dump(self, value: Any) -> Any:
         if self.use_postgres:
@@ -157,7 +166,10 @@ class StateStore:
                     cur.execute("SELECT payload_json FROM collection_items WHERE collection_name=%s ORDER BY updated_at DESC LIMIT %s", (collection_name, limit))
                     rows = cur.fetchall()
             else:
-                rows = conn.execute("SELECT payload_json FROM collection_items WHERE collection_name=? ORDER BY updated_at DESC LIMIT ?", (collection_name, limit)).fetchall()
+                rows = conn.execute(
+                    "SELECT payload_json FROM collection_items WHERE collection_name=? ORDER BY updated_at DESC LIMIT ?",
+                    (collection_name, limit),
+                ).fetchall()
         out: List[Dict[str, Any]] = []
         for row in rows or []:
             value = self._load_row(row)
@@ -172,7 +184,10 @@ class StateStore:
                     cur.execute("SELECT payload_json FROM collection_items WHERE collection_name=%s AND uid=%s", (collection_name, uid))
                     row = cur.fetchone()
             else:
-                row = conn.execute("SELECT payload_json FROM collection_items WHERE collection_name=? AND uid=?", (collection_name, uid)).fetchone()
+                row = conn.execute(
+                    "SELECT payload_json FROM collection_items WHERE collection_name=? AND uid=?",
+                    (collection_name, uid),
+                ).fetchone()
         value = self._load_row(row)
         return default if value is None else value
 
@@ -221,5 +236,11 @@ class StateStore:
                     removed = cur.rowcount or 0
         return int(removed)
 
+
 def get_state_store() -> StateStore:
-    return StateStore()
+    global _SINGLETON_STORE
+    if _SINGLETON_STORE is None:
+        with _SINGLETON_LOCK:
+            if _SINGLETON_STORE is None:
+                _SINGLETON_STORE = StateStore()
+    return _SINGLETON_STORE

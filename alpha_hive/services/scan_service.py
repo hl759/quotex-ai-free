@@ -558,7 +558,11 @@ class ScanService:
 
                 ranked_decisions: List[FinalDecision] = []
                 for snapshot in snapshots:
-                    decision = self.decision_engine.decide(snapshot, capital)
+                    decision = self.decision_engine.decide(
+                        snapshot=snapshot,
+                        capital_state=capital,
+                        audit_summary=audit_report,
+                    )
                     adjusted = self.meta_engine.validate(decision, snapshot, audit_report)
                     ranked_decisions.append(adjusted)
 

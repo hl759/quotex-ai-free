@@ -1,17 +1,26 @@
 from __future__ import annotations
 
+import threading
+import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from alpha_hive.storage.state_store import get_state_store
 
 COLLECTION = "edge_trade_ledger_v2"
 LEGACY_COLLECTION = "trade_ledger"
+_REPORT_CACHE_TTL_SECONDS = 8.0
 
 
 class EdgeAuditEngine:
     def __init__(self):
         self.store = get_state_store()
+        self._cache_lock = threading.Lock()
+        self._report_cache: Optional[Tuple[float, Dict[str, Any]]] = None
+
+    def _invalidate_cache(self) -> None:
+        with self._cache_lock:
+            self._report_cache = None
 
     def _to_ts(self, value: Any) -> Optional[float]:
         if value is None:
@@ -70,6 +79,7 @@ class EdgeAuditEngine:
         enriched = {**payload, "uid": uid}
         self.store.upsert_collection_item(COLLECTION, uid, enriched)
         self.store.upsert_collection_item(LEGACY_COLLECTION, uid, enriched)
+        self._invalidate_cache()
 
     def load_ledger(self, limit: int = 10000) -> List[Dict[str, Any]]:
         current = self.store.list_collection(COLLECTION, limit=limit)
@@ -176,7 +186,7 @@ class EdgeAuditEngine:
         )
         return out
 
-    def compute_report(self) -> Dict[str, Any]:
+    def _compute_report_uncached(self) -> Dict[str, Any]:
         rows = self.load_ledger()
         return {
             "summary": self._summary(rows),
@@ -188,3 +198,20 @@ class EdgeAuditEngine:
             "by_state": self._group(rows, "state")[:10],
             "by_hour": self._group_hours(rows)[:12],
         }
+
+    def compute_report(self, use_cache: bool = True) -> Dict[str, Any]:
+        now_ts = time.time()
+
+        if use_cache:
+            with self._cache_lock:
+                if self._report_cache is not None:
+                    cached_at, cached_value = self._report_cache
+                    if now_ts - cached_at <= _REPORT_CACHE_TTL_SECONDS:
+                        return cached_value
+
+        report = self._compute_report_uncached()
+
+        with self._cache_lock:
+            self._report_cache = (now_ts, report)
+
+        return report

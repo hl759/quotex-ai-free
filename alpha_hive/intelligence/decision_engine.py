@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from alpha_hive.config import SETTINGS
 from alpha_hive.core.clock import now_brazil
@@ -73,7 +73,12 @@ class DecisionEngine:
             "consensus_quality": getattr(council, "quality", "split"),
         }
 
-    def decide(self, snapshot: MarketSnapshot, capital_state: dict | None = None) -> FinalDecision:
+    def decide(
+        self,
+        snapshot: MarketSnapshot,
+        capital_state: dict | None = None,
+        audit_summary: Optional[Dict[str, Any]] = None,
+    ) -> FinalDecision:
         capital_state = capital_state or {}
         features, votes = self._votes(snapshot)
         setup_quality = self._setup_quality(votes)
@@ -136,7 +141,7 @@ class DecisionEngine:
             )
         )
 
-        audit_summary = self.audit.compute_report()
+        audit_summary = audit_summary or self.audit.compute_report()
         risk = self.edge_guard.evaluate(snapshot, features, council, audit_summary, setup_quality)
         capital_plan = self.capital_mind.get_plan(capital_state, confidence, setup_quality)
         suggested_stake = round(float(capital_plan["stake_value"]) * risk.stake_multiplier, 2)
