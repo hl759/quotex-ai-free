@@ -180,6 +180,12 @@ class TradeOutcome:
     timing_failure_mode: str = "none"
     mae: float = 0.0
     mfe: float = 0.0
+    signal_analysis_ts: Optional[float] = None
+    signal_entry_ts: Optional[float] = None
+    signal_expiration_ts: Optional[float] = None
+    entry_candle_ts: Optional[float] = None
+    exit_candle_ts: Optional[float] = None
+    evaluated_at_ts: Optional[float] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

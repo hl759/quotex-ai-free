@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
 from alpha_hive.storage.state_store import get_state_store
 
@@ -11,6 +12,56 @@ LEGACY_COLLECTION = "trade_ledger"
 class EdgeAuditEngine:
     def __init__(self):
         self.store = get_state_store()
+
+    def _to_ts(self, value: Any) -> Optional[float]:
+        if value is None:
+            return None
+
+        if isinstance(value, (int, float)):
+            val = float(value)
+            return val if val > 0 else None
+
+        text = str(value).strip()
+        if not text:
+            return None
+
+        try:
+            return float(text)
+        except Exception:
+            pass
+
+        for candidate in (
+            text.replace("Z", "+00:00"),
+            text.replace(" UTC", "+00:00"),
+            text,
+        ):
+            try:
+                dt = datetime.fromisoformat(candidate)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt.astimezone(timezone.utc).timestamp()
+            except Exception:
+                continue
+
+        return None
+
+    def _row_sort_ts(self, row: Dict[str, Any]) -> float:
+        for key in (
+            "evaluated_at_ts",
+            "signal_expiration_ts",
+            "expires_at_ts",
+            "exit_candle_ts",
+            "signal_entry_ts",
+            "entry_ts",
+            "entry_candle_ts",
+            "signal_analysis_ts",
+            "analysis_ts",
+            "created_at_ts",
+        ):
+            val = self._to_ts(row.get(key))
+            if val is not None:
+                return val
+        return 0.0
 
     def record_trade(self, payload: Dict[str, Any]) -> None:
         uid = str(payload.get("uid") or "")
@@ -35,7 +86,7 @@ class EdgeAuditEngine:
             merged[uid] = {**merged.get(uid, {}), **row, "uid": uid}
 
         rows = list(merged.values())
-        rows.sort(key=lambda row: str(row.get("analysis_time", "")), reverse=True)
+        rows.sort(key=self._row_sort_ts, reverse=True)
         return rows[:limit]
 
     def _summary(self, rows: List[Dict[str, Any]]) -> Dict[str, Any]:

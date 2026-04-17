@@ -89,6 +89,7 @@ class ScanService:
 
     def _build_pending_payload(self, decision: FinalDecision, shadow_only: bool = False, selection_rank: int = 0) -> Dict[str, Any]:
         now_local = now_brazil()
+        analysis_ts = time.time()
         base = now_local.replace(second=0, microsecond=0)
         entry_epoch = base.timestamp() + 60
         expiration_epoch = base.timestamp() + 120
@@ -107,6 +108,7 @@ class ScanService:
         uid = f"{slot_key}-{fingerprint}"
 
         dominant_specialist = decision.council.get("top_specialists", ["unknown"])[0] if decision.council else "unknown"
+        features = dict(decision.features or {})
         return {
             "uid": uid,
             "status": "pending",
@@ -114,6 +116,7 @@ class ScanService:
             "decision": decision.decision,
             "direction": decision.direction,
             "provider": decision.provider,
+            "provider_at_signal": decision.provider,
             "market_type": decision.market_type,
             "state": decision.state,
             "score": decision.score,
@@ -131,15 +134,20 @@ class ScanService:
             "analysis_time": base.strftime("%H:%M"),
             "analysis_time_exact": now_local.strftime("%H:%M:%S"),
             "analysis_hour_bucket": base.strftime("%H:00"),
+            "analysis_ts": analysis_ts,
             "entry_time": time.strftime("%H:%M", time.localtime(entry_epoch)),
+            "entry_ts": entry_epoch,
             "expiration": time.strftime("%H:%M", time.localtime(expiration_epoch)),
-            "created_at_ts": time.time(),
+            "expiration_ts": expiration_epoch,
+            "created_at_ts": analysis_ts,
             "expires_at_ts": expiration_epoch,
             "shadow_only": shadow_only,
             "selection_rank": selection_rank,
             "meta_rank_score": decision.meta_rank_score,
             "meta_state": decision.meta_state,
             "meta_reasons": decision.meta_reasons,
+            "source_symbol_at_signal": str(features.get("source_symbol", "") or ""),
+            "source_kind_at_signal": str(features.get("source_kind", "standard") or "standard"),
         }
 
     def _schedule_pending(self, decision: Optional[FinalDecision]) -> None:
@@ -332,7 +340,20 @@ class ScanService:
 
     def _register_outcome(self, row: Dict[str, Any], snapshot: MarketSnapshot) -> bool:
         decision = self._decision_from_pending(row)
-        outcome = self.result_engine.evaluate_expired_decision(decision, snapshot.candles_m1[-5:])
+
+        analysis_ts = float(row.get("analysis_ts", row.get("created_at_ts", 0.0)) or 0.0)
+        entry_ts = float(row.get("entry_ts", 0.0) or 0.0)
+        expiration_ts = float(row.get("expiration_ts", row.get("expires_at_ts", 0.0)) or 0.0)
+        delay_seconds = max(0, int(time.time() - expiration_ts)) if expiration_ts > 0 else 0
+
+        outcome = self.result_engine.evaluate_expired_decision(
+            decision=decision,
+            candles=snapshot.candles_m1,
+            analysis_ts=analysis_ts if analysis_ts > 0 else None,
+            entry_ts=entry_ts if entry_ts > 0 else None,
+            expiration_ts=expiration_ts if expiration_ts > 0 else None,
+            delay_seconds=delay_seconds,
+        )
         if not outcome:
             return False
 
@@ -351,18 +372,30 @@ class ScanService:
                 "signal": decision.direction,
                 "direction": decision.direction,
                 "provider": decision.provider,
+                "provider_at_signal": row.get("provider_at_signal", decision.provider),
                 "state": decision.state,
                 "dominant_specialist": dominant_specialist,
                 "analysis_time": row.get("analysis_time"),
                 "analysis_time_exact": row.get("analysis_time_exact"),
+                "analysis_ts": analysis_ts,
+                "signal_analysis_ts": outcome.signal_analysis_ts,
                 "entry_time": row.get("entry_time"),
+                "entry_ts": entry_ts,
+                "signal_entry_ts": outcome.signal_entry_ts,
                 "expiration": row.get("expiration"),
+                "expiration_ts": expiration_ts,
+                "signal_expiration_ts": outcome.signal_expiration_ts,
+                "entry_candle_ts": outcome.entry_candle_ts,
+                "exit_candle_ts": outcome.exit_candle_ts,
+                "evaluated_at_ts": outcome.evaluated_at_ts,
                 "hour_bucket": hour_bucket,
                 "setup_quality": decision.setup_quality,
                 "regime": regime,
                 "risk_pct": decision.risk_pct,
                 "score": decision.score,
                 "confidence": decision.confidence,
+                "source_symbol_at_signal": row.get("source_symbol_at_signal", ""),
+                "source_kind_at_signal": row.get("source_kind_at_signal", "standard"),
             }
             self.audit.record_trade(payload)
             self.journal.add_trade(payload)
@@ -450,7 +483,15 @@ class ScanService:
         self.store.upsert_collection_item(
             PENDING_COLLECTION,
             str(row.get("uid")),
-            {**row, "status": "evaluated", "result": outcome.result, "evaluated_at_ts": time.time()},
+            {
+                **row,
+                "status": "evaluated",
+                "result": outcome.result,
+                "evaluated_at_ts": outcome.evaluated_at_ts or time.time(),
+                "entry_candle_ts": outcome.entry_candle_ts,
+                "exit_candle_ts": outcome.exit_candle_ts,
+                "evaluation_mode": outcome.evaluation_mode,
+            },
         )
         return True
 

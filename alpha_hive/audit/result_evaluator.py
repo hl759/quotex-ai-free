@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
 
 from alpha_hive.config import SETTINGS
 from alpha_hive.core.contracts import Candle, FinalDecision, TradeOutcome
@@ -69,20 +70,151 @@ class ResultEvaluator:
             return "followthrough_failure"
         return "timing_degradation"
 
+    def _to_ts(self, value: Any) -> Optional[float]:
+        if value is None:
+            return None
+
+        if isinstance(value, (int, float)):
+            val = float(value)
+            return val if val > 0 else None
+
+        text = str(value).strip()
+        if not text:
+            return None
+
+        try:
+            if text.isdigit():
+                val = float(text)
+                return val if val > 0 else None
+        except Exception:
+            pass
+
+        try:
+            val = float(text)
+            return val if val > 0 else None
+        except Exception:
+            pass
+
+        for candidate in (
+            text.replace("Z", "+00:00"),
+            text.replace(" UTC", "+00:00"),
+            text,
+        ):
+            try:
+                dt = datetime.fromisoformat(candidate)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt.astimezone(timezone.utc).timestamp()
+            except Exception:
+                continue
+
+        return None
+
+    def _indexed_candles(self, candles: List[Candle]) -> List[Tuple[int, Candle, float]]:
+        indexed: List[Tuple[int, Candle, float]] = []
+        for idx, candle in enumerate(candles):
+            ts = self._to_ts(getattr(candle, "ts", None))
+            if ts is None:
+                continue
+            indexed.append((idx, candle, ts))
+        indexed.sort(key=lambda item: item[2])
+        return indexed
+
+    def _first_at_or_after(self, indexed: List[Tuple[int, Candle, float]], target_ts: float) -> Optional[Tuple[int, Candle, float]]:
+        for item in indexed:
+            if item[2] >= target_ts:
+                return item
+        return None
+
+    def _last_at_or_before(self, indexed: List[Tuple[int, Candle, float]], target_ts: float) -> Optional[Tuple[int, Candle, float]]:
+        found = None
+        for item in indexed:
+            if item[2] <= target_ts:
+                found = item
+            else:
+                break
+        return found
+
+    def _resolve_entry_exit(
+        self,
+        candles: List[Candle],
+        entry_ts: Optional[float],
+        expiration_ts: Optional[float],
+    ) -> Tuple[Optional[Candle], Optional[Candle], Optional[float], Optional[float], str]:
+        if len(candles) < 2:
+            return None, None, None, None, "insufficient"
+
+        indexed = self._indexed_candles(candles)
+        if len(indexed) < 2 or entry_ts is None or expiration_ts is None:
+            entry = candles[-2]
+            exit_ = candles[-1]
+            return (
+                entry,
+                exit_,
+                self._to_ts(entry.ts),
+                self._to_ts(exit_.ts),
+                "fallback_tail",
+            )
+
+        entry_item = self._first_at_or_after(indexed, entry_ts) or self._last_at_or_before(indexed, entry_ts)
+        exit_item = self._first_at_or_after(indexed, expiration_ts) or self._last_at_or_before(indexed, expiration_ts)
+
+        if entry_item is None or exit_item is None:
+            entry = candles[-2]
+            exit_ = candles[-1]
+            return (
+                entry,
+                exit_,
+                self._to_ts(entry.ts),
+                self._to_ts(exit_.ts),
+                "fallback_tail",
+            )
+
+        entry_idx, entry_candle, entry_candle_ts = entry_item
+        exit_idx, exit_candle, exit_candle_ts = exit_item
+
+        if exit_idx <= entry_idx:
+            for idx, candle, candle_ts in indexed:
+                if idx > entry_idx:
+                    exit_idx, exit_candle, exit_candle_ts = idx, candle, candle_ts
+                    break
+
+        if exit_idx <= entry_idx:
+            return None, None, None, None, "waiting_next_candle"
+
+        exact_entry = abs(entry_candle_ts - entry_ts) <= 3
+        exact_exit = abs(exit_candle_ts - expiration_ts) <= 3
+        mode = "timestamp_exact" if exact_entry and exact_exit else "timestamp_approx"
+        return entry_candle, exit_candle, entry_candle_ts, exit_candle_ts, mode
+
     def evaluate(
         self,
         decision: FinalDecision,
         candles: List[Candle],
         delay_seconds: int = 0,
         payout: Optional[float] = None,
+        analysis_ts: Optional[float] = None,
+        entry_ts: Optional[float] = None,
+        expiration_ts: Optional[float] = None,
     ) -> TradeOutcome | None:
         if decision.direction not in ("CALL", "PUT") or len(candles) < 2:
             return None
 
         payout = float(payout if payout is not None else SETTINGS.default_payout)
         features = dict(decision.features or {})
-        entry = candles[-2]
-        exit_ = candles[-1]
+
+        signal_analysis_ts = self._to_ts(analysis_ts)
+        signal_entry_ts = self._to_ts(entry_ts)
+        signal_expiration_ts = self._to_ts(expiration_ts)
+
+        entry, exit_, entry_candle_ts, exit_candle_ts, resolution_mode = self._resolve_entry_exit(
+            candles,
+            signal_entry_ts,
+            signal_expiration_ts,
+        )
+        if entry is None or exit_ is None:
+            return None
+
         entry_price = self._extract_close(entry)
         exit_price = self._extract_close(exit_)
         result = self._binary_result(str(decision.direction), entry_price, exit_price)
@@ -103,7 +235,13 @@ class ResultEvaluator:
             gross_pnl = 0.0
             gross_r = 0.0
 
-        prev_close = float(candles[-3].close) if len(candles) >= 3 else float(entry.open)
+        prev_close = float(getattr(entry, "open", entry_price))
+        indexed = self._indexed_candles(candles)
+        if indexed:
+            current_idx = next((i for i, (_, _, ts) in enumerate(indexed) if ts == entry_candle_ts), None)
+            if current_idx is not None and current_idx > 0:
+                prev_close = float(indexed[current_idx - 1][1].close)
+
         pre_move = abs(entry_price - prev_close) / max(abs(prev_close), 1e-9)
         exit_range = max(abs(float(exit_.high) - float(exit_.low)), 1e-9)
         body_to_range = abs(exit_price - entry_price) / exit_range
@@ -161,7 +299,7 @@ class ResultEvaluator:
             stake=stake,
             gross_pnl=gross_pnl,
             gross_r=gross_r,
-            evaluation_mode="candle_close_enriched",
+            evaluation_mode=f"candle_close_enriched:{resolution_mode}",
             provider=decision.provider,
             state=decision.state,
             consensus_strength=float(decision.council.get("consensus_strength", 0.0) if decision.council else 0.0),
@@ -180,4 +318,10 @@ class ResultEvaluator:
             timing_failure_mode=timing_failure_mode,
             mae=mae,
             mfe=mfe,
+            signal_analysis_ts=signal_analysis_ts,
+            signal_entry_ts=signal_entry_ts,
+            signal_expiration_ts=signal_expiration_ts,
+            entry_candle_ts=entry_candle_ts,
+            exit_candle_ts=exit_candle_ts,
+            evaluated_at_ts=datetime.now(timezone.utc).timestamp(),
         )
