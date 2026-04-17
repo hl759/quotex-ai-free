@@ -37,6 +37,8 @@ class Settings:
     ui_auto_refresh_seconds: int = int(os.getenv("UI_AUTO_REFRESH_SECONDS", "20"))
     ui_stale_after_seconds: int = int(os.getenv("UI_STALE_AFTER_SECONDS", "95"))
     ui_force_scan_after_seconds: int = int(os.getenv("UI_FORCE_SCAN_AFTER_SECONDS", "110"))
+    request_scan_min_interval_seconds: int = int(os.getenv("REQUEST_SCAN_MIN_INTERVAL_SECONDS", "25"))
+    signal_min_lead_seconds: int = int(os.getenv("SIGNAL_MIN_LEAD_SECONDS", "18"))
 
     data_quality_min_operable: float = float(os.getenv("DATA_QUALITY_MIN_OPERABLE", "0.60"))
     data_quality_min_offense: float = float(os.getenv("DATA_QUALITY_MIN_OFFENSE", "0.78"))
