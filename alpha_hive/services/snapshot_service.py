@@ -21,7 +21,7 @@ class SnapshotService:
             return "MÉDIO"
         return "CAUTELOSO"
 
-    def _reason_text(self, reasons) -> str:
+    def _reason_text(self, reasons):
         if not isinstance(reasons, list):
             reasons = [str(reasons)] if reasons else []
         if not reasons:
@@ -143,8 +143,44 @@ class SnapshotService:
         out["regime"] = item.get("regime") or "unknown"
         return out
 
+    def _coalesce_learning_stats(self, report: dict) -> dict:
+        summary = dict(report.get("summary", {}) or {})
+        journal_stats = dict(self.journal.stats() or {})
+
+        audit_total = int(summary.get("total", 0) or 0)
+        audit_wins = int(summary.get("wins", 0) or 0)
+        audit_loss = int(summary.get("losses", 0) or 0)
+
+        journal_total = int(journal_stats.get("total", 0) or 0)
+        journal_wins = int(journal_stats.get("wins", 0) or 0)
+        journal_loss = int(journal_stats.get("loss", 0) or 0)
+
+        if audit_total >= journal_total:
+            total = audit_total
+            wins = audit_wins
+            loss = audit_loss
+            source = "audit_summary"
+        else:
+            total = journal_total
+            wins = journal_wins
+            loss = journal_loss
+            source = "journal"
+
+        winrate = round((wins / total) * 100, 2) if total else 0.0
+
+        return {
+            "total": total,
+            "wins": wins,
+            "loss": loss,
+            "winrate": winrate,
+            "source": source,
+            "audit_total": audit_total,
+            "journal_total": journal_total,
+        }
+
     def build(self, runtime: dict):
         report = self.audit.compute_report()
+        learning_stats = self._coalesce_learning_stats(report)
 
         current = self._adapt_decision(runtime.get("current_decision", {}) or {})
         signals = [self._adapt_signal(item) for item in (runtime.get("signals", []) or [])]
@@ -160,13 +196,26 @@ class SnapshotService:
         meta.setdefault("scan_count", 0)
         meta.setdefault("last_scan_age_seconds", 0)
         meta.setdefault("scan_in_progress", False)
+        meta.setdefault("last_scan_error", "")
+        meta.setdefault("last_snapshot_refresh_error", "")
+        meta.setdefault("pending_total", 0)
+        meta.setdefault("pending_expired", 0)
+        meta.setdefault("pending_evaluated_last_scan", 0)
+        meta["stats_source"] = learning_stats.get("source", "unknown")
+        meta["audit_total"] = learning_stats.get("audit_total", 0)
+        meta["journal_total"] = learning_stats.get("journal_total", 0)
 
         return {
             "signals": signals,
             "history": history,
             "current_decision": current,
             "meta": meta,
-            "learning_stats": self.journal.stats(),
+            "learning_stats": {
+                "total": learning_stats["total"],
+                "wins": learning_stats["wins"],
+                "loss": learning_stats["loss"],
+                "winrate": learning_stats["winrate"],
+            },
             "best_assets": report.get("by_asset", []),
             "best_hours": report.get("by_hour", []),
             "capital_state": self.capital.get(),

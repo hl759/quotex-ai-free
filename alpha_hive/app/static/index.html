@@ -357,7 +357,14 @@ function safeSnapshot(d){
       ui_auto_refresh_seconds: d && d.meta && d.meta.ui_auto_refresh_seconds ? d.meta.ui_auto_refresh_seconds : 20,
       ui_stale_after_seconds: d && d.meta && d.meta.ui_stale_after_seconds ? d.meta.ui_stale_after_seconds : 95,
       ui_force_scan_after_seconds: d && d.meta && d.meta.ui_force_scan_after_seconds ? d.meta.ui_force_scan_after_seconds : 110,
-      last_scan_error: d && d.meta && d.meta.last_scan_error ? d.meta.last_scan_error : ''
+      last_scan_error: d && d.meta && d.meta.last_scan_error ? d.meta.last_scan_error : '',
+      last_snapshot_refresh_error: d && d.meta && d.meta.last_snapshot_refresh_error ? d.meta.last_snapshot_refresh_error : '',
+      pending_total: d && d.meta && typeof d.meta.pending_total !== 'undefined' ? d.meta.pending_total : 0,
+      pending_expired: d && d.meta && typeof d.meta.pending_expired !== 'undefined' ? d.meta.pending_expired : 0,
+      pending_evaluated_last_scan: d && d.meta && typeof d.meta.pending_evaluated_last_scan !== 'undefined' ? d.meta.pending_evaluated_last_scan : 0,
+      stats_source: d && d.meta && d.meta.stats_source ? d.meta.stats_source : 'journal',
+      audit_total: d && d.meta && typeof d.meta.audit_total !== 'undefined' ? d.meta.audit_total : 0,
+      journal_total: d && d.meta && typeof d.meta.journal_total !== 'undefined' ? d.meta.journal_total : 0
     },
     learning_stats: d && d.learning_stats ? d.learning_stats : {total:0,wins:0,loss:0,winrate:0},
     best_assets: Array.isArray(d && d.best_assets) ? d.best_assets : [],
@@ -480,7 +487,7 @@ function renderStatsPanel(s){
     </div>
     <div class='performance-row'>
       <div class='trend-card'><div class='panel-head'><h3>Desempenho recente</h3><div class='mini-badge'>IA premium</div></div><div class='sparkline'><svg viewBox='0 0 320 92' preserveAspectRatio='none'><defs><linearGradient id='lineGrad2' x1='0' y1='0' x2='1' y2='0'><stop offset='0%' stop-color='#4ca9ff'/><stop offset='100%' stop-color='#5ff5dc'/></linearGradient></defs><path d='M0 72 C20 68, 30 40, 52 45 S88 77, 110 62 S145 38, 170 46 S205 74, 226 55 S268 29, 320 18' fill='none' stroke='url(#lineGrad2)' stroke-width='3' stroke-linecap='round'/><path d='M0 92 L0 72 C20 68, 30 40, 52 45 S88 77, 110 62 S145 38, 170 46 S205 74, 226 55 S268 29, 320 18 L320 92 Z' fill='rgba(95,245,220,.10)'/></svg></div></div>
-      <div class='performance-card'><div class='panel-head'><h3>Resumo</h3><div class='mini-badge'>Live</div></div><div class='advanced-tip'>Scans: <b>${escapeHtml(s.meta.scan_count)}</b><br>Sinais: <b>${escapeHtml(s.meta.signal_count)}</b><br>Ativos: <b>${escapeHtml(s.meta.asset_count)}</b><br>Último scan: <b>${escapeHtml(s.meta.last_scan)}</b></div></div>
+      <div class='performance-card'><div class='panel-head'><h3>Resumo</h3><div class='mini-badge'>Live</div></div><div class='advanced-tip'>Scans: <b>${escapeHtml(s.meta.scan_count)}</b><br>Sinais: <b>${escapeHtml(s.meta.signal_count)}</b><br>Ativos: <b>${escapeHtml(s.meta.asset_count)}</b><br>Último scan: <b>${escapeHtml(s.meta.last_scan)}</b><br>Fonte stats: <b>${escapeHtml(s.meta.stats_source || 'unknown')}</b><br>Total audit: <b>${escapeHtml(s.meta.audit_total || 0)}</b><br>Total journal: <b>${escapeHtml(s.meta.journal_total || 0)}</b><br>Pendentes: <b>${escapeHtml(s.meta.pending_total || 0)}</b><br>Expirados: <b>${escapeHtml(s.meta.pending_expired || 0)}</b><br>Liquidados no último scan: <b>${escapeHtml(s.meta.pending_evaluated_last_scan || 0)}</b>${(s.meta.last_snapshot_refresh_error || s.meta.last_scan_error) ? `<br>Erro: <b>${escapeHtml(String(s.meta.last_snapshot_refresh_error || s.meta.last_scan_error).slice(0,120))}</b>` : ''}</div></div>
     </div>`;
 }
 function fillCapitalForm(cap){
@@ -500,7 +507,12 @@ function applySnapshot(d){
   document.getElementById('dash_expiration').textContent=(s.current_decision && s.current_decision.expiration) || '--:--';
   document.getElementById('dash_regime').textContent=(s.current_decision && s.current_decision.regime) || '--';
   document.getElementById('scan_age_big').textContent=formatAge((s.meta && s.meta.last_scan_age_seconds) || 0);
-  document.getElementById('scan_sub').textContent=s.meta.scan_in_progress ? 'Escaneando padrões de alta probabilidade...' : ('Último scan em ' + (s.meta.last_scan || '--'));
+  const refreshErr = (s.meta && (s.meta.last_snapshot_refresh_error || s.meta.last_scan_error)) || '';
+  if(refreshErr){
+    document.getElementById('scan_sub').textContent='Erro de refresh: ' + String(refreshErr).slice(0, 120);
+  }else{
+    document.getElementById('scan_sub').textContent=s.meta.scan_in_progress ? 'Escaneando padrões de alta probabilidade...' : ('Último scan em ' + (s.meta.last_scan || '--'));
+  }
   document.getElementById('dash_health_badge').textContent=((s.current_decision && s.current_decision.decision==='NAO_OPERAR') ? 'Modo defensivo' : 'Nível saudável');
   document.getElementById('stats_total').textContent=s.learning_stats.total || 0;
   document.getElementById('stats_wr').textContent=(s.learning_stats.winrate || 0) + '%';
