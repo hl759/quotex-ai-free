@@ -319,7 +319,8 @@ function saveCachedSnapshot(snapshot){
     }
   }catch(e){}
 }
-const initialSnapshot = loadCachedSnapshot();
+const bootstrapSnapshot = window.__BOOTSTRAP_SNAPSHOT__ || null;
+const initialSnapshot = bootstrapSnapshot || loadCachedSnapshot();
 let autoRefreshHandle = null;
 let autoRefreshSeconds = (initialSnapshot && initialSnapshot.meta && initialSnapshot.meta.ui_auto_refresh_seconds) || 20;
 let staleAfterSeconds = (initialSnapshot && initialSnapshot.meta && initialSnapshot.meta.ui_stale_after_seconds) || 95;
@@ -515,7 +516,11 @@ function applySnapshot(d){
   window.__lastSnapshot = s;
   if(
     (s.learning_stats && Number(s.learning_stats.total || 0) > 0) ||
-    (s.meta && (Number(s.meta.scan_count || 0) > 0 || Number(s.meta.audit_total || 0) > 0))
+    (s.meta && (
+      Number(s.meta.scan_count || 0) > 0 ||
+      Number(s.meta.audit_total || 0) > 0 ||
+      Number(s.meta.journal_total || 0) > 0
+    ))
   ){
     saveCachedSnapshot(s);
   }
