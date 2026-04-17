@@ -41,6 +41,7 @@ class ScanService:
             "current_decision": {},
             "meta": {
                 "last_scan": "--",
+                "last_scan_ts": 0.0,
                 "scan_count": 0,
                 "signal_count": 0,
                 "asset_count": 0,
@@ -53,6 +54,17 @@ class ScanService:
         }
         self._lock = threading.Lock()
         self._started = False
+
+    def _meta(self) -> Dict[str, Any]:
+        return self.runtime.setdefault("meta", {})  # type: ignore[return-value]
+
+    def _scan_age_seconds(self, now_ts: Optional[float] = None) -> int:
+        now_ts = now_ts or time.time()
+        meta = self._meta()
+        last_scan_ts = float(meta.get("last_scan_ts", 0.0) or 0.0)
+        if last_scan_ts <= 0:
+            return 10**9
+        return max(0, int(now_ts - last_scan_ts))
 
     def _find_snapshot(self, snapshots: List[MarketSnapshot], asset: str) -> Optional[MarketSnapshot]:
         return next((snap for snap in snapshots if snap.asset == asset), None)
@@ -121,6 +133,40 @@ class ScanService:
     def _pending_rows(self) -> List[Dict[str, Any]]:
         rows = self.store.list_collection(PENDING_COLLECTION, limit=400)
         return [row for row in rows if str(row.get("status", "pending")) == "pending"]
+
+    def _has_expired_pending(self, now_ts: Optional[float] = None) -> bool:
+        now_ts = now_ts or time.time()
+        for row in self._pending_rows():
+            expires_at_ts = float(row.get("expires_at_ts", 0.0) or 0.0)
+            if expires_at_ts > 0 and now_ts >= expires_at_ts:
+                return True
+        return False
+
+    def should_auto_scan(self) -> bool:
+        meta = self._meta()
+        if bool(meta.get("scan_in_progress", False)):
+            return False
+
+        now_ts = time.time()
+        scan_count = int(meta.get("scan_count", 0) or 0)
+        scan_age = self._scan_age_seconds(now_ts)
+        force_after = int(meta.get("ui_force_scan_after_seconds", SETTINGS.ui_force_scan_after_seconds) or SETTINGS.ui_force_scan_after_seconds)
+
+        if scan_count <= 0:
+            return True
+
+        if self._has_expired_pending(now_ts):
+            return True
+
+        if not SETTINGS.run_background_scanner and scan_age >= max(15, force_after):
+            return True
+
+        return False
+
+    def auto_refresh_if_needed(self, trigger: str = "snapshot_auto") -> Dict[str, object]:
+        if self.should_auto_scan():
+            return self.run_once(trigger)
+        return {"ok": True, "skipped": True, "reason": "fresh_enough"}
 
     def _decision_from_pending(self, row: Dict[str, Any]) -> FinalDecision:
         return FinalDecision(
@@ -380,55 +426,64 @@ class ScanService:
 
     def run_once(self, trigger: str = "manual") -> Dict[str, object]:
         with self._lock:
-            self.runtime["meta"]["scan_in_progress"] = True  # type: ignore[index]
+            meta = self._meta()
             started = time.time()
+            meta["scan_in_progress"] = True
 
-            snapshots = self.scanner.scan_assets()
-            self._liquidate_pending(snapshots)
+            try:
+                snapshots = self.scanner.scan_assets()
+                self._liquidate_pending(snapshots)
 
-            capital = self.capital_service.get()
-            audit_report = self.audit.compute_report()
+                capital = self.capital_service.get()
+                audit_report = self.audit.compute_report()
 
-            ranked_decisions: List[FinalDecision] = []
-            for snapshot in snapshots:
-                decision = self.decision_engine.decide(snapshot, capital)
-                adjusted = self.meta_engine.validate(decision, snapshot, audit_report)
-                ranked_decisions.append(adjusted)
+                ranked_decisions: List[FinalDecision] = []
+                for snapshot in snapshots:
+                    decision = self.decision_engine.decide(snapshot, capital)
+                    adjusted = self.meta_engine.validate(decision, snapshot, audit_report)
+                    ranked_decisions.append(adjusted)
 
-            ranked_decisions.sort(key=lambda item: (item.meta_rank_score, item.score, item.confidence), reverse=True)
+                ranked_decisions.sort(key=lambda item: (item.meta_rank_score, item.score, item.confidence), reverse=True)
 
-            current = ranked_decisions[0] if ranked_decisions else None
-            signals = [self.signal_engine.to_payload(current)] if current and current.direction and current.execution_permission != "BLOQUEADO" else []
+                current = ranked_decisions[0] if ranked_decisions else None
+                signals = [self.signal_engine.to_payload(current)] if current and current.direction and current.execution_permission != "BLOQUEADO" else []
 
-            self._schedule_pending(current)
-            self._schedule_shadows(ranked_decisions)
+                self._schedule_pending(current)
+                self._schedule_shadows(ranked_decisions)
 
-            history = self.runtime.get("history", [])
-            if current:
-                history = [current.to_dict(), *history][:40]
+                history = self.runtime.get("history", [])
+                if current:
+                    history = [current.to_dict(), *history][:40]
 
-            meta = self.runtime["meta"]  # type: ignore[assignment]
-            meta["last_scan"] = now_brazil().strftime("%H:%M:%S")
-            meta["scan_count"] = int(meta.get("scan_count", 0) or 0) + 1
-            meta["signal_count"] = len(signals)
-            meta["asset_count"] = len(snapshots)
-            meta["scan_in_progress"] = False
-            meta["last_scan_age_seconds"] = 0
-            meta["last_scan_duration_ms"] = int((time.time() - started) * 1000)
-            meta["last_scan_trigger"] = trigger
+                finished_at = time.time()
+                meta["last_scan"] = now_brazil().strftime("%H:%M:%S")
+                meta["last_scan_ts"] = finished_at
+                meta["scan_count"] = int(meta.get("scan_count", 0) or 0) + 1
+                meta["signal_count"] = len(signals)
+                meta["asset_count"] = len(snapshots)
+                meta["last_scan_age_seconds"] = 0
+                meta["last_scan_duration_ms"] = int((finished_at - started) * 1000)
+                meta["last_scan_trigger"] = trigger
 
-            self.runtime["signals"] = signals
-            self.runtime["history"] = history
-            self.runtime["current_decision"] = current.to_dict() if current else {}
+                self.runtime["signals"] = signals
+                self.runtime["history"] = history
+                self.runtime["current_decision"] = current.to_dict() if current else {}
 
-            return {
-                "ok": True,
-                "signals": len(signals),
-                "decision": current.to_dict() if current else {},
-                "trigger": trigger,
-            }
+                return {
+                    "ok": True,
+                    "signals": len(signals),
+                    "decision": current.to_dict() if current else {},
+                    "trigger": trigger,
+                }
+            finally:
+                meta["scan_in_progress"] = False
 
     def snapshot(self) -> Dict[str, object]:
+        meta = self._meta()
+        meta["last_scan_age_seconds"] = self._scan_age_seconds()
+        meta.setdefault("ui_auto_refresh_seconds", SETTINGS.ui_auto_refresh_seconds)
+        meta.setdefault("ui_stale_after_seconds", SETTINGS.ui_stale_after_seconds)
+        meta.setdefault("ui_force_scan_after_seconds", SETTINGS.ui_force_scan_after_seconds)
         return self.runtime
 
     def _loop(self):
