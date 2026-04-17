@@ -47,6 +47,10 @@ class ScanService:
                 "asset_count": 0,
                 "scan_in_progress": False,
                 "last_scan_age_seconds": 0,
+                "last_scan_error": "",
+                "pending_total": 0,
+                "pending_expired": 0,
+                "pending_evaluated_last_scan": 0,
                 "ui_auto_refresh_seconds": SETTINGS.ui_auto_refresh_seconds,
                 "ui_stale_after_seconds": SETTINGS.ui_stale_after_seconds,
                 "ui_force_scan_after_seconds": SETTINGS.ui_force_scan_after_seconds,
@@ -63,19 +67,45 @@ class ScanService:
         meta = self._meta()
         last_scan_ts = float(meta.get("last_scan_ts", 0.0) or 0.0)
         if last_scan_ts <= 0:
-            return 10**9
+            return 0
         return max(0, int(now_ts - last_scan_ts))
 
     def _find_snapshot(self, snapshots: List[MarketSnapshot], asset: str) -> Optional[MarketSnapshot]:
         return next((snap for snap in snapshots if snap.asset == asset), None)
 
+    def _pending_rows(self) -> List[Dict[str, Any]]:
+        rows = self.store.list_collection(PENDING_COLLECTION, limit=400)
+        return [row for row in rows if str(row.get("status", "pending")) == "pending"]
+
+    def _count_pending_state(self) -> Tuple[int, int]:
+        now_ts = time.time()
+        rows = self._pending_rows()
+        expired = 0
+        for row in rows:
+            expires_at_ts = float(row.get("expires_at_ts", 0.0) or 0.0)
+            if expires_at_ts > 0 and now_ts >= expires_at_ts:
+                expired += 1
+        return len(rows), expired
+
     def _build_pending_payload(self, decision: FinalDecision, shadow_only: bool = False, selection_rank: int = 0) -> Dict[str, Any]:
-        base = now_brazil().replace(second=0, microsecond=0)
+        now_local = now_brazil()
+        base = now_local.replace(second=0, microsecond=0)
         entry_epoch = base.timestamp() + 60
         expiration_epoch = base.timestamp() + 120
-        analysis_key = base.strftime("%Y%m%d%H%M")
-        direction = str(decision.direction or "NA")
-        uid = f"{decision.asset}-{direction}-{analysis_key}-{'shadow' if shadow_only else 'live'}"
+
+        slot_key = base.strftime("%Y%m%d%H%M")
+        fingerprint = "-".join(
+            [
+                str(decision.asset or "NA"),
+                str(decision.direction or "NA"),
+                str(decision.decision or "OBSERVAR"),
+                str(decision.setup_quality or "monitorado"),
+                str(decision.consensus_quality or "split"),
+                "shadow" if shadow_only else "live",
+            ]
+        )
+        uid = f"{slot_key}-{fingerprint}"
+
         dominant_specialist = decision.council.get("top_specialists", ["unknown"])[0] if decision.council else "unknown"
         return {
             "uid": uid,
@@ -99,6 +129,7 @@ class ScanService:
             "dominant_specialist": dominant_specialist,
             "specialist_votes": decision.specialist_votes,
             "analysis_time": base.strftime("%H:%M"),
+            "analysis_time_exact": now_local.strftime("%H:%M:%S"),
             "analysis_hour_bucket": base.strftime("%H:00"),
             "entry_time": time.strftime("%H:%M", time.localtime(entry_epoch)),
             "expiration": time.strftime("%H:%M", time.localtime(expiration_epoch)),
@@ -116,7 +147,12 @@ class ScanService:
             return
         if decision.execution_permission == "BLOQUEADO":
             return
+
         payload = self._build_pending_payload(decision, shadow_only=False, selection_rank=0)
+        existing = self.store.get_collection_item(PENDING_COLLECTION, payload["uid"], None)
+        if isinstance(existing, dict) and str(existing.get("status", "pending")) == "pending":
+            return
+
         self.store.upsert_collection_item(PENDING_COLLECTION, payload["uid"], payload)
 
     def _schedule_shadows(self, ranked: List[FinalDecision]) -> None:
@@ -126,13 +162,15 @@ class ScanService:
                 continue
             if candidate.meta_rank_score < 4.9:
                 continue
+
             payload = self._build_pending_payload(candidate, shadow_only=True, selection_rank=shadow_rank)
+            existing = self.store.get_collection_item(PENDING_COLLECTION, payload["uid"], None)
+            if isinstance(existing, dict) and str(existing.get("status", "pending")) == "pending":
+                shadow_rank += 1
+                continue
+
             self.store.upsert_collection_item(PENDING_COLLECTION, payload["uid"], payload)
             shadow_rank += 1
-
-    def _pending_rows(self) -> List[Dict[str, Any]]:
-        rows = self.store.list_collection(PENDING_COLLECTION, limit=400)
-        return [row for row in rows if str(row.get("status", "pending")) == "pending"]
 
     def _has_expired_pending(self, now_ts: Optional[float] = None) -> bool:
         now_ts = now_ts or time.time()
@@ -292,11 +330,11 @@ class ScanService:
 
         return "LOSS", max(0.30, min(0.60, base_weight * 0.70)), "structurally_fragile_contribution"
 
-    def _register_outcome(self, row: Dict[str, Any], snapshot: MarketSnapshot) -> None:
+    def _register_outcome(self, row: Dict[str, Any], snapshot: MarketSnapshot) -> bool:
         decision = self._decision_from_pending(row)
         outcome = self.result_engine.evaluate_expired_decision(decision, snapshot.candles_m1[-5:])
         if not outcome:
-            return
+            return False
 
         dominant_specialist = str(row.get("dominant_specialist", "unknown"))
         regime = str(decision.features.get("regime", "unknown"))
@@ -308,6 +346,7 @@ class ScanService:
         if not shadow_only:
             payload = {
                 **outcome.to_dict(),
+                "uid": str(outcome.uid),
                 "asset": decision.asset,
                 "signal": decision.direction,
                 "direction": decision.direction,
@@ -315,6 +354,7 @@ class ScanService:
                 "state": decision.state,
                 "dominant_specialist": dominant_specialist,
                 "analysis_time": row.get("analysis_time"),
+                "analysis_time_exact": row.get("analysis_time_exact"),
                 "entry_time": row.get("entry_time"),
                 "expiration": row.get("expiration"),
                 "hour_bucket": hour_bucket,
@@ -412,27 +452,65 @@ class ScanService:
             str(row.get("uid")),
             {**row, "status": "evaluated", "result": outcome.result, "evaluated_at_ts": time.time()},
         )
+        return True
 
-    def _liquidate_pending(self, snapshots: List[MarketSnapshot]) -> None:
+    def _snapshot_for_pending(
+        self,
+        asset: str,
+        snapshot_map: Dict[str, MarketSnapshot],
+    ) -> Optional[MarketSnapshot]:
+        cached = snapshot_map.get(asset)
+        if cached and len(cached.candles_m1) >= 2:
+            return cached
+
+        try:
+            one_off = self.scanner.scan_asset(asset)
+        except Exception:
+            one_off = None
+
+        if one_off and len(one_off.candles_m1) >= 2:
+            snapshot_map[asset] = one_off
+            return one_off
+        return None
+
+    def _liquidate_pending(self, snapshots: List[MarketSnapshot]) -> int:
         now_ts = time.time()
+        snapshot_map = {snap.asset: snap for snap in snapshots}
+        evaluated = 0
+
         for row in self._pending_rows():
             expires_at_ts = float(row.get("expires_at_ts", 0.0) or 0.0)
-            if now_ts < expires_at_ts:
+            if expires_at_ts <= 0 or now_ts < expires_at_ts:
                 continue
-            snapshot = self._find_snapshot(snapshots, str(row.get("asset", "")))
-            if not snapshot or len(snapshot.candles_m1) < 2:
+
+            asset = str(row.get("asset", "") or "").strip()
+            if not asset:
+                self.store.upsert_collection_item(
+                    PENDING_COLLECTION,
+                    str(row.get("uid")),
+                    {**row, "status": "discarded", "discard_reason": "missing_asset", "evaluated_at_ts": now_ts},
+                )
                 continue
-            self._register_outcome(row, snapshot)
+
+            snapshot = self._snapshot_for_pending(asset, snapshot_map)
+            if not snapshot:
+                continue
+
+            if self._register_outcome(row, snapshot):
+                evaluated += 1
+
+        return evaluated
 
     def run_once(self, trigger: str = "manual") -> Dict[str, object]:
         with self._lock:
             meta = self._meta()
             started = time.time()
             meta["scan_in_progress"] = True
+            meta["last_scan_error"] = ""
 
             try:
                 snapshots = self.scanner.scan_assets()
-                self._liquidate_pending(snapshots)
+                evaluated_count = self._liquidate_pending(snapshots)
 
                 capital = self.capital_service.get()
                 audit_report = self.audit.compute_report()
@@ -455,6 +533,7 @@ class ScanService:
                 if current:
                     history = [current.to_dict(), *history][:40]
 
+                pending_total, pending_expired = self._count_pending_state()
                 finished_at = time.time()
                 meta["last_scan"] = now_brazil().strftime("%H:%M:%S")
                 meta["last_scan_ts"] = finished_at
@@ -464,6 +543,9 @@ class ScanService:
                 meta["last_scan_age_seconds"] = 0
                 meta["last_scan_duration_ms"] = int((finished_at - started) * 1000)
                 meta["last_scan_trigger"] = trigger
+                meta["pending_total"] = pending_total
+                meta["pending_expired"] = pending_expired
+                meta["pending_evaluated_last_scan"] = evaluated_count
 
                 self.runtime["signals"] = signals
                 self.runtime["history"] = history
@@ -474,16 +556,24 @@ class ScanService:
                     "signals": len(signals),
                     "decision": current.to_dict() if current else {},
                     "trigger": trigger,
+                    "evaluated": evaluated_count,
                 }
+            except Exception as exc:
+                meta["last_scan_error"] = repr(exc)
+                raise
             finally:
                 meta["scan_in_progress"] = False
 
     def snapshot(self) -> Dict[str, object]:
         meta = self._meta()
+        pending_total, pending_expired = self._count_pending_state()
         meta["last_scan_age_seconds"] = self._scan_age_seconds()
+        meta["pending_total"] = pending_total
+        meta["pending_expired"] = pending_expired
         meta.setdefault("ui_auto_refresh_seconds", SETTINGS.ui_auto_refresh_seconds)
         meta.setdefault("ui_stale_after_seconds", SETTINGS.ui_stale_after_seconds)
         meta.setdefault("ui_force_scan_after_seconds", SETTINGS.ui_force_scan_after_seconds)
+        meta.setdefault("last_scan_error", "")
         return self.runtime
 
     def _loop(self):
