@@ -18,7 +18,7 @@ class SnapshotService:
         if confidence >= 82:
             return "FORTE"
         if confidence >= 70:
-            return "MÉDIO"
+            return "MEDIO"
         return "CAUTELOSO"
 
     def _reason_text(self, reasons):
@@ -47,6 +47,29 @@ class SnapshotService:
             expiration.strftime("%H:%M"),
         )
 
+    def _times_from_item(self, item: dict, require_signal: bool = False):
+        analysis_time = str(item.get("analysis_time") or "").strip()
+        entry_time = str(item.get("entry_time") or "").strip()
+        expiration = str(item.get("expiration") or "").strip()
+
+        if analysis_time and entry_time and expiration and analysis_time != "--:--" and entry_time != "--:--" and expiration != "--:--":
+            return analysis_time, entry_time, expiration
+
+        direction = item.get("direction") or item.get("signal")
+        execution_permission = str(item.get("execution_permission", "BLOQUEADO") or "BLOQUEADO")
+        decision = str(item.get("decision", "NAO_OPERAR") or "NAO_OPERAR")
+        should_plan = (
+            direction in ("CALL", "PUT")
+            and execution_permission != "BLOQUEADO"
+            and decision in ("ENTRADA_FORTE", "ENTRADA_CAUTELA")
+        )
+
+        if require_signal or should_plan:
+            raw_analysis = item.get("analysis_time") or item.get("analysis_session")
+            return self._resolve_times(raw_analysis)
+
+        return ("--:--", "--:--", "--:--")
+
     def _summary_for_decision(self, item: dict):
         decision = str(item.get("decision", "NAO_OPERAR") or "NAO_OPERAR")
         direction = item.get("direction")
@@ -58,22 +81,22 @@ class SnapshotService:
 
         if decision == "ENTRADA_FORTE":
             title = "Resumo da entrada forte"
-            main = f"Confluência forte {direction or 'sem direção definida'} com execução liberada."
+            main = f"Confluencia forte {direction or 'sem direcao definida'} com execucao liberada."
         elif decision == "ENTRADA_CAUTELA":
             title = "Resumo da entrada em cautela"
-            main = f"Setup operável {direction or 'sem direção definida'} com stake reduzida e disciplina."
+            main = f"Setup operavel {direction or 'sem direcao definida'} com stake reduzida e disciplina."
         elif decision == "OBSERVAR":
-            title = "Resumo da observação"
-            main = "Há leitura de mercado, mas o contexto ainda exige observação."
+            title = "Resumo da observacao"
+            main = "Ha leitura de mercado, mas o contexto ainda exige observacao."
         else:
             title = "Resumo do bloqueio"
-            main = "A governança bloqueou a execução para preservar capital e consistência."
+            main = "A governanca bloqueou a execucao para preservar capital e consistencia."
 
         points = [
             f"Regime: {regime}",
             f"Estado: {state}",
             f"Consenso: {consensus_quality}",
-            f"Execução: {execution_permission}",
+            f"Execucao: {execution_permission}",
             f"Setup: {setup_quality}",
         ]
         return title, main, points
@@ -86,8 +109,7 @@ class SnapshotService:
         reasons = item.get("reasons", []) or []
 
         regime = item.get("regime") or features.get("regime") or "unknown"
-        raw_analysis = item.get("analysis_time") or item.get("analysis_session")
-        analysis_time, entry_time, expiration = self._resolve_times(raw_analysis)
+        analysis_time, entry_time, expiration = self._times_from_item(item, require_signal=False)
 
         title, main, points = self._summary_for_decision({**item, "regime": regime})
 
@@ -110,22 +132,24 @@ class SnapshotService:
 
         direction = item.get("signal") or item.get("direction")
         confidence = int(item.get("confidence", 50) or 50)
-        raw_analysis = item.get("analysis_time")
-        analysis_time, entry_time, expiration = self._resolve_times(raw_analysis)
+        analysis_time, entry_time, expiration = self._times_from_item(item, require_signal=True)
 
         reasons = item.get("reasons", []) or []
         if not reasons:
             reasons = [
-                f"Direção dominante: {direction or 'N/A'}",
-                f"Execução: {item.get('execution_permission', 'BLOQUEADO')}",
+                f"Direcao dominante: {direction or 'N/A'}",
+                f"Execucao: {item.get('execution_permission', 'BLOQUEADO')}",
                 f"Setup: {item.get('setup_quality', 'monitorado')}",
             ]
+        lead_seconds = int(item.get("lead_seconds", 0) or 0)
+        if lead_seconds > 0:
+            reasons = [f"Janela de entrada em {lead_seconds}s", *reasons]
 
         summary_title = "Resumo operacional"
-        summary_main = f"Leitura {direction or 'N/A'} com confiança {confidence}%."
+        summary_main = f"Leitura {direction or 'N/A'} com confianca {confidence}%."
         summary_points = [
             f"Setup: {item.get('setup_quality', 'monitorado')}",
-            f"Execução: {item.get('execution_permission', 'BLOQUEADO')}",
+            f"Execucao: {item.get('execution_permission', 'BLOQUEADO')}",
             f"Estado: {item.get('state', 'OBSERVE')}",
         ]
 
