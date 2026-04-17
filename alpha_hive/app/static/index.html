@@ -145,6 +145,20 @@ body:after{width:220px;height:220px;right:-80px;top:340px;background:rgba(111,74
 .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .field{display:grid;gap:6px}.field label{font-size:12px;color:#9ab0ce}.field input{width:100%;border-radius:16px;padding:13px 14px;background:#0b1626;border:1px solid rgba(106,225,255,.12);color:#f4f9ff;font-size:15px;outline:none}.save-btn{margin-top:12px;padding:14px 18px;font-weight:900;color:#eff9ff;cursor:pointer;background:linear-gradient(180deg,#1a4f88,#11355a);pointer-events:auto;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
 .save-status{margin-top:10px;color:#94abca;font-size:13px}
+.pre-hydrate .learn-card .value,
+.pre-hydrate #scan_age_big,
+.pre-hydrate #side_scans,
+.pre-hydrate #side_signals,
+.pre-hydrate #side_assets,
+.pre-hydrate #side_update,
+.pre-hydrate #top_asset_value,
+.pre-hydrate #top_regime_value,
+.pre-hydrate #dash_analysis,
+.pre-hydrate #dash_entry,
+.pre-hydrate #dash_expiration,
+.pre-hydrate #dash_regime{
+  opacity:.55;
+}
 .hidden{display:none!important}
 @media (min-width: 700px){
   .app{max-width:1020px;padding:22px 22px 136px}
@@ -158,7 +172,7 @@ body:after{width:220px;height:220px;right:-80px;top:340px;background:rgba(111,74
 }
 </style>
 </head>
-<body>
+<body class='pre-hydrate'>
 <div class='app'>
   <div class='shell'>
     <div class='brand-row'>
@@ -170,7 +184,7 @@ body:after{width:220px;height:220px;right:-80px;top:340px;background:rgba(111,74
         </div>
       </div>
       <div class='right-stack'>
-        <div id='liveBadge' class='live-pill'>● ESCANEANDO</div>
+        <div id='liveBadge' class='live-pill'>● CARREGANDO</div>
         <button id='refreshBtn' class='refresh-btn' onclick='refreshSnapshot(false)'>↻ Atualizar agora</button>
       </div>
     </div>
@@ -204,8 +218,8 @@ body:after{width:220px;height:220px;right:-80px;top:340px;background:rgba(111,74
           <div class='scan-box'>
             <div class='scan-radar'><div class='dot'></div></div>
             <div class='scan-readout'>
-              <div class='time' id='scan_age_big'>00:00</div>
-              <div class='sub' id='scan_sub'>Escaneando mercado...</div>
+              <div class='time' id='scan_age_big'>--:--</div>
+              <div class='sub' id='scan_sub'>Carregando snapshot salvo e dados ao vivo...</div>
             </div>
           </div>
         </div>
@@ -219,10 +233,10 @@ body:after{width:220px;height:220px;right:-80px;top:340px;background:rgba(111,74
           <button class='ghost-btn' onclick="showTab('stats', document.querySelector('[data-tab=stats]'))">Ver detalhes</button>
         </div>
         <div class='learn-stats'>
-          <div class='stat-tile'><div class='label'>Total avaliadas</div><div class='value' id='stats_total'>0</div></div>
-          <div class='stat-tile positive'><div class='label'>Win rate</div><div class='value' id='stats_wr'>0%</div></div>
-          <div class='stat-tile positive'><div class='label'>Wins</div><div class='value' id='stats_wins'>0</div></div>
-          <div class='stat-tile negative'><div class='label'>Loss</div><div class='value' id='stats_loss'>0</div></div>
+          <div class='stat-tile'><div class='label'>Total avaliadas</div><div class='value' id='stats_total'>--</div></div>
+          <div class='stat-tile positive'><div class='label'>Win rate</div><div class='value' id='stats_wr'>--</div></div>
+          <div class='stat-tile positive'><div class='label'>Wins</div><div class='value' id='stats_wins'>--</div></div>
+          <div class='stat-tile negative'><div class='label'>Loss</div><div class='value' id='stats_loss'>--</div></div>
         </div>
         <div class='performance-row'>
           <div class='trend-card'>
@@ -243,11 +257,11 @@ body:after{width:220px;height:220px;right:-80px;top:340px;background:rgba(111,74
           <div class='performance-card'>
             <div class='panel-head'><h3>Desempenho geral</h3><div class='mini-badge'>7 dias</div></div>
             <div class='ring-wrap'>
-              <div class='ring' id='wr_ring'><div class='ring-inner'><div class='big' id='wr_ring_text'>0%</div><div class='small'>Win rate</div></div></div>
+              <div class='ring' id='wr_ring'><div class='ring-inner'><div class='big' id='wr_ring_text'>--</div><div class='small'>Win rate</div></div></div>
               <div class='performance-side'>
-                <div class='side-row'><div class='k'>Scans</div><div class='v' id='side_scans'>0</div></div>
-                <div class='side-row'><div class='k'>Sinais</div><div class='v' id='side_signals'>0</div></div>
-                <div class='side-row'><div class='k'>Ativos</div><div class='v' id='side_assets'>0</div></div>
+                <div class='side-row'><div class='k'>Scans</div><div class='v' id='side_scans'>--</div></div>
+                <div class='side-row'><div class='k'>Sinais</div><div class='v' id='side_signals'>--</div></div>
+                <div class='side-row'><div class='k'>Ativos</div><div class='v' id='side_assets'>--</div></div>
                 <div class='side-row'><div class='k'>Atualização</div><div class='v' id='side_update'>--:--</div></div>
               </div>
             </div>
@@ -512,6 +526,7 @@ function fillCapitalForm(cap){
   ids.forEach(id=>{const el=document.getElementById(id); if(el) el.value = cap[id] ?? (id==='daily_target_pct'?2.0:id==='daily_stop_pct'?3.0:0);});
 }
 function applySnapshot(d){
+  document.body.classList.add('snapshot-ready');
   const s=safeSnapshot(d);
   window.__lastSnapshot = s;
   if(
@@ -564,6 +579,7 @@ function applySnapshot(d){
   renderStatsPanel(s);
   fillCapitalForm(s.capital_state || {});
   updateLiveBadge(s.meta || {});
+  document.body.classList.remove('pre-hydrate');
   startAutoRefresh();
 }
 async function maybeTriggerScan(meta){
