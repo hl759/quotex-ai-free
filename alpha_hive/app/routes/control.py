@@ -4,6 +4,7 @@ from flask import Blueprint, current_app, jsonify, request
 
 bp = Blueprint("control", __name__)
 
+
 @bp.route("/run-scan", methods=["GET", "POST"])
 def run_scan():
     settings = current_app.config["SETTINGS"]
@@ -14,5 +15,6 @@ def run_scan():
         if provided != settings.scan_trigger_token:
             return jsonify({"ok": False, "error": "unauthorized"}), 401
     service = current_app.config["SCAN_SERVICE"]
-    result = service.run_once("manual")
+    service.ensure_started()
+    result = service.request_scan("manual", force=True)
     return jsonify(result)
