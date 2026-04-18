@@ -321,15 +321,24 @@ function loadCachedSnapshot(){
   try{
     const raw = localStorage.getItem('alpha_hive_last_snapshot');
     if(!raw) return null;
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    const cachedAt = Number(parsed && parsed._cached_at_ms ? parsed._cached_at_ms : 0);
+    if(!cachedAt) return null;
+    if((Date.now() - cachedAt) > 180000){
+      localStorage.removeItem('alpha_hive_last_snapshot');
+      return null;
+    }
+    return parsed;
   }catch(e){
+    try{ localStorage.removeItem('alpha_hive_last_snapshot'); }catch(_){}
     return null;
   }
 }
 function saveCachedSnapshot(snapshot){
   try{
     if(snapshot){
-      localStorage.setItem('alpha_hive_last_snapshot', JSON.stringify(snapshot));
+      const payload = {...snapshot, _cached_at_ms: Date.now()};
+      localStorage.setItem('alpha_hive_last_snapshot', JSON.stringify(payload));
     }
   }catch(e){}
 }
@@ -542,12 +551,15 @@ function applySnapshot(d){
   autoRefreshSeconds=parseInt((s.meta && s.meta.ui_auto_refresh_seconds) || autoRefreshSeconds || 20,10)||20;
   staleAfterSeconds=parseInt((s.meta && s.meta.ui_stale_after_seconds) || staleAfterSeconds || 95,10)||95;
   forceScanAfterSeconds=parseInt((s.meta && s.meta.ui_force_scan_after_seconds) || forceScanAfterSeconds || 110,10)||110;
-  document.getElementById('top_asset_value').textContent=(s.current_decision && s.current_decision.asset) || (s.signals[0] && s.signals[0].asset) || 'Mercado';
-  document.getElementById('top_regime_value').textContent=(s.current_decision && s.current_decision.regime) || (s.signals[0] && s.signals[0].regime) || 'Misto';
-  document.getElementById('dash_analysis').textContent=(s.current_decision && s.current_decision.analysis_time) || '--:--';
-  document.getElementById('dash_entry').textContent=(s.current_decision && s.current_decision.entry_time) || '--:--';
-  document.getElementById('dash_expiration').textContent=(s.current_decision && s.current_decision.expiration) || '--:--';
-  document.getElementById('dash_regime').textContent=(s.current_decision && s.current_decision.regime) || '--';
+  const liveDecision =
+    (s.signals && s.signals[0]) ||
+    ((s.current_decision && s.current_decision.decision) ? s.current_decision : {});
+  document.getElementById('top_asset_value').textContent=liveDecision.asset || 'Mercado';
+  document.getElementById('top_regime_value').textContent=liveDecision.regime || 'Misto';
+  document.getElementById('dash_analysis').textContent=liveDecision.analysis_time || '--:--';
+  document.getElementById('dash_entry').textContent=liveDecision.entry_time || '--:--';
+  document.getElementById('dash_expiration').textContent=liveDecision.expiration || '--:--';
+  document.getElementById('dash_regime').textContent=liveDecision.regime || '--';
   document.getElementById('scan_age_big').textContent=formatAge((s.meta && s.meta.last_scan_age_seconds) || 0);
   const refreshErr = (s.meta && (s.meta.last_snapshot_refresh_error || s.meta.last_scan_error)) || '';
   if(refreshErr){
@@ -598,13 +610,13 @@ async function refreshSnapshot(silent){
   const btn = document.getElementById('refreshBtn');
   if(btn && !silent){ btn.disabled = true; btn.textContent = 'Atualizando...'; }
   const controller = new AbortController();
-  const timeout = setTimeout(()=>controller.abort(), 12000);
+  const timeout = setTimeout(()=>controller.abort(), 45000);
   try{
     const resp = await fetch('/snapshot', {cache:'no-store', signal:controller.signal});
     const data = await resp.json();
     applySnapshot(data);
     await maybeTriggerScan(data.meta || {});
-  }catch(e){ console.error('snapshot refresh error', e); }
+  }catch(e){ console.error('snapshot refresh error', e); document.getElementById('scan_sub').textContent='Atualização demorou ou falhou; tentando novamente...'; }
   finally{
     clearTimeout(timeout);
     refreshInFlight = false;
