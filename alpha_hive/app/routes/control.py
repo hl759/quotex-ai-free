@@ -16,5 +16,5 @@ def run_scan():
             return jsonify({"ok": False, "error": "unauthorized"}), 401
     service = current_app.config["SCAN_SERVICE"]
     service.ensure_started()
-    result = service.request_scan("manual", force=True)
+    result = service.run_once("manual")
     return jsonify(result)
