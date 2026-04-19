@@ -1,5 +1,4 @@
 flask
-flask-compress
 requests
 pandas
 numpy

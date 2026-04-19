@@ -8,10 +8,6 @@ from alpha_hive.core.contracts import MarketSnapshot
 from alpha_hive.market.data_manager import DataManager
 from alpha_hive.market.reliability_engine import ReliabilityEngine
 
-# RENDER FREE: 80 velas 1min (era 260). 80 é suficiente para RSI/MACD/Bollinger.
-_M1_OUTPUTSIZE = 80
-_M5_OUTPUTSIZE = 30
-
 
 class MarketScanner:
     def __init__(self, data_manager: Optional[DataManager] = None):
@@ -26,35 +22,24 @@ class MarketScanner:
         return "metals"
 
     def scan_asset(self, asset: str) -> Optional[MarketSnapshot]:
-        candles_m1, chain = self.data.get_candles(
-            asset, interval="1min", outputsize=_M1_OUTPUTSIZE
-        )
+        candles_m1, chain = self.data.get_candles(asset, interval="1min", outputsize=260)
         if not candles_m1:
             return None
 
-        # Constrói M5 a partir do M1 (evita segunda chamada de API)
-        candles_m5 = self.data.build_m5_from_m1(candles_m1, outputsize=_M5_OUTPUTSIZE)
+        candles_m5 = self.data.build_m5_from_m1(candles_m1, outputsize=50)
 
-        # Só busca M5 direto se realmente insuficiente (mínimo = 8 velas)
-        if len(candles_m5) < 8:
-            direct_m5, _ = self.data.get_candles(
-                asset, interval="5min", outputsize=_M5_OUTPUTSIZE
-            )
+        if len(candles_m5) < 12:
+            direct_m5, _ = self.data.get_candles(asset, interval="5min", outputsize=50)
             if len(direct_m5) > len(candles_m5):
                 candles_m5 = direct_m5
 
         if not candles_m5:
-            candles_m5 = (
-                self.data.build_m5_from_m1(candles_m1, outputsize=8)
-                or candles_m1[-8:]
-            )
+            candles_m5 = self.data.build_m5_from_m1(candles_m1, outputsize=10) or candles_m1[-10:]
 
         provider = self.data.last_provider_used.get(asset, chain[0] if chain else "unknown")
         provider_root = provider.split("-")[0] if provider else "unknown"
         health_score = self.data.health.get(provider_root).score() if provider else 0.5
-        dq_score, dq_state, warnings = self.reliability.evaluate(
-            provider, chain, candles_m1, health_score
-        )
+        dq_score, dq_state, warnings = self.reliability.evaluate(provider, chain, candles_m1, health_score)
 
         return MarketSnapshot(
             asset=asset,
@@ -77,10 +62,7 @@ class MarketScanner:
         out: List[MarketSnapshot] = []
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_map = {
-                executor.submit(self.scan_asset, asset): asset
-                for asset in assets
-            }
+            future_map = {executor.submit(self.scan_asset, asset): asset for asset in assets}
             for future in as_completed(future_map):
                 snapshot = future.result()
                 if snapshot:
