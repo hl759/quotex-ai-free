@@ -8,31 +8,32 @@ from typing import List
 @dataclass(frozen=True)
 class Settings:
     # ─── ATIVOS ──────────────────────────────────────────────────────────────
-    # Pares USDT — dados via Binance (espelham os pares reais da EBINEX)
+    # Defaults conservadores para instância free: menos ativos = menos RAM/bandwidth.
+    # Quem quiser ampliar pode sobrescrever via env vars no Render.
     assets_crypto: List[str] = field(default_factory=lambda: [
         s.strip() for s in
-        os.getenv("ASSETS_CRYPTO", "BTCUSDT,ETHUSDT,XRPUSDT,SOLUSDT,BNBUSDT,ADAUSDT,DOGEUSDT").split(",")
+        os.getenv("ASSETS_CRYPTO", "BTCUSDT,ETHUSDT,XRPUSDT").split(",")
         if s.strip()
     ])
 
     # Instrumentos OTC/nomeados da EBINEX — dados via Yahoo Finance (BTC-USD etc.)
     assets_pure_crypto: List[str] = field(default_factory=lambda: [
         s.strip() for s in
-        os.getenv("ASSETS_PURE_CRYPTO", "BITCOIN,ETHEREUM,SOLANA,RIPPLE,CARDANO,DOGECOIN").split(",")
+        os.getenv("ASSETS_PURE_CRYPTO", "BITCOIN").split(",")
         if s.strip()
     ])
 
     # Forex disponíveis na EBINEX
     assets_forex: List[str] = field(default_factory=lambda: [
         s.strip() for s in
-        os.getenv("ASSETS_FOREX", "EURUSD,GBPUSD,USDJPY,AUDUSD,USDCAD,USDCHF,NZDUSD,EURJPY,GBPJPY").split(",")
+        os.getenv("ASSETS_FOREX", "EURUSD,GBPUSD").split(",")
         if s.strip()
     ])
 
     # Metais
     assets_metals: List[str] = field(default_factory=lambda: [
         s.strip() for s in
-        os.getenv("ASSETS_METALS", "GOLD").split(",")
+        os.getenv("ASSETS_METALS", "").split(",")
         if s.strip()
     ])
 
@@ -42,11 +43,11 @@ class Settings:
 
     scan_interval_seconds: int = int(os.getenv("SCAN_INTERVAL_SECONDS", "300"))
 
-    # Padrão conservador para evitar pico de RAM em instâncias free.
-    scanner_max_workers: int = int(os.getenv("SCANNER_MAX_WORKERS", "2"))
+    # Padrão ultra conservador para evitar pico de RAM em instâncias free.
+    scanner_max_workers: int = int(os.getenv("SCANNER_MAX_WORKERS", "1"))
 
     # Modo on-demand em instância free: limita o lote para não matar o worker.
-    on_demand_scan_asset_limit: int = int(os.getenv("ON_DEMAND_SCAN_ASSET_LIMIT", "10"))
+    on_demand_scan_asset_limit: int = int(os.getenv("ON_DEMAND_SCAN_ASSET_LIMIT", "5"))
     on_demand_scanner_max_workers: int = int(os.getenv("ON_DEMAND_SCANNER_MAX_WORKERS", "1"))
 
     # ─── UI / POLLING ────────────────────────────────────────────────────────
