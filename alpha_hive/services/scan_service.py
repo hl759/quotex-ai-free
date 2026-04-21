@@ -624,7 +624,7 @@ class ScanService:
             meta["last_scan_error"] = ""
 
             try:
-                snapshots = self.scanner.scan_assets()
+                snapshots = self._snapshots_from_passive()
                 evaluated_count = self._liquidate_pending(snapshots)
 
                 capital = self.capital_service.get()
@@ -705,16 +705,44 @@ class ScanService:
         meta.setdefault("last_scan_error", "")
         return self.runtime
 
-    def _loop(self):
-        while True:
-            try:
-                self.run_once("loop")
-            except Exception:
-                pass
-            time.sleep(max(15, SETTINGS.scan_interval_seconds))
+    def _snapshots_from_passive(self):
+        from alpha_hive.core.contracts import MarketSnapshot
+        contexts = self.passive_watcher.get_all_contexts()
+        asset_order = {a: i for i, a in enumerate(SETTINGS.assets)}
+        snapshots = []
+        for asset, ctx in contexts.items():
+            if ctx.is_initialized and ctx.is_fresh and len(ctx.candles_m1) >= 12:
+                candles_m1 = list(ctx.candles_m1)
+                candles_m5 = list(ctx.candles_m5)
+                mt = "crypto" if asset in SETTINGS.assets_crypto or asset in SETTINGS.assets_pure_crypto else "forex" if asset in SETTINGS.assets_forex else "metals"
+                snap = MarketSnapshot(
+                    asset=asset, market_type=mt, provider=ctx.provider,
+                    provider_fallback_chain=ctx.provider_chain,
+                    data_quality_score=ctx.data_quality_score,
+                    data_quality_state=ctx.data_quality_state,
+                    candles_m1=candles_m1, candles_m5=candles_m5,
+                    warnings=ctx.warnings, display_asset=asset,
+                    source_symbol=getattr(ctx, "source_symbol", asset),
+                    source_kind=getattr(ctx, "source_kind", "standard"),
+                )
+                snapshots.append(snap)
+            else:
+                initialized_count = sum(1 for c2 in contexts.values() if c2.is_initialized)
+                if initialized_count >= 1:
+                    try:
+                        snap = self.scanner.scan_asset(asset)
+                        if snap:
+                            snapshots.append(snap)
+                    except Exception:
+                        pass
+        snapshots.sort(key=lambda s: asset_order.get(s.asset, 10**9))
+        return snapshots
+
+    def _passive_diagnostics(self):
+        return self.passive_watcher.diagnostics()
 
     def ensure_started(self):
-        if self._started or not SETTINGS.run_background_scanner:
+        if self._started:
             return
-        threading.Thread(target=self._loop, daemon=True).start()
+        self.passive_watcher.ensure_started()
         self._started = True

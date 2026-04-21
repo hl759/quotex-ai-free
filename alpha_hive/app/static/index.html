@@ -345,7 +345,7 @@ function saveCachedSnapshot(snapshot){
 const bootstrapSnapshot = window.__BOOTSTRAP_SNAPSHOT__ || null;
 const initialSnapshot = bootstrapSnapshot || loadCachedSnapshot();
 let autoRefreshHandle = null;
-let autoRefreshSeconds = (initialSnapshot && initialSnapshot.meta && initialSnapshot.meta.ui_auto_refresh_seconds) || 20;
+let autoRefreshSeconds = (initialSnapshot && initialSnapshot.meta && initialSnapshot.meta.ui_auto_refresh_seconds) || 90;
 let staleAfterSeconds = (initialSnapshot && initialSnapshot.meta && initialSnapshot.meta.ui_stale_after_seconds) || 95;
 let forceScanAfterSeconds = (initialSnapshot && initialSnapshot.meta && initialSnapshot.meta.ui_force_scan_after_seconds) || 110;
 let refreshInFlight = false;
@@ -600,7 +600,7 @@ async function maybeTriggerScan(meta){
   const missingBootstrap = !meta || !meta.last_scan || meta.last_scan === '--' || count <= 0;
   if(!missingBootstrap && age < (parseInt((meta && meta.ui_force_scan_after_seconds) || forceScanAfterSeconds || 110, 10) || 110)) return;
   const now = Date.now();
-  if(now - lastAutoRunScanAt < (missingBootstrap ? 5000 : 45000)) return;
+  if(now - lastAutoRunScanAt < (missingBootstrap ? 15000 : 120000)) return;
   lastAutoRunScanAt = now;
   try{ await fetch('/run-scan', {cache:'no-store'}); }catch(e){ console.error('run-scan warning', e); }
 }
@@ -641,7 +641,7 @@ function startBootstrapPolling(){
       return;
     }
     await refreshSnapshot(true);
-  }, 2500);
+  }, 15000);
 }
 async function saveCapitalState(){
   const btn=document.getElementById('saveCapitalBtn');

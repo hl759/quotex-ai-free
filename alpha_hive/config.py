@@ -49,12 +49,12 @@ class Settings:
     # ─── UI / POLLING ────────────────────────────────────────────────────────
     # RENDER FREE: frontend atualiza a cada 90s (bem acima do scan_interval)
     ui_auto_refresh_seconds: int = int(os.getenv("UI_AUTO_REFRESH_SECONDS", "90"))
-    ui_stale_after_seconds: int = int(os.getenv("UI_STALE_AFTER_SECONDS", "330"))
-    ui_force_scan_after_seconds: int = int(os.getenv("UI_FORCE_SCAN_AFTER_SECONDS", "360"))
+    ui_stale_after_seconds: int = int(os.getenv("UI_STALE_AFTER_SECONDS", "480"))
+    ui_force_scan_after_seconds: int = int(os.getenv("UI_FORCE_SCAN_AFTER_SECONDS", "600"))
 
     # Cooldown entre scans manuais (evita duplo disparo no snapshot endpoint)
     request_scan_min_interval_seconds: int = int(
-        os.getenv("REQUEST_SCAN_MIN_INTERVAL_SECONDS", "120")
+        os.getenv("REQUEST_SCAN_MIN_INTERVAL_SECONDS", "180")
     )
 
     signal_min_lead_seconds: int = int(os.getenv("SIGNAL_MIN_LEAD_SECONDS", "18"))
