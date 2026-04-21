@@ -12,7 +12,7 @@ class Settings:
     # Padrão: apenas 3 pares crypto (mais líquidos na Quotex)
     assets_crypto: List[str] = field(default_factory=lambda: [
         s.strip() for s in
-        os.getenv("ASSETS_CRYPTO", "BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,XRPUSDT").split(",")
+        os.getenv("ASSETS_CRYPTO", "BTCUSDT,ETHUSDT,SOLUSDT").split(",")
         if s.strip()
     ])
 
@@ -26,7 +26,7 @@ class Settings:
     # RENDER FREE: apenas 4 forex principais
     assets_forex: List[str] = field(default_factory=lambda: [
         s.strip() for s in
-        os.getenv("ASSETS_FOREX", "EURUSD,GBPUSD,USDJPY,AUDUSD,USDCAD,USDCHF,NZDUSD").split(",")
+        os.getenv("ASSETS_FOREX", "EURUSD,GBPUSD,USDJPY,AUDUSD").split(",")
         if s.strip()
     ])
 
@@ -39,7 +39,7 @@ class Settings:
 
     # ─── SCANNER ─────────────────────────────────────────────────────────────
     # RENDER FREE: 300s = 5 min entre scans. Mude via env var se quiser.
-    passive_interval_seconds: int = int(os.getenv("PASSIVE_INTERVAL_SECONDS", "240"))
+    passive_interval_seconds: int = int(os.getenv("PASSIVE_INTERVAL_SECONDS", "300"))
 
     scan_interval_seconds: int = int(os.getenv("SCAN_INTERVAL_SECONDS", "300"))
 
