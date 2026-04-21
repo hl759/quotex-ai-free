@@ -42,8 +42,12 @@ class Settings:
 
     scan_interval_seconds: int = int(os.getenv("SCAN_INTERVAL_SECONDS", "300"))
 
-    # 3 workers = 3 ativos em paralelo (~30s para 22 ativos vs ~3min com 1 worker)
-    scanner_max_workers: int = int(os.getenv("SCANNER_MAX_WORKERS", "3"))
+    # Padrão conservador para evitar pico de RAM em instâncias free.
+    scanner_max_workers: int = int(os.getenv("SCANNER_MAX_WORKERS", "2"))
+
+    # Modo on-demand em instância free: limita o lote para não matar o worker.
+    on_demand_scan_asset_limit: int = int(os.getenv("ON_DEMAND_SCAN_ASSET_LIMIT", "10"))
+    on_demand_scanner_max_workers: int = int(os.getenv("ON_DEMAND_SCANNER_MAX_WORKERS", "1"))
 
     # ─── UI / POLLING ────────────────────────────────────────────────────────
     # RENDER FREE: frontend atualiza a cada 90s (bem acima do scan_interval)
