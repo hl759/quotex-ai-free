@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
 from typing import List, Optional
 
@@ -89,7 +88,6 @@ class MarketScanner:
         max_workers = max(1, min(SETTINGS.scanner_max_workers, len(assets)))
         out: List[MarketSnapshot] = []
         scan_timeout = self._scan_timeout_seconds(len(assets), max_workers)
-        started = time.time()
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_map = {
