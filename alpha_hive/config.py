@@ -59,6 +59,9 @@ class Settings:
 
     signal_min_lead_seconds: int = int(os.getenv("SIGNAL_MIN_LEAD_SECONDS", "18"))
 
+    # Tempo sem scan para ativar limpeza de histórico em idle (padrão: 10 min)
+    inactivity_timeout_seconds: int = int(os.getenv("INACTIVITY_TIMEOUT_SECONDS", "600"))
+
     # ─── QUALIDADE DE DADOS ──────────────────────────────────────────────────
     data_quality_min_operable: float = float(os.getenv("DATA_QUALITY_MIN_OPERABLE", "0.60"))
     data_quality_min_offense: float = float(os.getenv("DATA_QUALITY_MIN_OFFENSE", "0.78"))

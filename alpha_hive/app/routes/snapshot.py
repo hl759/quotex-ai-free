@@ -22,6 +22,8 @@ def snapshot():
     """
     Leitura pura do estado em memória — NÃO dispara nenhum scan.
     ON-DEMAND MODE: o scan só ocorre via POST /atualizar (clique do usuário).
+    Chama maybe_cleanup_idle() para liberar histórico excessivo após inatividade.
     """
     scan_service = current_app.config["SCAN_SERVICE"]
+    scan_service.maybe_cleanup_idle()
     return jsonify(snapshot_service.build(scan_service.snapshot()))

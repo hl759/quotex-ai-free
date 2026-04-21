@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import threading
 import time
 from datetime import datetime
@@ -7,19 +8,18 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from alpha_hive.audit.edge_audit import EdgeAuditEngine
 from alpha_hive.audit.journal_manager import JournalManager
-from alpha_hive.audit.result_engine import ResultEngine
 from alpha_hive.config import SETTINGS
 from alpha_hive.core.clock import now_brazil
 from alpha_hive.core.contracts import FinalDecision, MarketSnapshot
-from alpha_hive.intelligence.decision_engine import DecisionEngine
-from alpha_hive.intelligence.meta_decision_engine import MetaDecisionEngine
-from alpha_hive.intelligence.signal_engine import SignalEngine
 from alpha_hive.learning.learning_engine import LearningEngine
 from alpha_hive.learning.specialist_reputation_engine import SpecialistReputationEngine
 from alpha_hive.market.scanner import MarketScanner
 from alpha_hive.market.passive_watcher import PassiveWatcher
 from alpha_hive.services.capital_service import CapitalService
 from alpha_hive.storage.state_store import get_state_store
+
+# DecisionEngine, MetaDecisionEngine, SignalEngine, ResultEngine são importados
+# de forma lazy dentro de run_once() — não ficam em RAM fora da sessão de scan.
 
 PENDING_COLLECTION = "pending_signals_v2"
 
@@ -28,16 +28,22 @@ class ScanService:
     def __init__(self):
         self.passive_watcher = PassiveWatcher()
         self.scanner = MarketScanner(self.passive_watcher._data)  # DataManager compartilhado
-        self.decision_engine = DecisionEngine()
-        self.meta_engine = MetaDecisionEngine()
-        self.signal_engine = SignalEngine()
-        self.result_engine = ResultEngine()
+
+        # ENGINES STATEFUL — ficam em RAM entre scans (estado acumulado em DB).
+        # LearningEngine e SpecialistReputationEngine carregam dados do SQLite no
+        # __init__ e salvam de volta a cada update. São leves (~100-500 KB cada).
         self.capital_service = CapitalService()
         self.learning = LearningEngine()
         self.specialists = SpecialistReputationEngine()
         self.audit = EdgeAuditEngine()
         self.journal = JournalManager()
         self.store = get_state_store()
+
+        # ENGINES STATELESS — NÃO instanciados aqui. São criados em run_once()
+        # e destruídos ao final de cada scan para liberar RAM imediatamente.
+        # DecisionEngine (9 especialistas + FeatureEngine + CouncilEngine + EdgeGuard)
+        # MetaDecisionEngine, SignalEngine, ResultEngine são todos stateless.
+
         self.runtime: Dict[str, object] = {
             "signals": [],
             "history": [],
@@ -61,6 +67,7 @@ class ScanService:
         }
         self._lock = threading.Lock()
         self._started = False
+        self._last_activity_ts: float = 0.0
 
     def _meta(self) -> Dict[str, Any]:
         return self.runtime.setdefault("meta", {})  # type: ignore[return-value]
@@ -418,7 +425,11 @@ class ScanService:
         expiration_ts = float(row.get("expiration_ts", row.get("expires_at_ts", 0.0)) or 0.0)
         delay_seconds = max(0, int(time.time() - expiration_ts)) if expiration_ts > 0 else 0
 
-        outcome = self.result_engine.evaluate_expired_decision(
+        result_engine = getattr(self, "_scan_result_engine", None)
+        if result_engine is None:
+            from alpha_hive.audit.result_engine import ResultEngine
+            result_engine = ResultEngine()
+        outcome = result_engine.evaluate_expired_decision(
             decision=decision,
             candles=snapshot.candles_m1,
             analysis_ts=analysis_ts if analysis_ts > 0 else None,
@@ -618,8 +629,22 @@ class ScanService:
         with self._lock:
             meta = self._meta()
             started = time.time()
+            self._last_activity_ts = started
             meta["scan_in_progress"] = True
             meta["last_scan_error"] = ""
+
+            # LAZY IMPORT: engines pesados só existem durante o scan.
+            # DecisionEngine instancia 9 especialistas + FeatureEngine + CouncilEngine
+            # + EdgeGuard + CapitalMindEngine. São STATELESS — destruídos ao final.
+            from alpha_hive.intelligence.decision_engine import DecisionEngine
+            from alpha_hive.intelligence.meta_decision_engine import MetaDecisionEngine
+            from alpha_hive.intelligence.signal_engine import SignalEngine
+            from alpha_hive.audit.result_engine import ResultEngine
+
+            _decision_engine = DecisionEngine()
+            _meta_engine = MetaDecisionEngine()
+            _signal_engine = SignalEngine()
+            self._scan_result_engine = ResultEngine()
 
             try:
                 # ON-DEMAND MODE: busca dados frescos agora, só quando solicitado.
@@ -636,12 +661,12 @@ class ScanService:
 
                 ranked_decisions: List[FinalDecision] = []
                 for snapshot in snapshots:
-                    decision = self.decision_engine.decide(
+                    decision = _decision_engine.decide(
                         snapshot=snapshot,
                         capital_state=capital,
                         audit_summary=audit_report,
                     )
-                    adjusted = self.meta_engine.validate(decision, snapshot, audit_report)
+                    adjusted = _meta_engine.validate(decision, snapshot, audit_report)
                     ranked_decisions.append(adjusted)
 
                 ranked_decisions.sort(key=lambda item: (item.meta_rank_score, item.score, item.confidence), reverse=True)
@@ -652,7 +677,7 @@ class ScanService:
 
                 signals: List[Dict[str, Any]] = []
                 if primary_signal and planned:
-                    signals = [self._decorate_signal_payload(self.signal_engine.to_payload(primary_signal), planned)]
+                    signals = [self._decorate_signal_payload(_signal_engine.to_payload(primary_signal), planned)]
 
                 self._schedule_pending(primary_signal, planned=planned)
                 operable_followups = [item for item in ranked_decisions if item is not primary_signal and self._is_operable_candidate(item)]
@@ -702,7 +727,18 @@ class ScanService:
                 meta["last_scan_error"] = repr(exc)
                 raise
             finally:
+                # DESTRUIÇÃO EXPLÍCITA dos engines stateless.
+                # DecisionEngine (9 especialistas + deps) é o maior consumidor.
+                # Após o try/except, estas variáveis locais podem não existir
+                # se o erro ocorreu antes da criação — hence o getattr/del seguro.
+                for _name in ("_decision_engine", "_meta_engine", "_signal_engine"):
+                    _obj = locals().get(_name)
+                    if _obj is not None:
+                        del _obj
+                self._scan_result_engine = None
                 meta["scan_in_progress"] = False
+                if not SETTINGS.run_background_scanner:
+                    gc.collect()
 
     def snapshot(self) -> Dict[str, object]:
         meta = self._meta()
@@ -761,9 +797,8 @@ class ScanService:
 
     def _release_market_memory(self) -> None:
         """
-        Libera objetos pesados após cada scan on-demand.
-        Candles, contextos e cache HTTP de APIs não precisam ficar em RAM
-        entre operações. O próximo scan buscará dados frescos de qualquer forma.
+        Libera dados de mercado brutos após cada scan on-demand.
+        Candles, contextos e cache HTTP não precisam ficar em RAM entre operações.
         """
         try:
             self.passive_watcher.clear_contexts()
@@ -773,6 +808,22 @@ class ScanService:
             self.scanner.data.clear_cache()
         except Exception:
             pass
+
+    def maybe_cleanup_idle(self) -> None:
+        """
+        ESTADO B — limpeza por inatividade.
+        Se nenhum scan foi feito nos últimos INACTIVITY_TIMEOUT_SECONDS, descarta
+        o histórico extenso mantendo apenas os últimos 5 registros.
+        Chamado passivamente no GET /snapshot (sem custo quando ativo).
+        """
+        timeout = int(getattr(SETTINGS, "inactivity_timeout_seconds", 600) or 600)
+        age = self._scan_age_seconds()
+        if age <= 0 or age < timeout:
+            return
+        history = self.runtime.get("history", [])
+        if isinstance(history, list) and len(history) > 5:
+            self.runtime["history"] = history[:5]
+        gc.collect()
 
     def _passive_diagnostics(self):
         return self.passive_watcher.diagnostics()
