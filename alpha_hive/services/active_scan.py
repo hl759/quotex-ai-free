@@ -70,8 +70,8 @@ class ActiveScan:
             candles_m5=candles_m5,
             warnings=ctx.warnings,
             display_asset=ctx.asset,
-            source_symbol=ctx.source_symbol,
-            source_kind=ctx.source_kind,
+            source_symbol=getattr(ctx, 'source_symbol', ctx.asset),
+            source_kind=getattr(ctx, 'source_kind', 'standard'),
         )
 
     def _snapshots_from_passive(self) -> Tuple[List[MarketSnapshot], int, int]:

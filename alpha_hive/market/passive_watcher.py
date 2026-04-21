@@ -182,7 +182,10 @@ class PassiveWatcher:
             candles_m1, chain = self._data.get_candles(asset, interval="1min", outputsize=50)
             if not candles_m1:
                 return False
-            candles_m5 = self._data.build_m5_from_m1(candles_m1, outputsize=20)
+            if hasattr(self._data, 'build_m5_from_m1'):
+                candles_m5 = self._data.build_m5_from_m1(candles_m1, outputsize=20)
+            else:
+                candles_m5 = candles_m1[-20:]
             if len(candles_m5) < 8:
                 candles_m5 = candles_m1[-8:]
             provider = self._data.last_provider_used.get(asset, chain[0] if chain else "unknown")
@@ -233,8 +236,8 @@ class PassiveWatcher:
                 ctx.provider = provider; ctx.provider_chain = chain
                 ctx.data_quality_score = dq_score; ctx.data_quality_state = dq_state
                 ctx.warnings = warnings
-                ctx.source_symbol = self._data.resolve_source_symbol(asset, provider)
-                ctx.source_kind = self._data.source_kind_for(asset)
+                ctx.source_symbol = getattr(self._data, 'resolve_source_symbol', lambda a,p: a)(asset, provider)
+                ctx.source_kind = getattr(self._data, 'source_kind_for', lambda a: 'standard')(asset)
                 ctx.last_updated_ts = time.time(); ctx.update_count += 1
                 ctx.is_initialized = True; ctx.last_error = ""
             return True
