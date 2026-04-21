@@ -185,7 +185,7 @@ body:after{width:220px;height:220px;right:-80px;top:340px;background:rgba(111,74
       </div>
       <div class='right-stack'>
         <div id='liveBadge' class='live-pill'>● CARREGANDO</div>
-        <button id='refreshBtn' class='refresh-btn' onclick='refreshSnapshot(false)'>↻ Atualizar agora</button>
+        <button id='refreshBtn' class='refresh-btn' onclick='triggerActiveScan()'>↻ Atualizar agora</button>
       </div>
     </div>
 
@@ -603,6 +603,20 @@ async function maybeTriggerScan(meta){
   if(now - lastAutoRunScanAt < (missingBootstrap ? 15000 : 120000)) return;
   lastAutoRunScanAt = now;
   try{ await fetch('/run-scan', {cache:'no-store'}); }catch(e){ console.error('run-scan warning', e); }
+}
+async function triggerActiveScan(){
+  const btn = document.getElementById('refreshBtn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Analisando...'; }
+  try{
+    const resp = await fetch('/atualizar', {method:'POST', cache:'no-store'});
+    const data = await resp.json();
+    if(data && data.skipped && data.retry_after_seconds){
+      if(btn){ btn.textContent = 'Aguarde ' + data.retry_after_seconds + 's'; }
+      setTimeout(()=>{ if(btn){ btn.disabled=false; btn.textContent='↻ Atualizar agora'; } }, data.retry_after_seconds * 1000);
+      return;
+    }
+  }catch(e){ console.warn('trigger error', e); }
+  await refreshSnapshot(false);
 }
 async function refreshSnapshot(silent){
   if(refreshInFlight) return;
