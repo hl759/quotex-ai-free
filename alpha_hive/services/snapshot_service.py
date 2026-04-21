@@ -9,10 +9,19 @@ from alpha_hive.services.capital_service import CapitalService
 
 
 class SnapshotService:
+    """
+    Stateless — não mantém instâncias pesadas em RAM.
+    EdgeAuditEngine e JournalManager são criados por chamada e descartados.
+    CapitalService é leve (apenas lê/escreve uma chave no SQLite).
+    """
     def __init__(self):
-        self.audit = EdgeAuditEngine()
-        self.journal = JournalManager()
         self.capital = CapitalService()
+
+    def _audit(self) -> EdgeAuditEngine:
+        return EdgeAuditEngine()
+
+    def _journal(self) -> JournalManager:
+        return JournalManager()
 
     def _confidence_label(self, confidence: int) -> str:
         if confidence >= 82:
@@ -169,7 +178,7 @@ class SnapshotService:
 
     def _coalesce_learning_stats(self, report: dict) -> dict:
         summary = dict(report.get("summary", {}) or {})
-        journal_stats = dict(self.journal.stats() or {})
+        journal_stats = dict(self._journal().stats() or {})
 
         audit_total = int(summary.get("total", 0) or 0)
         audit_wins = int(summary.get("wins", 0) or 0)
@@ -203,7 +212,7 @@ class SnapshotService:
         }
 
     def build(self, runtime: dict):
-        report = self.audit.compute_report()
+        report = self._audit().compute_report()
         learning_stats = self._coalesce_learning_stats(report)
 
         current = self._adapt_decision(runtime.get("current_decision", {}) or {})
