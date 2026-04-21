@@ -27,8 +27,15 @@ def _bootstrap_snapshot(scan_service) -> dict:
         scan_count = int(current_meta.get("scan_count", 0) or 0)
         scan_in_progress = bool(current_meta.get("scan_in_progress", False))
 
-        # Só faz scan aqui se for o primeiro acesso (sem dados ainda)
-        if not scan_in_progress and scan_count <= 0:
+        # Bootstrap: só roda scan se passive watcher já tem dados prontos
+        # Evita timeout no cold start do Render Free
+        passive_ready = False
+        watcher = getattr(scan_service, "passive_watcher", None)
+        if watcher:
+            ctxs = watcher.get_all_contexts()
+            passive_ready = sum(1 for c in ctxs.values() if c.is_initialized) >= 3
+
+        if not scan_in_progress and scan_count <= 0 and passive_ready:
             refresh_result = scan_service.run_once("snapshot_bootstrap")
             if isinstance(refresh_result, dict):
                 meta["last_snapshot_refresh_result"] = refresh_result
