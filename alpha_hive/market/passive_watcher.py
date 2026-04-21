@@ -9,10 +9,10 @@ from alpha_hive.market.data_manager import DataManager
 from alpha_hive.market.reliability_engine import ReliabilityEngine
 
 _PASSIVE_INTERVAL_SECONDS: int = int(os.getenv("PASSIVE_INTERVAL_SECONDS", "120"))
-_CANDLE_BUFFER_M1: int = 80
-_CANDLE_BUFFER_M5: int = 30
-_INTER_ASSET_SLEEP: float = 0.4
-_CONTEXT_STALE_SECONDS: float = 300.0
+_CANDLE_BUFFER_M1: int = 50
+_CANDLE_BUFFER_M5: int = 20
+_INTER_ASSET_SLEEP: float = 1.0
+_CONTEXT_STALE_SECONDS: float = 480.0
 
 @dataclass
 class AssetContext:
@@ -179,10 +179,10 @@ class PassiveWatcher:
 
     def _refresh_asset(self, asset: str) -> bool:
         try:
-            candles_m1, chain = self._data.get_candles(asset, interval="1min", outputsize=_CANDLE_BUFFER_M1)
+            candles_m1, chain = self._data.get_candles(asset, interval="1min", outputsize=50)
             if not candles_m1:
                 return False
-            candles_m5 = self._data.build_m5_from_m1(candles_m1, outputsize=_CANDLE_BUFFER_M5)
+            candles_m5 = self._data.build_m5_from_m1(candles_m1, outputsize=20)
             if len(candles_m5) < 8:
                 candles_m5 = candles_m1[-8:]
             provider = self._data.last_provider_used.get(asset, chain[0] if chain else "unknown")

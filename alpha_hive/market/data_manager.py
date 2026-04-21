@@ -42,7 +42,7 @@ class DataManager:
         return item["data"]  # type: ignore[return-value]
 
     def _set_cache(self, provider: str, symbol: str, interval: str, data: List[Candle]) -> None:
-        ttl = 295 if interval == "5min" else 58
+        ttl = 350 if interval == "5min" else 115
         with self.cache_lock:
             self.cache[self._cache_key(provider, symbol, interval)] = {
                 "data": data,

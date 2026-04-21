@@ -9,8 +9,8 @@ from alpha_hive.market.data_manager import DataManager
 from alpha_hive.market.reliability_engine import ReliabilityEngine
 
 # RENDER FREE: 80 velas 1min (era 260). 80 é suficiente para RSI/MACD/Bollinger.
-_M1_OUTPUTSIZE = 80
-_M5_OUTPUTSIZE = 30
+_M1_OUTPUTSIZE = 50
+_M5_OUTPUTSIZE = 20
 
 
 class MarketScanner:
