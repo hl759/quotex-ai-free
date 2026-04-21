@@ -12,33 +12,35 @@ class Settings:
     # Padrão: apenas 3 pares crypto (mais líquidos na Quotex)
     assets_crypto: List[str] = field(default_factory=lambda: [
         s.strip() for s in
-        os.getenv("ASSETS_CRYPTO", "BTCUSDT,ETHUSDT,SOLUSDT").split(",")
+        os.getenv("ASSETS_CRYPTO", "BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,XRPUSDT,ADAUSDT,DOGEUSDT").split(",")
         if s.strip()
     ])
 
     # Crypto "puro" desativado por padrão no free tier (duplica chamadas)
     assets_pure_crypto: List[str] = field(default_factory=lambda: [
         s.strip() for s in
-        os.getenv("ASSETS_PURE_CRYPTO", "").split(",")
+        os.getenv("ASSETS_PURE_CRYPTO", "BITCOIN,ETHEREUM,SOLANA").split(",")
         if s.strip()
     ])
 
     # RENDER FREE: apenas 4 forex principais
     assets_forex: List[str] = field(default_factory=lambda: [
         s.strip() for s in
-        os.getenv("ASSETS_FOREX", "EURUSD,GBPUSD,USDJPY,AUDUSD").split(",")
+        os.getenv("ASSETS_FOREX", "EURUSD,GBPUSD,USDJPY,AUDUSD,USDCAD,USDCHF,NZDUSD,EURJPY,GBPJPY,EURGBP").split(",")
         if s.strip()
     ])
 
     # RENDER FREE: apenas GOLD (mais volume)
     assets_metals: List[str] = field(default_factory=lambda: [
         s.strip() for s in
-        os.getenv("ASSETS_METALS", "GOLD").split(",")
+        os.getenv("ASSETS_METALS", "GOLD,SILVER").split(",")
         if s.strip()
     ])
 
     # ─── SCANNER ─────────────────────────────────────────────────────────────
     # RENDER FREE: 300s = 5 min entre scans. Mude via env var se quiser.
+    passive_interval_seconds: int = int(os.getenv("PASSIVE_INTERVAL_SECONDS", "120"))
+
     scan_interval_seconds: int = int(os.getenv("SCAN_INTERVAL_SECONDS", "300"))
 
     # RENDER FREE: 1 worker = sem paralelismo, sem burst de requests externos

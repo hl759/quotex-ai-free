@@ -26,7 +26,9 @@ def create_app() -> Flask:
         pass  # flask-compress não instalado: continua sem compressão
 
     app.config["SETTINGS"] = SETTINGS
-    app.config["SCAN_SERVICE"] = ScanService()
+    scan_service = ScanService()
+    app.config["SCAN_SERVICE"] = scan_service
+    scan_service.ensure_started()  # inicia passive watcher no startup
     app.config["START_TIME"] = time.time()
 
     # ── Cache-Control para arquivos estáticos ─────────────────────────────────

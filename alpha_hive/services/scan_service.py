@@ -17,6 +17,8 @@ from alpha_hive.intelligence.signal_engine import SignalEngine
 from alpha_hive.learning.learning_engine import LearningEngine
 from alpha_hive.learning.specialist_reputation_engine import SpecialistReputationEngine
 from alpha_hive.market.scanner import MarketScanner
+from alpha_hive.market.passive_watcher import PassiveWatcher
+from alpha_hive.services.active_scan import ActiveScan
 from alpha_hive.services.capital_service import CapitalService
 from alpha_hive.storage.state_store import get_state_store
 
@@ -59,6 +61,8 @@ class ScanService:
         }
         self._lock = threading.Lock()
         self._started = False
+        self.passive_watcher = PassiveWatcher()
+        self.active_scan = ActiveScan(self.passive_watcher)
 
     def _meta(self) -> Dict[str, Any]:
         return self.runtime.setdefault("meta", {})  # type: ignore[return-value]
