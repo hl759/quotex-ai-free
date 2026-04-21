@@ -643,8 +643,12 @@ class ScanService:
                 from alpha_hive.intelligence.signal_engine import SignalEngine
                 from alpha_hive.audit.result_engine import ResultEngine
 
-                _decision_engine = DecisionEngine()
-                _meta_engine = MetaDecisionEngine()
+                _decision_engine = DecisionEngine(
+                    learning_engine=self.learning,
+                    audit_engine=self.audit,
+                    reputation_engine=self.specialists,
+                )
+                _meta_engine = MetaDecisionEngine(learning_engine=self.learning)
                 _signal_engine = SignalEngine()
                 self._scan_result_engine = ResultEngine()
 
