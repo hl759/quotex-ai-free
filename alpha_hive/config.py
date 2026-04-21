@@ -52,9 +52,9 @@ class Settings:
     ui_stale_after_seconds: int = int(os.getenv("UI_STALE_AFTER_SECONDS", "480"))
     ui_force_scan_after_seconds: int = int(os.getenv("UI_FORCE_SCAN_AFTER_SECONDS", "600"))
 
-    # Cooldown entre scans manuais (evita duplo disparo no snapshot endpoint)
+    # Cooldown entre scans manuais. 30s no modo on-demand (era 180s para background).
     request_scan_min_interval_seconds: int = int(
-        os.getenv("REQUEST_SCAN_MIN_INTERVAL_SECONDS", "180")
+        os.getenv("REQUEST_SCAN_MIN_INTERVAL_SECONDS", "30")
     )
 
     signal_min_lead_seconds: int = int(os.getenv("SIGNAL_MIN_LEAD_SECONDS", "18"))
@@ -71,8 +71,10 @@ class Settings:
     app_name: str = os.getenv("APP_NAME", "Alpha Hive AI")
     port: int = int(os.getenv("PORT", "10000"))
 
+    # ON-DEMAND MODE é o padrão (0): PassiveWatcher não roda em background.
+    # Ativa modo background com RUN_BACKGROUND_SCANNER=1 (mais RAM e bandwidth).
     run_background_scanner: bool = (
-        os.getenv("RUN_BACKGROUND_SCANNER", "1").strip().lower()
+        os.getenv("RUN_BACKGROUND_SCANNER", "0").strip().lower()
         not in ("0", "false", "no")
     )
     scan_route_enabled: bool = (

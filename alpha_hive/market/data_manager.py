@@ -395,25 +395,43 @@ class DataManager:
             return []
 
         interval_value = "5m" if interval == "5min" else "1m"
+
+        # OTIMIZAÇÃO DE BANDWIDTH: usar period1/period2 em vez de range=1d.
+        # range=1d retorna ~400 KB de JSON por asset (dia inteiro de barras 1min).
+        # Com period1/period2 pedimos apenas os últimos N minutos necessários,
+        # reduzindo a resposta para ~20-40 KB — 10-20x menos bandwidth.
+        now_ts = int(time.time())
         if interval == "5min":
-            range_value = "5d"
-        elif outputsize > 390:
-            range_value = "5d"
+            lookback = max(outputsize, 50) * 300 + 300          # barras 5min
         elif outputsize > 180:
-            range_value = "2d"
+            lookback = outputsize * 60 * 2                       # 2x buffer
         else:
-            range_value = "1d"
+            # Para outputsize=30 (padrão Render Free): 90 min de histórico
+            lookback = max(outputsize * 60 * 3, 5400)            # mín 90 min
+
+        params: dict = {
+            "interval": interval_value,
+            "period1": now_ts - lookback,
+            "period2": now_ts,
+            "includePrePost": "true",
+        }
 
         data = self._http_get_json(
             f"https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_symbol}",
-            params={
-                "interval": interval_value,
-                "range": range_value,
-                "includePrePost": "true",
-            },
-            timeout=4,
+            params=params,
+            timeout=5,
         )
         candles = self._trim(yahoo.normalize(data or {}, limit=outputsize), outputsize)
+
+        # Fallback: se period1/period2 não retornar dados suficientes, tenta range=1d
+        if not candles or len(candles) < max(8, outputsize // 3):
+            data = self._http_get_json(
+                f"https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_symbol}",
+                params={"interval": interval_value, "range": "1d", "includePrePost": "true"},
+                timeout=5,
+            )
+            candles = self._trim(yahoo.normalize(data or {}, limit=outputsize), outputsize)
+
         if candles:
             self._set_cache("yahoo", symbol, interval, candles)
             self._remember(symbol, "yahoo")
@@ -422,6 +440,11 @@ class DataManager:
 
         self.health.mark_failure("yahoo", "request_failed")
         return []
+
+    def clear_cache(self) -> None:
+        """Limpa todo o cache HTTP em memória. Chamado após scan on-demand."""
+        with self.cache_lock:
+            self.cache.clear()
 
     def get_candles(self, symbol: str, interval: str = "1min", outputsize: int = 50) -> Tuple[List[Candle], List[str]]:
         chain = self.router.provider_chain_for(symbol)

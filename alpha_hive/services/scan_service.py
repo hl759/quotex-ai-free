@@ -622,7 +622,13 @@ class ScanService:
             meta["last_scan_error"] = ""
 
             try:
-                snapshots = self._snapshots_from_passive()
+                # ON-DEMAND MODE: busca dados frescos agora, só quando solicitado.
+                # BACKGROUND MODE (RUN_BACKGROUND_SCANNER=1): usa cache do PassiveWatcher.
+                if SETTINGS.run_background_scanner and self._started:
+                    snapshots = self._snapshots_from_passive()
+                else:
+                    snapshots = self.scanner.scan_assets()
+
                 evaluated_count = self._liquidate_pending(snapshots)
 
                 capital = self.capital_service.get()
@@ -678,12 +684,19 @@ class ScanService:
                 self.runtime["history"] = history
                 self.runtime["current_decision"] = current_payload
 
+                # ON-DEMAND: libera candles e cache HTTP da memória após processar.
+                # Os resultados já estão salvos em runtime e DB; os dados brutos
+                # (candles, contextos, cache de API) não são mais necessários.
+                if not SETTINGS.run_background_scanner:
+                    self._release_market_memory()
+
                 return {
                     "ok": True,
                     "signals": len(signals),
                     "decision": current_payload,
                     "trigger": trigger,
                     "evaluated": evaluated_count,
+                    "duration_ms": int((time.time() - started) * 1000),
                 }
             except Exception as exc:
                 meta["last_scan_error"] = repr(exc)
@@ -746,11 +759,28 @@ class ScanService:
             snapshots.sort(key=lambda s: asset_order.get(s.asset, 10**9))
         return snapshots
 
+    def _release_market_memory(self) -> None:
+        """
+        Libera objetos pesados após cada scan on-demand.
+        Candles, contextos e cache HTTP de APIs não precisam ficar em RAM
+        entre operações. O próximo scan buscará dados frescos de qualquer forma.
+        """
+        try:
+            self.passive_watcher.clear_contexts()
+        except Exception:
+            pass
+        try:
+            self.scanner.data.clear_cache()
+        except Exception:
+            pass
+
     def _passive_diagnostics(self):
         return self.passive_watcher.diagnostics()
 
     def ensure_started(self):
+        """Inicia PassiveWatcher apenas no modo background (RUN_BACKGROUND_SCANNER=1)."""
         if self._started:
             return
-        self.passive_watcher.ensure_started()
-        self._started = True
+        if SETTINGS.run_background_scanner:
+            self.passive_watcher.ensure_started()
+            self._started = True
