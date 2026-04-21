@@ -8,29 +8,28 @@ from typing import List
 @dataclass(frozen=True)
 class Settings:
     # ─── ATIVOS ──────────────────────────────────────────────────────────────
-    # RENDER FREE: lista enxuta. Use env var ASSETS_CRYPTO para customizar.
-    # Padrão: apenas 3 pares crypto (mais líquidos na Quotex)
+    # Pares USDT — dados via Binance (espelham os pares reais da EBINEX)
     assets_crypto: List[str] = field(default_factory=lambda: [
         s.strip() for s in
-        os.getenv("ASSETS_CRYPTO", "BTCUSDT,ETHUSDT,SOLUSDT").split(",")
+        os.getenv("ASSETS_CRYPTO", "BTCUSDT,ETHUSDT,XRPUSDT,SOLUSDT,BNBUSDT,ADAUSDT,DOGEUSDT").split(",")
         if s.strip()
     ])
 
-    # Crypto "puro" desativado por padrão no free tier (duplica chamadas)
+    # Instrumentos OTC/nomeados da EBINEX — dados via Yahoo Finance (BTC-USD etc.)
     assets_pure_crypto: List[str] = field(default_factory=lambda: [
         s.strip() for s in
-        os.getenv("ASSETS_PURE_CRYPTO", "").split(",")
+        os.getenv("ASSETS_PURE_CRYPTO", "BITCOIN,ETHEREUM,SOLANA,RIPPLE,CARDANO,DOGECOIN").split(",")
         if s.strip()
     ])
 
-    # RENDER FREE: apenas 4 forex principais
+    # Forex disponíveis na EBINEX
     assets_forex: List[str] = field(default_factory=lambda: [
         s.strip() for s in
-        os.getenv("ASSETS_FOREX", "EURUSD,GBPUSD,USDJPY,AUDUSD").split(",")
+        os.getenv("ASSETS_FOREX", "EURUSD,GBPUSD,USDJPY,AUDUSD,USDCAD,USDCHF,NZDUSD,EURJPY,GBPJPY").split(",")
         if s.strip()
     ])
 
-    # RENDER FREE: apenas GOLD (mais volume)
+    # Metais
     assets_metals: List[str] = field(default_factory=lambda: [
         s.strip() for s in
         os.getenv("ASSETS_METALS", "GOLD").split(",")
