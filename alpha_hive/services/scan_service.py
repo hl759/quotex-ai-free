@@ -724,8 +724,14 @@ class ScanService:
                     "duration_ms": int((time.time() - started) * 1000),
                 }
             except Exception as exc:
-                meta["last_scan_error"] = repr(exc)
-                raise
+                err = repr(exc)
+                meta["last_scan_error"] = err
+                return {
+                    "ok": False,
+                    "error": err,
+                    "trigger": trigger,
+                    "duration_ms": int((time.time() - started) * 1000),
+                }
             finally:
                 # DESTRUIÇÃO EXPLÍCITA dos engines stateless.
                 # DecisionEngine (9 especialistas + deps) é o maior consumidor.
