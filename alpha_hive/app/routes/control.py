@@ -11,7 +11,11 @@ _last_trigger_ts: float = 0.0
 @bp.route("/atualizar", methods=["GET", "POST"])
 @bp.route("/run-scan", methods=["GET", "POST"])
 def atualizar():
-    """Active Decision Mode trigger — equivalente ao 'atualizar agora'."""
+    """
+    ON-DEMAND scan trigger — único ponto de ativação da inteligência.
+    Chamado exclusivamente pelo botão "Atualizar agora" na UI.
+    Não há polling automático nem background loops no modo padrão.
+    """
     global _last_trigger_ts
 
     settings = current_app.config["SETTINGS"]
@@ -30,8 +34,9 @@ def atualizar():
 
     now = time.time()
     elapsed = now - _last_trigger_ts
+    # Cooldown reduzido para 30s no modo on-demand (era 120s para background mode)
     min_interval = max(30, int(
-        getattr(settings, "request_scan_min_interval_seconds", 120) or 120
+        getattr(settings, "request_scan_min_interval_seconds", 30) or 30
     ))
 
     if elapsed < min_interval and _last_trigger_ts > 0:
@@ -44,16 +49,17 @@ def atualizar():
 
     _last_trigger_ts = now
     service = current_app.config["SCAN_SERVICE"]
-    service.ensure_started()
     result = service.run_once("atualizar_agora")
     return jsonify(result)
 
 
 @bp.get("/passive-status")
 def passive_status():
-    """Diagnóstico do Passive Intelligence Mode."""
+    """Diagnóstico do modo de coleta de dados."""
     service = current_app.config["SCAN_SERVICE"]
+    settings = current_app.config["SETTINGS"]
     watcher = getattr(service, "passive_watcher", None)
+    mode = "background" if settings.run_background_scanner else "on_demand"
     if not watcher:
-        return jsonify({"error": "passive_watcher_not_available"}), 503
-    return jsonify(watcher.diagnostics())
+        return jsonify({"mode": mode, "error": "passive_watcher_not_available"}), 503
+    return jsonify({"mode": mode, **watcher.diagnostics()})

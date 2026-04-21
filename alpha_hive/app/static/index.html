@@ -342,15 +342,11 @@ function saveCachedSnapshot(snapshot){
     }
   }catch(e){}
 }
+// ON-DEMAND MODE: sem polling automático — a IA só acorda quando você clica.
 const bootstrapSnapshot = window.__BOOTSTRAP_SNAPSHOT__ || null;
 const initialSnapshot = bootstrapSnapshot || loadCachedSnapshot();
-let autoRefreshHandle = null;
-let autoRefreshSeconds = (initialSnapshot && initialSnapshot.meta && initialSnapshot.meta.ui_auto_refresh_seconds) || 90;
-let staleAfterSeconds = (initialSnapshot && initialSnapshot.meta && initialSnapshot.meta.ui_stale_after_seconds) || 95;
-let forceScanAfterSeconds = (initialSnapshot && initialSnapshot.meta && initialSnapshot.meta.ui_force_scan_after_seconds) || 110;
+let staleAfterSeconds = 300;   // após 5 min mostra badge "INATIVO"
 let refreshInFlight = false;
-let lastAutoRunScanAt = 0;
-let bootstrapPollHandle = null;
 
 function activateTab(tabId, btn){
   const fallbackId = document.getElementById(tabId) ? tabId : 'dashboard';
@@ -417,11 +413,13 @@ function updateLiveBadge(meta){
   const status=document.getElementById('top_connection_value');
   if(!el || !meta) return;
   const age=parseInt(meta.last_scan_age_seconds||0,10)||0;
-  const stale=parseInt(meta.ui_stale_after_seconds||staleAfterSeconds||95,10)||95;
-  if(meta.scan_in_progress){ el.textContent='● ESCANEANDO'; if(status) status.textContent='Ao vivo'; return; }
-  if(age>=stale){ el.textContent='● ATRASADO'; if(status) status.textContent='Atenção'; return; }
-  el.textContent=age<=5?'● AO VIVO':('● ATUALIZADO ' + formatAge(age));
-  if(status) status.textContent='Modo live';
+  if(meta.scan_in_progress){ el.textContent='● ESCANEANDO'; if(status) status.textContent='Processando...'; return; }
+  if(age<=0 || !meta.last_scan || meta.last_scan==='--'){
+    el.textContent='● INATIVO'; if(status) status.textContent='Clique Atualizar'; return;
+  }
+  if(age>=staleAfterSeconds){ el.textContent='● INATIVO'; if(status) status.textContent='Clique Atualizar'; return; }
+  el.textContent='● ATUALIZADO ' + formatAge(age);
+  if(status) status.textContent='Sob demanda';
 }
 function renderDashboardDecision(d){
   const c=document.getElementById('dashboard_decision');
@@ -548,9 +546,7 @@ function applySnapshot(d){
   ){
     saveCachedSnapshot(s);
   }
-  autoRefreshSeconds=parseInt((s.meta && s.meta.ui_auto_refresh_seconds) || autoRefreshSeconds || 20,10)||20;
-  staleAfterSeconds=parseInt((s.meta && s.meta.ui_stale_after_seconds) || staleAfterSeconds || 95,10)||95;
-  forceScanAfterSeconds=parseInt((s.meta && s.meta.ui_force_scan_after_seconds) || forceScanAfterSeconds || 110,10)||110;
+  // ON-DEMAND: sem controle de intervalos automáticos.
   const liveDecision =
     (s.signals && s.signals[0]) ||
     ((s.current_decision && s.current_decision.decision) ? s.current_decision : {});
@@ -592,18 +588,9 @@ function applySnapshot(d){
   fillCapitalForm(s.capital_state || {});
   updateLiveBadge(s.meta || {});
   document.body.classList.remove('pre-hydrate');
-  startAutoRefresh();
+  // ON-DEMAND: sem startAutoRefresh(), sem polling de background.
 }
-async function maybeTriggerScan(meta){
-  const age = parseInt((meta && meta.last_scan_age_seconds) || 0, 10) || 0;
-  const count = parseInt((meta && meta.scan_count) || 0, 10) || 0;
-  const missingBootstrap = !meta || !meta.last_scan || meta.last_scan === '--' || count <= 0;
-  if(!missingBootstrap && age < (parseInt((meta && meta.ui_force_scan_after_seconds) || forceScanAfterSeconds || 110, 10) || 110)) return;
-  const now = Date.now();
-  if(now - lastAutoRunScanAt < (missingBootstrap ? 15000 : 120000)) return;
-  lastAutoRunScanAt = now;
-  try{ await fetch('/run-scan', {cache:'no-store'}); }catch(e){ console.error('run-scan warning', e); }
-}
+// maybeTriggerScan REMOVIDO: no modo on-demand, scans só ocorrem via botão.
 async function triggerActiveScan(){
   const btn = document.getElementById('refreshBtn');
   if(btn){ btn.disabled = true; btn.textContent = 'Analisando...'; }
@@ -622,44 +609,29 @@ async function triggerActiveScan(){
   await refreshSnapshot(false);
 }
 async function refreshSnapshot(silent){
+  // Leitura pura do snapshot — NÃO dispara scan.
   if(refreshInFlight) return;
   refreshInFlight = true;
   const btn = document.getElementById('refreshBtn');
   if(btn && !silent){ btn.disabled = true; btn.textContent = 'Atualizando...'; }
   const controller = new AbortController();
-  const timeout = setTimeout(()=>controller.abort(), 90000);
+  const timeout = setTimeout(()=>controller.abort(), 30000);
   try{
     const resp = await fetch('/snapshot', {cache:'no-store', signal:controller.signal});
     const data = await resp.json();
     applySnapshot(data);
-    await maybeTriggerScan(data.meta || {});
-  }catch(e){ console.error('snapshot refresh error', e); document.getElementById('scan_sub').textContent='Atualização demorou ou falhou; tentando novamente...'; }
+  }catch(e){
+    const sub = document.getElementById('scan_sub');
+    if(sub) sub.textContent='Falha ao carregar snapshot. Clique "Atualizar agora" para tentar.';
+  }
   finally{
     clearTimeout(timeout);
     refreshInFlight = false;
     if(btn && !silent){ setTimeout(()=>{ btn.disabled=false; btn.textContent='↻ Atualizar agora'; }, 600); }
   }
 }
-function startAutoRefresh(){
-  if(autoRefreshHandle) clearInterval(autoRefreshHandle);
-  autoRefreshHandle = setInterval(()=>{ if(document.hidden) return; refreshSnapshot(true); }, Math.max(8, autoRefreshSeconds) * 1000);
-}
-function startBootstrapPolling(){
-  if(bootstrapPollHandle) clearInterval(bootstrapPollHandle);
-  const current = safeSnapshot(window.__lastSnapshot || initialSnapshot || null);
-  if((current.meta && current.meta.scan_count) > 0 && (current.signals.length > 0 || (current.current_decision && current.current_decision.asset && current.current_decision.asset !== 'MERCADO'))){
-    return;
-  }
-  bootstrapPollHandle = setInterval(async ()=>{
-    const latest = safeSnapshot(window.__lastSnapshot || initialSnapshot || null);
-    if((latest.meta && latest.meta.scan_count) > 0 && (latest.signals.length > 0 || (latest.current_decision && latest.current_decision.asset && latest.current_decision.asset !== 'MERCADO'))){
-      clearInterval(bootstrapPollHandle);
-      bootstrapPollHandle = null;
-      return;
-    }
-    await refreshSnapshot(true);
-  }, 15000);
-}
+// startAutoRefresh e startBootstrapPolling REMOVIDOS.
+// ON-DEMAND MODE: zero polling, zero timers, zero chamadas automáticas.
 async function saveCapitalState(){
   const btn=document.getElementById('saveCapitalBtn');
   const status=document.getElementById('capital_status');
@@ -691,20 +663,28 @@ document.addEventListener('DOMContentLoaded', function(){
       return;
     }
   });
+
+  // ON-DEMAND MODE:
+  // 1. Tenta exibir snapshot salvo em localStorage (carregamento instantâneo, zero rede).
+  // 2. Faz UMA única leitura GET /snapshot para checar se há dados mais recentes no servidor.
+  // 3. Nenhum timer, nenhum polling, nenhuma chamada automática depois disso.
+  // 4. A IA só é acionada quando o usuário clica "↻ Atualizar agora".
+
   if(initialSnapshot){
-    try{
-      applySnapshot(initialSnapshot);
-    }catch(e){
-      console.error('initial cached snapshot error', e);
-    }
+    try{ applySnapshot(initialSnapshot); }catch(e){ console.error('cached snapshot error', e); }
   }else{
-    document.getElementById('scan_sub').textContent='Carregando snapshot salvo e dados ao vivo...';
-    document.getElementById('liveBadge').textContent='● CARREGANDO';
+    const sub = document.getElementById('scan_sub');
+    const badge = document.getElementById('liveBadge');
+    if(sub) sub.textContent='Clique "Atualizar agora" para ativar a IA.';
+    if(badge) badge.textContent='● INATIVO';
   }
-  startAutoRefresh();
-  startBootstrapPolling();
-  setTimeout(()=>refreshSnapshot(true), 250);
-  document.addEventListener('visibilitychange', function(){ if(!document.hidden){ refreshSnapshot(true); } });
+
+  // Leitura única do servidor ao abrir a página (sem scan, sem loop)
+  setTimeout(()=>refreshSnapshot(true), 300);
+
+  // SEM visibilitychange → sem refresh ao trocar de aba
+  // SEM startAutoRefresh() → sem setInterval
+  // SEM startBootstrapPolling() → sem polling a cada 15s
 });
 </script>
 </body>

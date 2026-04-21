@@ -28,7 +28,11 @@ def create_app() -> Flask:
     app.config["SETTINGS"] = SETTINGS
     scan_service = ScanService()
     app.config["SCAN_SERVICE"] = scan_service
-    scan_service.ensure_started()  # inicia passive watcher no startup
+    # ON-DEMAND MODE: não inicia PassiveWatcher no startup.
+    # Dados são coletados apenas quando o usuário clica "Atualizar agora".
+    # Para reativar modo background (mais RAM/bandwidth): RUN_BACKGROUND_SCANNER=1
+    if SETTINGS.run_background_scanner:
+        scan_service.ensure_started()
     app.config["START_TIME"] = time.time()
 
     # ── Cache-Control para arquivos estáticos ─────────────────────────────────
