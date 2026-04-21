@@ -50,6 +50,9 @@ def atualizar():
     _last_trigger_ts = now
     service = current_app.config["SCAN_SERVICE"]
     result = service.run_once("atualizar_agora")
+    # Se o scan falhou, resetar cooldown para permitir nova tentativa imediata
+    if isinstance(result, dict) and not result.get("ok", True):
+        _last_trigger_ts = 0.0
     return jsonify(result)
 
 

@@ -632,23 +632,22 @@ class ScanService:
             self._last_activity_ts = started
             meta["scan_in_progress"] = True
             meta["last_scan_error"] = ""
-
-            # LAZY IMPORT: engines pesados só existem durante o scan.
-            # DecisionEngine instancia 9 especialistas + FeatureEngine + CouncilEngine
-            # + EdgeGuard + CapitalMindEngine. São STATELESS — destruídos ao final.
-            from alpha_hive.intelligence.decision_engine import DecisionEngine
-            from alpha_hive.intelligence.meta_decision_engine import MetaDecisionEngine
-            from alpha_hive.intelligence.signal_engine import SignalEngine
-            from alpha_hive.audit.result_engine import ResultEngine
-
-            _decision_engine = DecisionEngine()
-            _meta_engine = MetaDecisionEngine()
-            _signal_engine = SignalEngine()
-            self._scan_result_engine = ResultEngine()
+            _decision_engine = None
+            _meta_engine = None
+            _signal_engine = None
+            self._scan_result_engine = None
 
             try:
-                # ON-DEMAND MODE: busca dados frescos agora, só quando solicitado.
-                # BACKGROUND MODE (RUN_BACKGROUND_SCANNER=1): usa cache do PassiveWatcher.
+                from alpha_hive.intelligence.decision_engine import DecisionEngine
+                from alpha_hive.intelligence.meta_decision_engine import MetaDecisionEngine
+                from alpha_hive.intelligence.signal_engine import SignalEngine
+                from alpha_hive.audit.result_engine import ResultEngine
+
+                _decision_engine = DecisionEngine()
+                _meta_engine = MetaDecisionEngine()
+                _signal_engine = SignalEngine()
+                self._scan_result_engine = ResultEngine()
+
                 if SETTINGS.run_background_scanner and self._started:
                     snapshots = self._snapshots_from_passive()
                 else:
@@ -709,9 +708,6 @@ class ScanService:
                 self.runtime["history"] = history
                 self.runtime["current_decision"] = current_payload
 
-                # ON-DEMAND: libera candles e cache HTTP da memória após processar.
-                # Os resultados já estão salvos em runtime e DB; os dados brutos
-                # (candles, contextos, cache de API) não são mais necessários.
                 if not SETTINGS.run_background_scanner:
                     self._release_market_memory()
 
@@ -733,14 +729,12 @@ class ScanService:
                     "duration_ms": int((time.time() - started) * 1000),
                 }
             finally:
-                # DESTRUIÇÃO EXPLÍCITA dos engines stateless.
-                # DecisionEngine (9 especialistas + deps) é o maior consumidor.
-                # Após o try/except, estas variáveis locais podem não existir
-                # se o erro ocorreu antes da criação — hence o getattr/del seguro.
-                for _name in ("_decision_engine", "_meta_engine", "_signal_engine"):
-                    _obj = locals().get(_name)
-                    if _obj is not None:
-                        del _obj
+                if _decision_engine is not None:
+                    del _decision_engine
+                if _meta_engine is not None:
+                    del _meta_engine
+                if _signal_engine is not None:
+                    del _signal_engine
                 self._scan_result_engine = None
                 meta["scan_in_progress"] = False
                 if not SETTINGS.run_background_scanner:
