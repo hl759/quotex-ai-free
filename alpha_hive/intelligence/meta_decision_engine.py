@@ -9,8 +9,8 @@ from alpha_hive.learning.learning_engine import LearningEngine
 
 
 class MetaDecisionEngine:
-    def __init__(self):
-        self.learning = LearningEngine()
+    def __init__(self, learning_engine: LearningEngine | None = None):
+        self.learning = learning_engine or LearningEngine()
 
     def _hour_bucket(self) -> str:
         return f"{now_brazil().hour:02d}:00"
