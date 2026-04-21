@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
 from typing import List, Optional
 
 from alpha_hive.config import SETTINGS
@@ -24,6 +25,17 @@ class MarketScanner:
         if asset in SETTINGS.assets_forex:
             return "forex"
         return "metals"
+
+    def _scan_timeout_seconds(self, asset_count: int, worker_count: int) -> int:
+        """
+        Deadline global do lote on-demand.
+        Antes, o timeout fixo de 90s abortava o scan inteiro em Render Free
+        quando alguns ativos demoravam mais, zerando sinais mesmo com resultados
+        parciais já disponíveis. Agora o timeout é adaptativo e nunca derruba o
+        lote completo: devolvemos o que ficou pronto dentro da janela.
+        """
+        waves = max(1, (asset_count + worker_count - 1) // worker_count)
+        return max(45, min(105, (waves * 12) + 10))
 
     def scan_asset(self, asset: str) -> Optional[MarketSnapshot]:
         candles_m1, chain = self.data.get_candles(
@@ -76,19 +88,30 @@ class MarketScanner:
             assets = SETTINGS.assets
         max_workers = max(1, min(SETTINGS.scanner_max_workers, len(assets)))
         out: List[MarketSnapshot] = []
+        scan_timeout = self._scan_timeout_seconds(len(assets), max_workers)
+        started = time.time()
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_map = {
                 executor.submit(self.scan_asset, asset): asset
                 for asset in assets
             }
-            for future in as_completed(future_map, timeout=90):
-                try:
-                    snapshot = future.result(timeout=15)
-                    if snapshot:
-                        out.append(snapshot)
-                except Exception:
-                    pass
+            try:
+                for future in as_completed(future_map, timeout=scan_timeout):
+                    try:
+                        snapshot = future.result()
+                        if snapshot:
+                            out.append(snapshot)
+                    except Exception:
+                        pass
+            except FuturesTimeoutError:
+                # Em ambiente limitado (Render Free), alguns ativos podem atrasar.
+                # Mantemos o scan válido com resultados parciais em vez de falhar tudo.
+                pass
+            finally:
+                for future in future_map:
+                    if not future.done():
+                        future.cancel()
 
         asset_order = {asset: idx for idx, asset in enumerate(assets)}
         out.sort(key=lambda item: asset_order.get(item.asset, 10**9))
