@@ -734,6 +734,16 @@ class ScanService:
                     except Exception:
                         pass
         snapshots.sort(key=lambda s: asset_order.get(s.asset, 10**9))
+        # Se passive nao retornou nada, scan direto completo
+        if not snapshots:
+            for asset in SETTINGS.assets:
+                try:
+                    snap = self.scanner.scan_asset(asset)
+                    if snap:
+                        snapshots.append(snap)
+                except Exception:
+                    pass
+            snapshots.sort(key=lambda s: asset_order.get(s.asset, 10**9))
         return snapshots
 
     def _passive_diagnostics(self):
