@@ -18,7 +18,6 @@ from alpha_hive.learning.learning_engine import LearningEngine
 from alpha_hive.learning.specialist_reputation_engine import SpecialistReputationEngine
 from alpha_hive.market.scanner import MarketScanner
 from alpha_hive.market.passive_watcher import PassiveWatcher
-from alpha_hive.services.active_scan import ActiveScan
 from alpha_hive.services.capital_service import CapitalService
 from alpha_hive.storage.state_store import get_state_store
 
@@ -27,7 +26,8 @@ PENDING_COLLECTION = "pending_signals_v2"
 
 class ScanService:
     def __init__(self):
-        self.scanner = MarketScanner()
+        self.passive_watcher = PassiveWatcher()
+        self.scanner = MarketScanner(self.passive_watcher._data)  # DataManager compartilhado
         self.decision_engine = DecisionEngine()
         self.meta_engine = MetaDecisionEngine()
         self.signal_engine = SignalEngine()
@@ -61,8 +61,6 @@ class ScanService:
         }
         self._lock = threading.Lock()
         self._started = False
-        self.passive_watcher = PassiveWatcher()
-        self.active_scan = ActiveScan(self.passive_watcher)
 
     def _meta(self) -> Dict[str, Any]:
         return self.runtime.setdefault("meta", {})  # type: ignore[return-value]
