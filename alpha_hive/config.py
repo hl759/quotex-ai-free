@@ -42,8 +42,8 @@ class Settings:
 
     scan_interval_seconds: int = int(os.getenv("SCAN_INTERVAL_SECONDS", "300"))
 
-    # RENDER FREE: 1 worker = sem paralelismo, sem burst de requests externos
-    scanner_max_workers: int = int(os.getenv("SCANNER_MAX_WORKERS", "1"))
+    # 3 workers = 3 ativos em paralelo (~30s para 22 ativos vs ~3min com 1 worker)
+    scanner_max_workers: int = int(os.getenv("SCANNER_MAX_WORKERS", "3"))
 
     # ─── UI / POLLING ────────────────────────────────────────────────────────
     # RENDER FREE: frontend atualiza a cada 90s (bem acima do scan_interval)

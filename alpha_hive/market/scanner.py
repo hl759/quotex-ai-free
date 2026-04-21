@@ -71,8 +71,9 @@ class MarketScanner:
             source_kind=self.data.source_kind_for(asset),
         )
 
-    def scan_assets(self) -> List[MarketSnapshot]:
-        assets = SETTINGS.assets
+    def scan_assets(self, assets: Optional[List[str]] = None) -> List[MarketSnapshot]:
+        if assets is None:
+            assets = SETTINGS.assets
         max_workers = max(1, min(SETTINGS.scanner_max_workers, len(assets)))
         out: List[MarketSnapshot] = []
 
@@ -81,10 +82,13 @@ class MarketScanner:
                 executor.submit(self.scan_asset, asset): asset
                 for asset in assets
             }
-            for future in as_completed(future_map):
-                snapshot = future.result()
-                if snapshot:
-                    out.append(snapshot)
+            for future in as_completed(future_map, timeout=90):
+                try:
+                    snapshot = future.result(timeout=15)
+                    if snapshot:
+                        out.append(snapshot)
+                except Exception:
+                    pass
 
         asset_order = {asset: idx for idx, asset in enumerate(assets)}
         out.sort(key=lambda item: asset_order.get(item.asset, 10**9))

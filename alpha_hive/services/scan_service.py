@@ -763,6 +763,8 @@ class ScanService:
         contexts = self.passive_watcher.get_all_contexts()
         asset_order = {a: i for i, a in enumerate(SETTINGS.assets)}
         snapshots = []
+        stale_assets = []
+
         for asset, ctx in contexts.items():
             if ctx.is_initialized and ctx.is_fresh and len(ctx.candles_m1) >= 12:
                 candles_m1 = list(ctx.candles_m1)
@@ -780,25 +782,18 @@ class ScanService:
                 )
                 snapshots.append(snap)
             else:
-                initialized_count = sum(1 for c2 in contexts.values() if c2.is_initialized)
-                if initialized_count >= 1:
-                    try:
-                        snap = self.scanner.scan_asset(asset)
-                        if snap:
-                            snapshots.append(snap)
-                    except Exception:
-                        pass
-        snapshots.sort(key=lambda s: asset_order.get(s.asset, 10**9))
-        # Se passive nao retornou nada, scan direto completo
+                stale_assets.append(asset)
+
+        # Ativos sem dados frescos: scan paralelo (não sequencial)
+        if stale_assets:
+            fresh = self.scanner.scan_assets(stale_assets)
+            snapshots.extend(fresh)
+
+        # Passive não retornou nada: scan completo paralelo
         if not snapshots:
-            for asset in SETTINGS.assets:
-                try:
-                    snap = self.scanner.scan_asset(asset)
-                    if snap:
-                        snapshots.append(snap)
-                except Exception:
-                    pass
-            snapshots.sort(key=lambda s: asset_order.get(s.asset, 10**9))
+            snapshots = self.scanner.scan_assets()
+
+        snapshots.sort(key=lambda s: asset_order.get(s.asset, 10**9))
         return snapshots
 
     def _release_market_memory(self) -> None:
