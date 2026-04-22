@@ -27,6 +27,11 @@ DATABASE_URL = (
     os.getenv("ALPHA_HIVE_DATABASE_URL", "").strip()
     or os.getenv("DATABASE_URL", "").strip()
 )
+# Segundo banco (failover automático). Use DATABASE_URL_2 ou ALPHA_HIVE_DATABASE_URL_2.
+DATABASE_URL_2 = (
+    os.getenv("ALPHA_HIVE_DATABASE_URL_2", "").strip()
+    or os.getenv("DATABASE_URL_2", "").strip()
+)
 ensure_parent(SQLITE_DB_PATH)
 
 # Pool conservador: máximo 4 conexões simultâneas.
@@ -53,24 +58,30 @@ def _ensure_sslmode(url: str) -> str:
 class StateStore:
     """
     Armazenamento de estado com suporte a PostgreSQL (via pool de conexões)
-    e fallback automático para SQLite.
+    e fallback automático: DB-primário → DB-secundário → SQLite.
 
     Configuração:
-        ALPHA_HIVE_DATABASE_URL  ou  DATABASE_URL  → URL do PostgreSQL
-        Exemplo: postgres://user:pass@host:port/db?sslmode=require
+        DATABASE_URL            → PostgreSQL primário (Aiven #1)
+        DATABASE_URL_2          → PostgreSQL secundário / failover (Aiven #2)
+        ALPHA_HIVE_DATABASE_URL → alias para DATABASE_URL
+        ALPHA_HIVE_DATABASE_URL_2 → alias para DATABASE_URL_2
 
-    Se a URL não for definida ou a conexão falhar, usa SQLite local.
+    Se o primário falhar na inicialização ou em operação, chaveia para o
+    secundário automaticamente. Se ambos falharem, usa SQLite local.
     """
 
     def __init__(
         self,
         db_path: str = SQLITE_DB_PATH,
         database_url: str = DATABASE_URL,
+        database_url_2: str = DATABASE_URL_2,
     ):
         self.db_path = db_path
         self.database_url = database_url
+        self.database_url_2 = database_url_2
         self._write_lock = threading.Lock()
-        self._pool: Any = None  # psycopg2.pool.ThreadedConnectionPool | None
+        self._pool: Any = None
+        self._pool_2: Any = None  # pool do banco secundário
         self.fallback_reason: Optional[str] = None
         self.last_error: Optional[str] = None
 
@@ -79,6 +90,10 @@ class StateStore:
 
         if wants_pg:
             self._init_pool(database_url)
+
+        # Inicializa pool secundário se URL_2 estiver configurada
+        if _is_postgres_url(database_url_2) and _HAS_PSYCOPG2:
+            self._init_pool_2(database_url_2)
 
         self.backend_name = "postgres" if self.use_postgres else "sqlite"
         self.backend_target = database_url if self.use_postgres else db_path
@@ -96,17 +111,55 @@ class StateStore:
                 dsn=safe_url,
                 connect_timeout=8,
             )
-            # Testa a conexão imediatamente
             conn = self._pool.getconn()
             self._pool.putconn(conn)
             self.use_postgres = True
-            log.info("StateStore: PostgreSQL conectado via pool (%d–%d conns)", _PG_POOL_MIN, _PG_POOL_MAX)
+            log.info("StateStore: PostgreSQL primário conectado (%d–%d conns)", _PG_POOL_MIN, _PG_POOL_MAX)
         except Exception as exc:
             self._pool = None
             self.use_postgres = False
-            self.fallback_reason = "pg_pool_init_failed"
+            self.fallback_reason = "pg_primary_failed"
             self.last_error = repr(exc)
-            log.warning("StateStore: falha ao conectar PostgreSQL (%s) — usando SQLite", exc)
+            log.warning("StateStore: falha no PostgreSQL primário (%s)", exc)
+
+    def _init_pool_2(self, url: str) -> None:
+        safe_url = _ensure_sslmode(url)
+        try:
+            self._pool_2 = psycopg2.pool.ThreadedConnectionPool(
+                _PG_POOL_MIN,
+                _PG_POOL_MAX,
+                dsn=safe_url,
+                connect_timeout=8,
+            )
+            conn = self._pool_2.getconn()
+            self._pool_2.putconn(conn)
+            # Se o primário falhou, o secundário assume como ativo
+            if not self.use_postgres:
+                self._pool, self._pool_2 = self._pool_2, None
+                self.use_postgres = True
+                self.fallback_reason = "pg_using_secondary"
+                log.info("StateStore: PostgreSQL secundário assumiu como primário")
+            else:
+                log.info("StateStore: PostgreSQL secundário conectado (failover em standby)")
+        except Exception as exc:
+            self._pool_2 = None
+            log.warning("StateStore: falha no PostgreSQL secundário (%s)", exc)
+
+    def _failover_to_secondary(self) -> bool:
+        """Tenta promover pool_2 a primário. Retorna True se bem-sucedido."""
+        if self._pool_2 is None:
+            return False
+        try:
+            conn = self._pool_2.getconn()
+            self._pool_2.putconn(conn)
+            old = self._pool
+            self._pool, self._pool_2 = self._pool_2, old
+            self.fallback_reason = "pg_failover_to_secondary"
+            log.warning("StateStore: failover automático para PostgreSQL secundário")
+            return True
+        except Exception as exc:
+            log.warning("StateStore: secundário também indisponível (%s) — usando SQLite", exc)
+            return False
 
     @contextmanager
     def _connect(self) -> Generator:
@@ -117,12 +170,15 @@ class StateStore:
                 conn.autocommit = True
                 yield conn
             except psycopg2.pool.PoolError as exc:
-                # Pool esgotado — fallback pontual para SQLite nesta operação
                 log.warning("StateStore: pool esgotado (%s), operação via SQLite", exc)
                 yield from self._sqlite_connect()
             except Exception as exc:
                 self.last_error = repr(exc)
-                raise
+                # Tenta failover para secundário antes de subir o erro
+                if self._failover_to_secondary():
+                    yield from self._connect()
+                else:
+                    raise
             finally:
                 if conn is not None and self._pool is not None:
                     try:
@@ -449,30 +505,31 @@ class StateStore:
     # ── Diagnóstico ───────────────────────────────────────────────────────
 
     def health(self) -> Dict[str, Any]:
-        pool_info: Dict[str, Any] = {}
-        if self._pool is not None:
+        def _pool_info(p: Any) -> Optional[Dict]:
+            if p is None:
+                return None
             try:
-                pool_info = {
-                    "min": _PG_POOL_MIN,
-                    "max": _PG_POOL_MAX,
-                    "closed": self._pool.closed,
-                }
+                return {"min": _PG_POOL_MIN, "max": _PG_POOL_MAX, "closed": p.closed}
             except Exception:
-                pass
+                return None
+
         return {
             "backend": self.backend_name,
             "target": self.backend_target,
             "fallback_reason": self.fallback_reason,
             "last_error": self.last_error,
-            "pool": pool_info or None,
+            "pool_primary": _pool_info(self._pool),
+            "pool_secondary": _pool_info(self._pool_2),
+            "has_failover": self._pool_2 is not None,
         }
 
     def close(self) -> None:
-        if self._pool is not None:
-            try:
-                self._pool.closeall()
-            except Exception:
-                pass
+        for pool in (self._pool, self._pool_2):
+            if pool is not None:
+                try:
+                    pool.closeall()
+                except Exception:
+                    pass
 
 
 def get_state_store() -> StateStore:
