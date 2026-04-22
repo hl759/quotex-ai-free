@@ -8,8 +8,10 @@ from alpha_hive.core.contracts import MarketSnapshot
 from alpha_hive.market.data_manager import DataManager
 from alpha_hive.market.reliability_engine import ReliabilityEngine
 
-# RENDER FREE: 80 velas 1min (era 260). 80 é suficiente para RSI/MACD/Bollinger.
-_M1_OUTPUTSIZE = 30
+# 60 velas M1 = 60 minutos de histórico.
+# Suficiente para ATR(14), RSI(14), swing structure, FVG, Order Blocks e MSS.
+# Custo de bandwidth é marginal com a abordagem period1/period2 do Yahoo.
+_M1_OUTPUTSIZE = 60
 _M5_OUTPUTSIZE = 12
 
 

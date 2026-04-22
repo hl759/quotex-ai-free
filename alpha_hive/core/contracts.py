@@ -72,6 +72,39 @@ class MarketFeatures:
     source_kind: str = "standard"
     source_symbol: str = ""
 
+    # ── ATR (Average True Range) ──────────────────────────────────────────
+    atr: float = 0.0
+    atr_pct: float = 0.0  # ATR as % of price
+
+    # ── Enhanced Price Action Patterns ────────────────────────────────────
+    price_action_pattern: str = "none"  # pin_bar, engulfing, marubozu, inside_bar, doji, none
+    pattern_strength: float = 0.0       # 0.0–1.0
+
+    # ── Swing Structure ───────────────────────────────────────────────────
+    swing_high_recent: float = 0.0      # most recent swing high price
+    swing_low_recent: float = 0.0       # most recent swing low price
+    near_swing_high: bool = False       # price within ATR*0.5 of swing high
+    near_swing_low: bool = False        # price within ATR*0.5 of swing low
+    structure_break: bool = False       # price closed beyond a swing point
+    structure_break_direction: str = "none"  # "bullish" | "bearish" | "none"
+
+    # ── Smart Money Concepts (ICT/SMC) ────────────────────────────────────
+    order_block_bullish: bool = False   # price at active bullish order block
+    order_block_bearish: bool = False   # price at active bearish order block
+    order_block_level: float = 0.0     # price level of the order block
+    fvg_bullish: bool = False           # recent unfilled bullish fair value gap
+    fvg_bearish: bool = False           # recent unfilled bearish fair value gap
+    fvg_size_pct: float = 0.0          # FVG size as % of price
+    mss_detected: bool = False          # market structure shift detected
+    mss_direction: str = "none"         # "bullish" | "bearish" | "none"
+    liquidity_grab: bool = False        # stop hunt / liquidity sweep detected
+    liquidity_grab_direction: str = "none"  # "bullish" | "bearish" | "none"
+    displacement: bool = False          # strong institutional displacement candle
+    displacement_direction: str = "none"    # "bullish" | "bearish" | "none"
+
+    # ── Trend Strength ────────────────────────────────────────────────────
+    trend_strength: float = 0.0         # price efficiency ratio 0–1 (ADX proxy)
+
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 

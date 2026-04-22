@@ -16,9 +16,12 @@ from alpha_hive.risk.edge_guard import EdgeGuard
 from alpha_hive.specialists.breakout_specialist import BreakoutSpecialist
 from alpha_hive.specialists.data_quality_specialist import DataQualitySpecialist
 from alpha_hive.specialists.mean_reversion_specialist import MeanReversionSpecialist
+from alpha_hive.specialists.price_action_specialist import PriceActionSpecialist
 from alpha_hive.specialists.regime_specialist import RegimeSpecialist
 from alpha_hive.specialists.reversal_specialist import ReversalSpecialist
 from alpha_hive.specialists.session_specialist import SessionSpecialist
+from alpha_hive.specialists.smart_money_specialist import SmartMoneySpecialist
+from alpha_hive.specialists.structure_specialist import StructureSpecialist
 from alpha_hive.specialists.timing_specialist import TimingSpecialist
 from alpha_hive.specialists.trend_specialist import TrendSpecialist
 from alpha_hive.specialists.volatility_specialist import VolatilitySpecialist
@@ -47,6 +50,9 @@ class DecisionEngine:
             TimingSpecialist(),
             SessionSpecialist(),
             DataQualitySpecialist(),
+            PriceActionSpecialist(),
+            SmartMoneySpecialist(),
+            StructureSpecialist(),
         ]
 
     def _hour_bucket(self) -> str:
