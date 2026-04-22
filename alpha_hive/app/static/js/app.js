@@ -2,9 +2,11 @@
 // Scans são ativados exclusivamente via botão "Atualizar agora" (POST /atualizar).
 // Este arquivo é reserva; a UI principal usa o script embutido em index.html.
 
+const API_BASE = (typeof window !== 'undefined' && window.BACKEND_URL) ? window.BACKEND_URL.replace(/\/$/, '') : '';
+
 async function refresh() {
   try {
-    const resp = await fetch('/snapshot');
+    const resp = await fetch(API_BASE + '/snapshot');
     if (!resp.ok) return;
     const data = await resp.json();
     const dec = document.getElementById('decision');
@@ -22,7 +24,7 @@ async function runScan() {
   const btn = document.querySelector('[onclick="runScan()"]');
   if (btn) { btn.disabled = true; btn.textContent = 'Analisando...'; }
   try {
-    await fetch('/atualizar', { method: 'POST' });
+    await fetch(API_BASE + '/atualizar', { method: 'POST' });
     await refresh();
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Atualizar agora'; }

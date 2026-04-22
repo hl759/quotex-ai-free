@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 
@@ -13,10 +14,35 @@ from alpha_hive.app.routes.snapshot import bp as snapshot_bp
 from alpha_hive.config import SETTINGS
 from alpha_hive.services.scan_service import ScanService
 
+# Origens permitidas para CORS.
+# Render static site (ou qualquer outro frontend) deve ser adicionada via env var.
+# Exemplo: CORS_ORIGINS=https://alpha-hive.onrender.com,https://meuapp.com
+_CORS_ORIGINS = [
+    o.strip()
+    for o in os.getenv("CORS_ORIGINS", "").split(",")
+    if o.strip()
+]
+
 
 def create_app() -> Flask:
     static_folder = str(Path(__file__).resolve().parent / "static")
     app = Flask(__name__, static_folder=static_folder, static_url_path="")
+
+    # ── CORS (para deploy split: frontend no Render, backend no Fly.io) ──────
+    if _CORS_ORIGINS:
+        try:
+            from flask_cors import CORS
+            CORS(app, origins=_CORS_ORIGINS, supports_credentials=False)
+        except ImportError:
+            @app.after_request
+            def add_cors(response):
+                from flask import request as _req
+                req_origin = _req.headers.get("Origin", "")
+                if req_origin in _CORS_ORIGINS:
+                    response.headers["Access-Control-Allow-Origin"] = req_origin
+                    response.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
+                    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+                return response
 
     # ── Compressão gzip (RENDER FREE: reduz JSON em ~65-75%) ─────────────────
     try:
