@@ -1,0 +1,66 @@
+# Fly.io deployment — Alpha Hive AI backend
+# Deploy: fly launch  (first time)
+#         fly deploy  (updates)
+#
+# Required secrets (set once via CLI):
+#   fly secrets set DATABASE_URL="postgres://user:pass@host:port/db?sslmode=require"
+#   fly secrets set CORS_ORIGINS="https://alpha-hive.onrender.com"
+#
+# Free tier: 3 shared-cpu-1x 256MB machines included.
+
+app = "alpha-hive-ai"
+primary_region = "gru"
+
+[build]
+
+[env]
+  PORT = "8080"
+  # Workers conservadores para 256 MB de RAM no free tier
+  GUNICORN_WORKERS = "1"
+  GUNICORN_THREADS = "2"
+  # Backend completo: pode ativar scan passivo sem travar (Fly não dorme)
+  RUN_BACKGROUND_SCANNER = "0"
+
+[http_service]
+  internal_port = 8080
+  force_https   = true
+  # Mantém a máquina sempre viva — sem cold-start (diferencial vs Render free)
+  auto_stop_machines  = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type       = "requests"
+    hard_limit = 25
+    soft_limit = 20
+
+[[vm]]
+  memory   = "256mb"
+  cpu_kind = "shared"
+  cpus     = 1
+
+[[services.ports]]
+  port     = 443
+  handlers = ["tls", "http"]
+
+[[services.ports]]
+  port     = 80
+  handlers = ["http"]
+
+  [services.ports.force_https]
+    enabled = true
+
+[[services.tcp_checks]]
+  grace_period  = "5s"
+  interval      = "15s"
+  restart_limit = 0
+  timeout       = "2s"
+
+[[services.http_checks]]
+  interval      = "15s"
+  grace_period  = "10s"
+  method        = "GET"
+  path          = "/health"
+  protocol      = "http"
+  restart_limit = 0
+  timeout       = "5s"

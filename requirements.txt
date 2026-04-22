@@ -1,5 +1,6 @@
 flask
 flask-compress
+flask-cors
 requests
 pandas
 numpy
