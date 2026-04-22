@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import gc
+import logging
 import threading
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
+
+log = logging.getLogger(__name__)
 
 from alpha_hive.audit.edge_audit import EdgeAuditEngine
 from alpha_hive.audit.journal_manager import JournalManager
@@ -68,6 +71,7 @@ class ScanService:
         self._lock = threading.Lock()
         self._started = False
         self._last_activity_ts: float = 0.0
+        self._restore_runtime()
 
     def _meta(self) -> Dict[str, Any]:
         return self.runtime.setdefault("meta", {})  # type: ignore[return-value]
@@ -79,6 +83,40 @@ class ScanService:
         if last_scan_ts <= 0:
             return 0
         return max(0, int(now_ts - last_scan_ts))
+
+    def _restore_runtime(self) -> None:
+        """Carrega o último estado do PostgreSQL no startup — IA nunca começa vazia."""
+        try:
+            saved = self.store.get_json("scan_runtime_v1", {})
+            if not saved:
+                return
+            for key in ("signals", "history", "current_decision"):
+                if key in saved:
+                    self.runtime[key] = saved[key]
+            saved_meta = saved.get("meta", {})
+            if saved_meta:
+                meta = self._meta()
+                meta.update(saved_meta)
+                meta["scan_in_progress"] = False
+                meta["ui_auto_refresh_seconds"] = SETTINGS.ui_auto_refresh_seconds
+                meta["ui_stale_after_seconds"] = SETTINGS.ui_stale_after_seconds
+                meta["ui_force_scan_after_seconds"] = SETTINGS.ui_force_scan_after_seconds
+            log.info("ScanService: runtime restaurado do PostgreSQL")
+        except Exception as exc:
+            log.warning("ScanService: falha ao restaurar runtime (%s) — iniciando vazio", exc)
+
+    def _persist_runtime(self) -> None:
+        """Persiste runtime no PostgreSQL após cada scan — sobrevive a restarts do Render."""
+        try:
+            meta = {k: v for k, v in self._meta().items() if k != "scan_in_progress"}
+            self.store.set_json("scan_runtime_v1", {
+                "signals": self.runtime.get("signals", []),
+                "history": (self.runtime.get("history", []) or [])[:20],
+                "current_decision": self.runtime.get("current_decision", {}),
+                "meta": meta,
+            })
+        except Exception as exc:
+            log.warning("ScanService: falha ao persistir runtime (%s)", exc)
 
     def _find_snapshot(self, snapshots: List[MarketSnapshot], asset: str) -> Optional[MarketSnapshot]:
         return next((snap for snap in snapshots if snap.asset == asset), None)
@@ -711,6 +749,7 @@ class ScanService:
                 self.runtime["signals"] = signals
                 self.runtime["history"] = history
                 self.runtime["current_decision"] = current_payload
+                self._persist_runtime()
 
                 if not SETTINGS.run_background_scanner:
                     self._release_market_memory()

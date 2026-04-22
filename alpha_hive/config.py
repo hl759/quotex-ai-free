@@ -38,10 +38,11 @@ class Settings:
     ])
 
     # ─── SCANNER ─────────────────────────────────────────────────────────────
-    # RENDER FREE: 300s = 5 min entre scans. Mude via env var se quiser.
-    passive_interval_seconds: int = int(os.getenv("PASSIVE_INTERVAL_SECONDS", "300"))
+    # 600s = 10 min entre scans no background mode. Conservador para Render free
+    # (512 MB RAM, 0.1 vCPU). Reduza para 300s se quiser scans mais frequentes.
+    passive_interval_seconds: int = int(os.getenv("PASSIVE_INTERVAL_SECONDS", "600"))
 
-    scan_interval_seconds: int = int(os.getenv("SCAN_INTERVAL_SECONDS", "300"))
+    scan_interval_seconds: int = int(os.getenv("SCAN_INTERVAL_SECONDS", "600"))
 
     # Padrão ultra conservador para evitar pico de RAM em instâncias free.
     scanner_max_workers: int = int(os.getenv("SCANNER_MAX_WORKERS", "1"))

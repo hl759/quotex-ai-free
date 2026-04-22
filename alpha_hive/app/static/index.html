@@ -694,12 +694,17 @@ document.addEventListener('DOMContentLoaded', function(){
     if(badge) badge.textContent='● INATIVO';
   }
 
-  // Leitura única do servidor ao abrir a página (sem scan, sem loop)
+  // Leitura inicial ao abrir (sem scan)
   setTimeout(()=>refreshSnapshot(true), 300);
 
-  // SEM visibilitychange → sem refresh ao trocar de aba
-  // SEM startAutoRefresh() → sem setInterval
-  // SEM startBootstrapPolling() → sem polling a cada 15s
+  // Auto-refresh silencioso a cada 2 minutos — mostra o último scan do backend
+  // sem disparar novo scan. Compatível com background scanner e on-demand.
+  setInterval(()=>{ if(!document.hidden) refreshSnapshot(true); }, 120000);
+
+  // Atualiza exibição ao voltar para a aba
+  document.addEventListener('visibilitychange', ()=>{
+    if(!document.hidden) refreshSnapshot(true);
+  });
 });
 </script>
 </body>
