@@ -145,49 +145,43 @@ class StateStore:
             self._pool_2 = None
             log.warning("StateStore: falha no PostgreSQL secundário (%s)", exc)
 
-    def _failover_to_secondary(self) -> bool:
-        """Tenta promover pool_2 a primário. Retorna True se bem-sucedido."""
-        if self._pool_2 is None:
-            return False
+    def _acquire_pg_conn(self):
+        """Adquire conexão do pool primário, com failover para secundário se necessário."""
         try:
-            conn = self._pool_2.getconn()
-            self._pool_2.putconn(conn)
-            old = self._pool
-            self._pool, self._pool_2 = self._pool_2, old
-            self.fallback_reason = "pg_failover_to_secondary"
-            log.warning("StateStore: failover automático para PostgreSQL secundário")
-            return True
+            conn = self._pool.getconn()
+            conn.autocommit = True
+            return conn
+        except psycopg2.pool.PoolError:
+            return None  # pool esgotado → cai para SQLite
         except Exception as exc:
-            log.warning("StateStore: secundário também indisponível (%s) — usando SQLite", exc)
-            return False
+            self.last_error = repr(exc)
+            if self._failover_to_secondary():
+                try:
+                    conn = self._pool.getconn()
+                    conn.autocommit = True
+                    return conn
+                except Exception as exc2:
+                    self.last_error = repr(exc2)
+                    return None
+            return None
 
     @contextmanager
     def _connect(self) -> Generator:
         if self.use_postgres and self._pool is not None:
-            conn = None
-            try:
-                conn = self._pool.getconn()
-                conn.autocommit = True
-                yield conn
-            except psycopg2.pool.PoolError as exc:
-                log.warning("StateStore: pool esgotado (%s), operação via SQLite", exc)
-                yield from self._sqlite_connect()
-            except Exception as exc:
-                self.last_error = repr(exc)
-                # Tenta failover para secundário antes de subir o erro
-                if self._failover_to_secondary():
-                    yield from self._connect()
-                else:
-                    raise
-            finally:
-                if conn is not None and self._pool is not None:
+            conn = self._acquire_pg_conn()
+            if conn is not None:
+                try:
+                    yield conn
+                finally:
                     try:
                         self._pool.putconn(conn)
                     except Exception:
                         pass
-            return
+                return
+            log.warning("StateStore: PostgreSQL indisponível nesta operação, usando SQLite")
 
-        yield from self._sqlite_connect()
+        with self._sqlite_connect() as conn:
+            yield conn
 
     @contextmanager
     def _sqlite_connect(self) -> Generator:
