@@ -8,29 +8,33 @@ from typing import List
 @dataclass(frozen=True)
 class Settings:
     # ─── ATIVOS ──────────────────────────────────────────────────────────────
-    # Defaults conservadores para instância free: menos ativos = menos RAM/bandwidth.
-    # Quem quiser ampliar pode sobrescrever via env vars no Render.
+    # 11 pares USDT (Binance) — os mais líquidos e voláteis em M1.
+    # Ciclo estimado: ~55s scan + 60s sleep = ~2min por varredura completa.
+    # Sobrescreva via env var ASSETS_CRYPTO no Render se quiser personalizar.
     assets_crypto: List[str] = field(default_factory=lambda: [
         s.strip() for s in
-        os.getenv("ASSETS_CRYPTO", "BTCUSDT,ETHUSDT,XRPUSDT").split(",")
+        os.getenv(
+            "ASSETS_CRYPTO",
+            "BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,LTCUSDT,LINKUSDT,AVAXUSDT,MATICUSDT"
+        ).split(",")
         if s.strip()
     ])
 
-    # Instrumentos OTC/nomeados da EBINEX — dados via Yahoo Finance (BTC-USD etc.)
+    # Cripto OTC/nomeados (Yahoo Finance) — 3 ativos principais.
     assets_pure_crypto: List[str] = field(default_factory=lambda: [
         s.strip() for s in
-        os.getenv("ASSETS_PURE_CRYPTO", "BITCOIN").split(",")
+        os.getenv("ASSETS_PURE_CRYPTO", "BITCOIN,ETHEREUM,SOLANA").split(",")
         if s.strip()
     ])
 
-    # Forex disponíveis na EBINEX
+    # Forex
     assets_forex: List[str] = field(default_factory=lambda: [
         s.strip() for s in
         os.getenv("ASSETS_FOREX", "EURUSD,GBPUSD").split(",")
         if s.strip()
     ])
 
-    # Metais
+    # Metais (ex: XAUUSD) — vazio por padrão
     assets_metals: List[str] = field(default_factory=lambda: [
         s.strip() for s in
         os.getenv("ASSETS_METALS", "").split(",")
