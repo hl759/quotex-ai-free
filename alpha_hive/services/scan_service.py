@@ -90,6 +90,28 @@ class ScanService:
             for key in ("signals", "history", "current_decision"):
                 if key in saved:
                     self.runtime[key] = saved[key]
+
+            now_ts = time.time()
+
+            # Marca current_decision expirado para não exibir sinal de ontem como ativo.
+            current = self.runtime.get("current_decision", {})
+            if isinstance(current, dict) and current:
+                expiration_ts = float(current.get("expiration_ts", 0) or 0)
+                if expiration_ts > 0 and now_ts > expiration_ts:
+                    current["expired"] = True
+                    current["entry_time"] = "--:--"
+                    current["expiration"] = "--:--"
+                    current["analysis_time"] = "--:--"
+
+            # Remove sinais cuja janela de entrada já passou.
+            signals = self.runtime.get("signals", [])
+            if isinstance(signals, list):
+                self.runtime["signals"] = [
+                    s for s in signals
+                    if float(s.get("expiration_ts", 0) or 0) <= 0
+                    or now_ts <= float(s.get("expiration_ts", 0) or 0)
+                ]
+
             saved_meta = saved.get("meta", {})
             if saved_meta:
                 meta = self._meta()
@@ -196,7 +218,10 @@ class ScanService:
                 }
             )
         else:
-            out.setdefault("analysis_time", "--:--")
+            # Para decisões não-operáveis (OBSERVAR/BLOQUEADO), registra o horário
+            # da análise para que o usuário saiba que o scan foi executado agora.
+            analysis_time = (planned or {}).get("analysis_time") or now_brazil().strftime("%H:%M")
+            out["analysis_time"] = analysis_time
             out.setdefault("entry_time", "--:--")
             out.setdefault("expiration", "--:--")
             out.setdefault("lead_seconds", 0)
@@ -685,6 +710,10 @@ class ScanService:
 
                 snapshots = self.scanner.scan_assets()
 
+                # Filtra apenas ativos com candles suficientes para análise significativa.
+                # Assets que retornaram dados parciais ou sem histórico mínimo são descartados.
+                snapshots = [s for s in snapshots if len(s.candles_m1) >= 5]
+
                 # Registra horário do scan logo após os dados serem buscados.
                 # Assim mesmo que a fase de decisão falhe, o usuário vê dados frescos.
                 fetch_ts = time.time()
@@ -712,13 +741,14 @@ class ScanService:
 
                 current_analysis = ranked_decisions[0] if ranked_decisions else None
                 primary_signal = next((item for item in ranked_decisions if self._is_operable_candidate(item)), None)
-                planned = self._planned_signal_window(analysis_ts=time.time()) if primary_signal else None
+                # Sempre computa planned para incluir analysis_time mesmo em decisões OBSERVAR/BLOQUEADO.
+                planned = self._planned_signal_window(analysis_ts=time.time())
 
                 signals: List[Dict[str, Any]] = []
-                if primary_signal and planned:
+                if primary_signal:
                     signals = [self._decorate_signal_payload(_signal_engine.to_payload(primary_signal), planned)]
 
-                self._schedule_pending(primary_signal, planned=planned)
+                self._schedule_pending(primary_signal, planned=planned if primary_signal else None)
                 operable_followups = [item for item in ranked_decisions if item is not primary_signal and self._is_operable_candidate(item)]
                 self._schedule_shadows(operable_followups)
 

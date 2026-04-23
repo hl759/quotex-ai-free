@@ -374,7 +374,8 @@ window.saveCapitalState = saveCapitalState;
 function escapeHtml(text){ if(text===null||text===undefined) return ''; return String(text).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;'); }
 function formatText(text){ return escapeHtml(text).replace(/\\n/g,'<br>'); }
 function formatAge(seconds){ const s=Math.max(0, parseInt(seconds||0,10)||0); if(s<60) return '00:'+String(s).padStart(2,'0'); const m=Math.floor(s/60); const r=s%60; return String(m).padStart(2,'0')+':'+String(r).padStart(2,'0'); }
-function badgeInfo(decision, direction){
+function badgeInfo(decision, direction, expired){
+  if(expired) return {cls:'block', text:'EXPIRADO'};
   const dir = direction || 'CALL';
   if(decision==='ENTRADA_FORTE') return {cls: dir==='PUT'?'put':'call', text:'ENTRADA FORTE'};
   if(decision==='ENTRADA_CAUTELA') return {cls: dir==='PUT'?'put':'call', text:'ENTRADA CAUTELA'};
@@ -430,8 +431,10 @@ function renderDashboardDecision(d){
   const c=document.getElementById('dashboard_decision');
   if(!c) return;
   if(!d || !d.decision){ c.innerHTML=`<div class='empty'>Sem decisão disponível agora.</div>`; return; }
-  const b=badgeInfo(d.decision,d.direction);
+  const isExpired = !!(d.expired) || (d.expiration_ts > 0 && (Date.now()/1000) > d.expiration_ts);
+  const b=badgeInfo(d.decision,d.direction,isExpired);
   const conf=Math.max(2, Math.min(100, parseFloat(d.confidence||0)||0));
+  const expiredNote=isExpired ? `<div style='margin-top:8px;font-size:12px;color:var(--muted)'>Sinal expirado • aguardando próximo scan</div>` : '';
   c.innerHTML=`
     <div class='hero-head'>
       <div>
@@ -440,6 +443,7 @@ function renderDashboardDecision(d){
       </div>
       <div class='action-badge ${b.cls}'>✓ ${escapeHtml(b.text)}</div>
     </div>
+    ${expiredNote}
     <div class='stake-chip'>Stake sugerida: ${escapeHtml(d.stake_suggested != null ? d.stake_suggested : (d.stake || '0.0'))}</div>
     <div class='score-row'>
       <div class='score-tile'><div class='label'>Score</div><div class='value'>${escapeHtml(d.score || '0')}</div></div>
@@ -489,7 +493,8 @@ function renderSignals(signals){
 function renderDecision(d){
   const c=document.getElementById('decision_container'); if(!c) return;
   if(!d || !d.decision){ c.innerHTML=`<div class='empty'>Sem decisão disponível agora.</div>`; return; }
-  const b=badgeInfo(d.decision,d.direction);
+  const isExpired = !!(d.expired) || (d.expiration_ts > 0 && (Date.now()/1000) > d.expiration_ts);
+  const b=badgeInfo(d.decision,d.direction,isExpired);
   c.innerHTML=`<div class='signal-card'>
     <div class='decision-head'><div class='asset-name'>${escapeHtml(d.asset || 'MERCADO')}</div><div class='badge ${b.cls}'>${escapeHtml(b.text)}</div></div>
     <div class='grid-2'>
@@ -551,15 +556,19 @@ function applySnapshot(d){
   ){
     saveCachedSnapshot(s);
   }
-  // ON-DEMAND: sem controle de intervalos automáticos.
+  // Decisão ativa: prefere sinal operável, depois current_decision.
+  // Se current_decision está expirado, usa para ativo/regime mas não para horários.
+  const cd = s.current_decision || {};
+  const cdExpired = !!(cd.expired) || (cd.expiration_ts > 0 && (Date.now()/1000) > cd.expiration_ts);
   const liveDecision =
     (s.signals && s.signals[0]) ||
-    ((s.current_decision && s.current_decision.decision) ? s.current_decision : {});
+    ((cd && cd.decision) ? cd : {});
   document.getElementById('top_asset_value').textContent=liveDecision.asset || 'Mercado';
   document.getElementById('top_regime_value').textContent=liveDecision.regime || 'Misto';
-  document.getElementById('dash_analysis').textContent=liveDecision.analysis_time || '--:--';
-  document.getElementById('dash_entry').textContent=liveDecision.entry_time || '--:--';
-  document.getElementById('dash_expiration').textContent=liveDecision.expiration || '--:--';
+  // Mostra horário de análise mesmo para OBSERVAR; limpa quando sinal expirado aguarda novo scan.
+  document.getElementById('dash_analysis').textContent=(!cdExpired && liveDecision.analysis_time) || '--:--';
+  document.getElementById('dash_entry').textContent=(!cdExpired && liveDecision.entry_time) || '--:--';
+  document.getElementById('dash_expiration').textContent=(!cdExpired && liveDecision.expiration) || '--:--';
   document.getElementById('dash_regime').textContent=liveDecision.regime || '--';
   document.getElementById('scan_age_big').textContent=formatAge((s.meta && s.meta.last_scan_age_seconds) || 0);
   const refreshErr = (s.meta && (s.meta.last_snapshot_refresh_error || s.meta.last_scan_error)) || '';

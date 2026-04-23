@@ -179,6 +179,7 @@ class StateStore:
                 except Exception:
                     pass
                 conn = None
+                # Continua para a próxima iteração do loop
             except psycopg2.pool.PoolError:
                 return None  # pool esgotado → SQLite
             except Exception as exc:
@@ -188,16 +189,39 @@ class StateStore:
                         self._pool.putconn(conn, close=True)
                     except Exception:
                         pass
-                # Na segunda falha tenta failover
-                if attempt == 1 and self._failover_to_secondary():
-                    try:
-                        c = self._pool.getconn()
-                        c.autocommit = True
-                        return c
-                    except Exception as exc2:
-                        self.last_error = repr(exc2)
-                return None if attempt == 1 else None
+                if attempt == 1:
+                    # Segunda falha: tenta failover para banco secundário
+                    if self._failover_to_secondary():
+                        try:
+                            c = self._pool.getconn()
+                            c.autocommit = True
+                            return c
+                        except Exception as exc2:
+                            self.last_error = repr(exc2)
+                    return None
+                # attempt == 0: continua para tentativa 1
         return None
+
+    def _is_pg_conn(self, conn) -> bool:
+        """Retorna True se a conexão é realmente PostgreSQL (não SQLite fallback)."""
+        return not isinstance(conn, sqlite3.Connection)
+
+    def _run_with_retry(self, fn):
+        """Executa fn(conn, is_pg) com retry automático em OperationalError SSL."""
+        for attempt in range(2):
+            try:
+                with self._connect() as conn:
+                    return fn(conn, self._is_pg_conn(conn))
+            except Exception as exc:
+                if (
+                    attempt == 0
+                    and _HAS_PSYCOPG2
+                    and isinstance(exc, psycopg2.OperationalError)
+                ):
+                    log.warning("StateStore: SSL error mid-query, retentando (%s)", exc)
+                    continue
+                raise
+        return None  # nunca alcançado normalmente
 
     @contextmanager
     def _connect(self) -> Generator:
@@ -232,8 +256,8 @@ class StateStore:
     # ── Schema ────────────────────────────────────────────────────────────
 
     def _init_schema(self) -> None:
-        with self._connect() as conn:
-            if self.use_postgres:
+        def _create(conn, is_pg):
+            if is_pg:
                 with conn.cursor() as cur:
                     cur.execute("""
                         CREATE TABLE IF NOT EXISTS kv (
@@ -274,20 +298,23 @@ class StateStore:
                         PRIMARY KEY (collection_name, uid)
                     )
                 """)
+        try:
+            self._run_with_retry(_create)
+        except Exception as exc:
+            log.warning("StateStore: falha ao criar schema (%s)", exc)
 
     # ── Serialização ──────────────────────────────────────────────────────
 
-    def _dump(self, value: Any) -> Any:
-        if self.use_postgres:
+    def _dump(self, value: Any, is_pg: bool = True) -> Any:
+        if is_pg:
             return psycopg2.extras.Json(value)
         return json.dumps(value, ensure_ascii=False)
 
-    def _load(self, raw: Any) -> Any:
+    def _load(self, raw: Any, is_pg: bool = True) -> Any:
         if raw is None:
             return None
-        if self.use_postgres:
-            # psycopg2 já desserializa JSONB automaticamente
-            return raw
+        if is_pg:
+            return raw  # psycopg2 já desserializa JSONB automaticamente
         try:
             return json.loads(raw)
         except Exception:
@@ -296,46 +323,52 @@ class StateStore:
     # ── KV Store ─────────────────────────────────────────────────────────
 
     def get_json(self, key: str, default: Any = None) -> Any:
-        with self._connect() as conn:
-            if self.use_postgres:
+        def _q(conn, is_pg):
+            if is_pg:
                 with conn.cursor() as cur:
                     cur.execute("SELECT value_json FROM kv WHERE key=%s", (key,))
                     row = cur.fetchone()
             else:
-                row = conn.execute(
-                    "SELECT value_json FROM kv WHERE key=?", (key,)
-                ).fetchone()
-        value = self._load(row[0] if row else None)
-        return default if value is None else value
+                row = conn.execute("SELECT value_json FROM kv WHERE key=?", (key,)).fetchone()
+            value = self._load(row[0] if row else None, is_pg)
+            return default if value is None else value
+        try:
+            return self._run_with_retry(_q)
+        except Exception:
+            return default
 
     def set_json(self, key: str, value: Any) -> None:
         now = datetime.now(timezone.utc).isoformat()
-        payload = self._dump(value)
-        with self._write_lock:
-            with self._connect() as conn:
-                if self.use_postgres:
-                    with conn.cursor() as cur:
-                        cur.execute(
-                            """
-                            INSERT INTO kv (key, value_json, updated_at)
-                            VALUES (%s, %s, %s)
-                            ON CONFLICT (key) DO UPDATE
-                                SET value_json = EXCLUDED.value_json,
-                                    updated_at = EXCLUDED.updated_at
-                            """,
-                            (key, payload, now),
-                        )
-                else:
-                    conn.execute(
+        def _q(conn, is_pg):
+            payload = self._dump(value, is_pg)
+            if is_pg:
+                with conn.cursor() as cur:
+                    cur.execute(
                         """
                         INSERT INTO kv (key, value_json, updated_at)
-                        VALUES (?, ?, ?)
+                        VALUES (%s, %s, %s)
                         ON CONFLICT (key) DO UPDATE
-                            SET value_json = excluded.value_json,
-                                updated_at = excluded.updated_at
+                            SET value_json = EXCLUDED.value_json,
+                                updated_at = EXCLUDED.updated_at
                         """,
                         (key, payload, now),
                     )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO kv (key, value_json, updated_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT (key) DO UPDATE
+                        SET value_json = excluded.value_json,
+                            updated_at = excluded.updated_at
+                    """,
+                    (key, payload, now),
+                )
+        with self._write_lock:
+            try:
+                self._run_with_retry(_q)
+            except Exception as exc:
+                log.warning("StateStore: set_json falhou (%s)", exc)
 
     # ── Coleções ──────────────────────────────────────────────────────────
 
@@ -347,31 +380,35 @@ class StateStore:
         created_at: Optional[str] = None,
     ) -> bool:
         ts = created_at or datetime.now(timezone.utc).isoformat()
-        raw = self._dump(payload)
+        def _q(conn, is_pg):
+            raw = self._dump(payload, is_pg)
+            if is_pg:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO collection_items
+                            (collection_name, uid, created_at, updated_at, payload_json)
+                        VALUES (%s, %s, %s, %s, %s)
+                        ON CONFLICT (collection_name, uid) DO NOTHING
+                        """,
+                        (collection_name, uid, ts, ts, raw),
+                    )
+                    return (cur.rowcount or 0) > 0
+            cur = conn.execute(
+                """
+                INSERT INTO collection_items
+                    (collection_name, uid, created_at, updated_at, payload_json)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (collection_name, uid) DO NOTHING
+                """,
+                (collection_name, uid, ts, ts, raw),
+            )
+            return (cur.rowcount or 0) > 0
         with self._write_lock:
-            with self._connect() as conn:
-                if self.use_postgres:
-                    with conn.cursor() as cur:
-                        cur.execute(
-                            """
-                            INSERT INTO collection_items
-                                (collection_name, uid, created_at, updated_at, payload_json)
-                            VALUES (%s, %s, %s, %s, %s)
-                            ON CONFLICT (collection_name, uid) DO NOTHING
-                            """,
-                            (collection_name, uid, ts, ts, raw),
-                        )
-                        return (cur.rowcount or 0) > 0
-                cur = conn.execute(
-                    """
-                    INSERT INTO collection_items
-                        (collection_name, uid, created_at, updated_at, payload_json)
-                    VALUES (?, ?, ?, ?, ?)
-                    ON CONFLICT (collection_name, uid) DO NOTHING
-                    """,
-                    (collection_name, uid, ts, ts, raw),
-                )
-                return (cur.rowcount or 0) > 0
+            try:
+                return self._run_with_retry(_q) or False
+            except Exception:
+                return False
 
     def upsert_collection_item(
         self,
@@ -381,41 +418,45 @@ class StateStore:
         created_at: Optional[str] = None,
     ) -> None:
         ts = created_at or datetime.now(timezone.utc).isoformat()
-        raw = self._dump(payload)
-        with self._write_lock:
-            with self._connect() as conn:
-                if self.use_postgres:
-                    with conn.cursor() as cur:
-                        cur.execute(
-                            """
-                            INSERT INTO collection_items
-                                (collection_name, uid, created_at, updated_at, payload_json)
-                            VALUES (%s, %s, %s, %s, %s)
-                            ON CONFLICT (collection_name, uid) DO UPDATE
-                                SET payload_json = EXCLUDED.payload_json,
-                                    updated_at   = EXCLUDED.updated_at
-                            """,
-                            (collection_name, uid, ts, ts, raw),
-                        )
-                else:
-                    conn.execute(
+        def _q(conn, is_pg):
+            raw = self._dump(payload, is_pg)
+            if is_pg:
+                with conn.cursor() as cur:
+                    cur.execute(
                         """
                         INSERT INTO collection_items
                             (collection_name, uid, created_at, updated_at, payload_json)
-                        VALUES (?, ?, ?, ?, ?)
+                        VALUES (%s, %s, %s, %s, %s)
                         ON CONFLICT (collection_name, uid) DO UPDATE
-                            SET payload_json = excluded.payload_json,
-                                updated_at   = excluded.updated_at
+                            SET payload_json = EXCLUDED.payload_json,
+                                updated_at   = EXCLUDED.updated_at
                         """,
                         (collection_name, uid, ts, ts, raw),
                     )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO collection_items
+                        (collection_name, uid, created_at, updated_at, payload_json)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT (collection_name, uid) DO UPDATE
+                        SET payload_json = excluded.payload_json,
+                            updated_at   = excluded.updated_at
+                    """,
+                    (collection_name, uid, ts, ts, raw),
+                )
+        with self._write_lock:
+            try:
+                self._run_with_retry(_q)
+            except Exception as exc:
+                log.warning("StateStore: upsert_collection_item falhou (%s)", exc)
 
     def list_collection(
         self, collection_name: str, limit: int = 200
     ) -> List[Dict[str, Any]]:
         limit = max(1, int(limit))
-        with self._connect() as conn:
-            if self.use_postgres:
+        def _q(conn, is_pg):
+            if is_pg:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
@@ -437,13 +478,17 @@ class StateStore:
                     """,
                     (collection_name, limit),
                 ).fetchall()
-        return [v for row in (rows or []) if (v := self._load(row[0])) is not None]
+            return [v for row in (rows or []) if (v := self._load(row[0], is_pg)) is not None]
+        try:
+            return self._run_with_retry(_q) or []
+        except Exception:
+            return []
 
     def get_collection_item(
         self, collection_name: str, uid: str, default: Any = None
     ) -> Any:
-        with self._connect() as conn:
-            if self.use_postgres:
+        def _q(conn, is_pg):
+            if is_pg:
                 with conn.cursor() as cur:
                     cur.execute(
                         "SELECT payload_json FROM collection_items WHERE collection_name=%s AND uid=%s",
@@ -455,8 +500,12 @@ class StateStore:
                     "SELECT payload_json FROM collection_items WHERE collection_name=? AND uid=?",
                     (collection_name, uid),
                 ).fetchone()
-        value = self._load(row[0] if row else None)
-        return default if value is None else value
+            value = self._load(row[0] if row else None, is_pg)
+            return default if value is None else value
+        try:
+            return self._run_with_retry(_q)
+        except Exception:
+            return default
 
     # ── Pruning ───────────────────────────────────────────────────────────
 
@@ -466,52 +515,50 @@ class StateStore:
         keep_latest: int = 4000,
         max_age_days: int = 90,
     ) -> int:
-        """
-        Remove registros antigos ou excedentes de uma coleção.
-        Chamado periodicamente para manter o banco dentro do plano gratuito da Aiven.
-        """
         keep_latest = max(100, int(keep_latest))
         cutoff = (datetime.utcnow() - timedelta(days=max_age_days)).isoformat()
-        removed = 0
-        with self._write_lock:
-            with self._connect() as conn:
-                if self.use_postgres:
-                    with conn.cursor() as cur:
-                        cur.execute(
-                            """
-                            DELETE FROM collection_items
-                            WHERE collection_name = %s
-                              AND (
-                                  created_at < %s
-                                  OR uid NOT IN (
-                                      SELECT uid FROM collection_items
-                                      WHERE collection_name = %s
-                                      ORDER BY updated_at DESC
-                                      LIMIT %s
-                                  )
-                              )
-                            """,
-                            (collection_name, cutoff, collection_name, keep_latest),
-                        )
-                        removed = cur.rowcount or 0
-                else:
-                    cur = conn.execute(
+        def _q(conn, is_pg):
+            if is_pg:
+                with conn.cursor() as cur:
+                    cur.execute(
                         """
                         DELETE FROM collection_items
-                        WHERE collection_name = ?
+                        WHERE collection_name = %s
                           AND (
-                              created_at < ?
+                              created_at < %s
                               OR uid NOT IN (
                                   SELECT uid FROM collection_items
-                                  WHERE collection_name = ?
+                                  WHERE collection_name = %s
                                   ORDER BY updated_at DESC
-                                  LIMIT ?
+                                  LIMIT %s
                               )
                           )
                         """,
                         (collection_name, cutoff, collection_name, keep_latest),
                     )
-                    removed = cur.rowcount or 0
+                    return cur.rowcount or 0
+            cur = conn.execute(
+                """
+                DELETE FROM collection_items
+                WHERE collection_name = ?
+                  AND (
+                      created_at < ?
+                      OR uid NOT IN (
+                          SELECT uid FROM collection_items
+                          WHERE collection_name = ?
+                          ORDER BY updated_at DESC
+                          LIMIT ?
+                      )
+                  )
+                """,
+                (collection_name, cutoff, collection_name, keep_latest),
+            )
+            return cur.rowcount or 0
+        with self._write_lock:
+            try:
+                removed = self._run_with_retry(_q) or 0
+            except Exception:
+                removed = 0
         if removed:
             log.info("StateStore: pruning '%s' removeu %d registros", collection_name, removed)
         return int(removed)

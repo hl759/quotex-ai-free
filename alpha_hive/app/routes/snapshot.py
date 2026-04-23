@@ -17,4 +17,7 @@ def home():
 def snapshot():
     scan_service = current_app.config["SCAN_SERVICE"]
     scan_service.maybe_cleanup_idle()
-    return jsonify(snapshot_service.build(scan_service.snapshot()))
+    # Passa o relatório já cacheado (30s TTL) — evita criar nova instância
+    # pesada de EdgeAuditEngine a cada ping do UptimeRobot/BetterStack.
+    audit_report = scan_service.audit.compute_report()
+    return jsonify(snapshot_service.build(scan_service.snapshot(), audit_report=audit_report))
