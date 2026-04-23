@@ -42,9 +42,6 @@ class Settings:
     # 60s = scan a cada expiração M1. Padrão: 60s para Render free.
     scan_interval_seconds: int = int(os.getenv("SCAN_INTERVAL_SECONDS", "60"))
 
-    # Mesmo intervalo para coleta de velas (PassiveWatcher).
-    passive_interval_seconds: int = int(os.getenv("PASSIVE_INTERVAL_SECONDS", "60"))
-
     # 1 worker conserva RAM no Render free (512 MB).
     scanner_max_workers: int = int(os.getenv("SCANNER_MAX_WORKERS", "1"))
 

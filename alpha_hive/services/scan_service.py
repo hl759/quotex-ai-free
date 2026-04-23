@@ -17,7 +17,6 @@ from alpha_hive.core.contracts import FinalDecision, MarketSnapshot
 from alpha_hive.learning.learning_engine import LearningEngine
 from alpha_hive.learning.specialist_reputation_engine import SpecialistReputationEngine
 from alpha_hive.market.scanner import MarketScanner
-from alpha_hive.market.passive_watcher import PassiveWatcher
 from alpha_hive.services.capital_service import CapitalService
 from alpha_hive.storage.state_store import get_state_store
 
@@ -29,12 +28,10 @@ PENDING_COLLECTION = "pending_signals_v2"
 
 class ScanService:
     def __init__(self):
-        self.passive_watcher = PassiveWatcher()
-        self.scanner = MarketScanner(self.passive_watcher._data)  # DataManager compartilhado
+        # Scanner direto — sem PassiveWatcher. Dados buscados frescos a cada ciclo
+        # e liberados imediatamente após o scan. Zero buffers de velas em RAM.
+        self.scanner = MarketScanner()
 
-        # ENGINES STATEFUL — ficam em RAM entre scans (estado acumulado em DB).
-        # LearningEngine e SpecialistReputationEngine carregam dados do SQLite no
-        # __init__ e salvam de volta a cada update. São leves (~100-500 KB cada).
         self.capital_service = CapitalService()
         self.learning = LearningEngine()
         self.specialists = SpecialistReputationEngine()
@@ -686,10 +683,7 @@ class ScanService:
                 _signal_engine = SignalEngine()
                 self._scan_result_engine = ResultEngine()
 
-                if self._started:
-                    snapshots = self._snapshots_from_passive()
-                else:
-                    snapshots = self.scanner.scan_assets()
+                snapshots = self.scanner.scan_assets()
 
                 evaluated_count = self._liquidate_pending(snapshots)
 
@@ -774,6 +768,7 @@ class ScanService:
                     del _signal_engine
                 self._scan_result_engine = None
                 meta["scan_in_progress"] = False
+                self._release_market_memory()
                 gc.collect()
 
     def snapshot(self) -> Dict[str, object]:
@@ -788,53 +783,8 @@ class ScanService:
         meta.setdefault("last_scan_error", "")
         return self.runtime
 
-    def _snapshots_from_passive(self):
-        from alpha_hive.core.contracts import MarketSnapshot
-        contexts = self.passive_watcher.get_all_contexts()
-        asset_order = {a: i for i, a in enumerate(SETTINGS.assets)}
-        snapshots = []
-        stale_assets = []
-
-        for asset, ctx in contexts.items():
-            if ctx.is_initialized and ctx.is_fresh and len(ctx.candles_m1) >= 12:
-                candles_m1 = list(ctx.candles_m1)
-                candles_m5 = list(ctx.candles_m5)
-                mt = "crypto" if asset in SETTINGS.assets_crypto or asset in SETTINGS.assets_pure_crypto else "forex" if asset in SETTINGS.assets_forex else "metals"
-                snap = MarketSnapshot(
-                    asset=asset, market_type=mt, provider=ctx.provider,
-                    provider_fallback_chain=ctx.provider_chain,
-                    data_quality_score=ctx.data_quality_score,
-                    data_quality_state=ctx.data_quality_state,
-                    candles_m1=candles_m1, candles_m5=candles_m5,
-                    warnings=ctx.warnings, display_asset=asset,
-                    source_symbol=getattr(ctx, "source_symbol", asset),
-                    source_kind=getattr(ctx, "source_kind", "standard"),
-                )
-                snapshots.append(snap)
-            else:
-                stale_assets.append(asset)
-
-        # Ativos sem dados frescos: scan paralelo (não sequencial)
-        if stale_assets:
-            fresh = self.scanner.scan_assets(stale_assets)
-            snapshots.extend(fresh)
-
-        # Passive não retornou nada: scan completo paralelo
-        if not snapshots:
-            snapshots = self.scanner.scan_assets()
-
-        snapshots.sort(key=lambda s: asset_order.get(s.asset, 10**9))
-        return snapshots
-
     def _release_market_memory(self) -> None:
-        """
-        Libera dados de mercado brutos após cada scan on-demand.
-        Candles, contextos e cache HTTP não precisam ficar em RAM entre operações.
-        """
-        try:
-            self.passive_watcher.clear_contexts()
-        except Exception:
-            pass
+        """Libera cache HTTP do DataManager após cada ciclo."""
         try:
             self.scanner.data.clear_cache()
         except Exception:
@@ -856,12 +806,23 @@ class ScanService:
             self.runtime["history"] = history[:5]
         gc.collect()
 
-    def _passive_diagnostics(self):
-        return self.passive_watcher.diagnostics()
-
     def ensure_started(self):
-        """Inicia PassiveWatcher em background."""
+        """Inicia o loop autônomo de scan em background."""
         if self._started:
             return
-        self.passive_watcher.ensure_started()
         self._started = True
+        t = threading.Thread(target=self._background_loop, daemon=True, name="scan-loop")
+        t.start()
+        log.info("ScanService: loop autônomo iniciado (intervalo=%ds)", SETTINGS.scan_interval_seconds)
+
+    def _background_loop(self):
+        """Loop infinito: executa run_once() a cada scan_interval_seconds.
+        Dados buscados, processados e liberados da RAM a cada ciclo."""
+        while True:
+            try:
+                self.run_once("auto")
+            except Exception as exc:
+                log.warning("ScanService: erro no ciclo de scan (%s)", exc)
+            finally:
+                gc.collect()
+            time.sleep(SETTINGS.scan_interval_seconds)
