@@ -110,6 +110,11 @@ class StateStore:
                 _PG_POOL_MAX,
                 dsn=safe_url,
                 connect_timeout=8,
+                # TCP keepalive — mantém conexões vivas no Aiven (que fecha após ~5 min ociosas)
+                keepalives=1,
+                keepalives_idle=30,
+                keepalives_interval=10,
+                keepalives_count=5,
             )
             conn = self._pool.getconn()
             self._pool.putconn(conn)
@@ -129,6 +134,10 @@ class StateStore:
                 _PG_POOL_MIN,
                 _PG_POOL_MAX,
                 dsn=safe_url,
+                keepalives=1,
+                keepalives_idle=30,
+                keepalives_interval=10,
+                keepalives_count=5,
                 connect_timeout=8,
             )
             conn = self._pool_2.getconn()
@@ -145,25 +154,50 @@ class StateStore:
             self._pool_2 = None
             log.warning("StateStore: falha no PostgreSQL secundário (%s)", exc)
 
-    def _acquire_pg_conn(self):
-        """Adquire conexão do pool primário, com failover para secundário se necessário."""
+    def _validate_conn(self, conn) -> bool:
+        """Verifica se a conexão ainda está viva com SELECT 1."""
         try:
-            conn = self._pool.getconn()
-            conn.autocommit = True
-            return conn
-        except psycopg2.pool.PoolError:
-            return None  # pool esgotado → cai para SQLite
-        except Exception as exc:
-            self.last_error = repr(exc)
-            if self._failover_to_secondary():
-                try:
-                    conn = self._pool.getconn()
-                    conn.autocommit = True
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+            return True
+        except Exception:
+            return False
+
+    def _acquire_pg_conn(self):
+        """Adquire e valida conexão do pool. Descarta conexões mortas (SSL stale)."""
+        for attempt in range(2):
+            conn = None
+            try:
+                conn = self._pool.getconn()
+                conn.autocommit = True
+                if self._validate_conn(conn):
                     return conn
-                except Exception as exc2:
-                    self.last_error = repr(exc2)
-                    return None
-            return None
+                # Conexão morta — descarta e tenta de novo
+                log.warning("StateStore: conexão obsoleta descartada (tentativa %d)", attempt + 1)
+                try:
+                    self._pool.putconn(conn, close=True)
+                except Exception:
+                    pass
+                conn = None
+            except psycopg2.pool.PoolError:
+                return None  # pool esgotado → SQLite
+            except Exception as exc:
+                self.last_error = repr(exc)
+                if conn is not None:
+                    try:
+                        self._pool.putconn(conn, close=True)
+                    except Exception:
+                        pass
+                # Na segunda falha tenta failover
+                if attempt == 1 and self._failover_to_secondary():
+                    try:
+                        c = self._pool.getconn()
+                        c.autocommit = True
+                        return c
+                    except Exception as exc2:
+                        self.last_error = repr(exc2)
+                return None if attempt == 1 else None
+        return None
 
     @contextmanager
     def _connect(self) -> Generator:
