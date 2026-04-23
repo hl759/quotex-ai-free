@@ -824,5 +824,7 @@ class ScanService:
             except Exception as exc:
                 log.warning("ScanService: erro no ciclo de scan (%s)", exc)
             finally:
+                self.learning.release()
+                self.specialists.release()
                 gc.collect()
             time.sleep(SETTINGS.scan_interval_seconds)
