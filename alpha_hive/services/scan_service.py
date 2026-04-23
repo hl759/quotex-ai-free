@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import gc
 import logging
-import os
 import threading
 import time
-import urllib.request
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -687,6 +685,14 @@ class ScanService:
 
                 snapshots = self.scanner.scan_assets()
 
+                # Registra horário do scan logo após os dados serem buscados.
+                # Assim mesmo que a fase de decisão falhe, o usuário vê dados frescos.
+                fetch_ts = time.time()
+                meta["last_scan"] = now_brazil().strftime("%H:%M:%S")
+                meta["last_scan_ts"] = fetch_ts
+                meta["asset_count"] = len(snapshots)
+                meta["last_scan_age_seconds"] = 0
+
                 evaluated_count = self._liquidate_pending(snapshots)
 
                 capital = self.capital_service.get()
@@ -726,12 +732,8 @@ class ScanService:
 
                 pending_total, pending_expired = self._count_pending_state()
                 finished_at = time.time()
-                meta["last_scan"] = now_brazil().strftime("%H:%M:%S")
-                meta["last_scan_ts"] = finished_at
                 meta["scan_count"] = int(meta.get("scan_count", 0) or 0) + 1
                 meta["signal_count"] = len(signals)
-                meta["asset_count"] = len(snapshots)
-                meta["last_scan_age_seconds"] = 0
                 meta["last_scan_duration_ms"] = int((finished_at - started) * 1000)
                 meta["last_scan_trigger"] = trigger
                 meta["pending_total"] = pending_total
@@ -817,24 +819,9 @@ class ScanService:
         t.start()
         log.info("ScanService: loop autônomo iniciado (intervalo=%ds)", SETTINGS.scan_interval_seconds)
 
-    def _self_ping(self) -> None:
-        """Faz uma requisição HTTP para localhost, mantendo o Render free acordado.
-        Sem isso o Render mata o processo após 15 min sem requisições externas."""
-        try:
-            port = int(os.getenv("PORT", "10000"))
-            req = urllib.request.Request(
-                f"http://127.0.0.1:{port}/health",
-                headers={"User-Agent": "alpha-hive-keepalive"},
-            )
-            urllib.request.urlopen(req, timeout=5)
-        except Exception:
-            pass
-
     def _background_loop(self):
-        """Loop infinito: executa run_once() a cada scan_interval_seconds.
-        Faz self-ping antes de cada ciclo para evitar que o Render free durma."""
+        """Loop infinito: executa run_once() a cada scan_interval_seconds."""
         while True:
-            self._self_ping()
             try:
                 self.run_once("auto")
             except Exception as exc:
