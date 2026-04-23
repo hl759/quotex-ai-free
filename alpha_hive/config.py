@@ -15,22 +15,22 @@ class Settings:
         s.strip() for s in
         os.getenv(
             "ASSETS_CRYPTO",
-            "BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,LTCUSDT,LINKUSDT,AVAXUSDT,MATICUSDT"
+            "BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,DOGEUSDT,ADAUSDT"
         ).split(",")
         if s.strip()
     ])
 
-    # Cripto OTC/nomeados (Yahoo Finance) — 3 ativos principais.
+    # Cripto OTC/nomeados (Yahoo Finance) — 5 ativos.
     assets_pure_crypto: List[str] = field(default_factory=lambda: [
         s.strip() for s in
-        os.getenv("ASSETS_PURE_CRYPTO", "BITCOIN,ETHEREUM,SOLANA").split(",")
+        os.getenv("ASSETS_PURE_CRYPTO", "BITCOIN,ETHEREUM,SOLANA,BNB,XRP").split(",")
         if s.strip()
     ])
 
-    # Forex
+    # Forex — 4 pares mais líquidos em M1.
     assets_forex: List[str] = field(default_factory=lambda: [
         s.strip() for s in
-        os.getenv("ASSETS_FOREX", "EURUSD,GBPUSD").split(",")
+        os.getenv("ASSETS_FOREX", "EURUSD,GBPUSD,USDJPY,GBPJPY").split(",")
         if s.strip()
     ])
 
