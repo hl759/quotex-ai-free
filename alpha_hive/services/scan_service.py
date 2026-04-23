@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import gc
 import logging
+import os
 import threading
 import time
+import urllib.request
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -815,10 +817,24 @@ class ScanService:
         t.start()
         log.info("ScanService: loop autônomo iniciado (intervalo=%ds)", SETTINGS.scan_interval_seconds)
 
+    def _self_ping(self) -> None:
+        """Faz uma requisição HTTP para localhost, mantendo o Render free acordado.
+        Sem isso o Render mata o processo após 15 min sem requisições externas."""
+        try:
+            port = int(os.getenv("PORT", "10000"))
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{port}/health",
+                headers={"User-Agent": "alpha-hive-keepalive"},
+            )
+            urllib.request.urlopen(req, timeout=5)
+        except Exception:
+            pass
+
     def _background_loop(self):
         """Loop infinito: executa run_once() a cada scan_interval_seconds.
-        Dados buscados, processados e liberados da RAM a cada ciclo."""
+        Faz self-ping antes de cada ciclo para evitar que o Render free durma."""
         while True:
+            self._self_ping()
             try:
                 self.run_once("auto")
             except Exception as exc:

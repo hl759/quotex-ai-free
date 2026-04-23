@@ -422,7 +422,7 @@ function updateLiveBadge(meta){
   if(age<=0 || !meta.last_scan || meta.last_scan==='--'){
     el.textContent='● ATIVO'; if(status) status.textContent='Aguardando scan'; return;
   }
-  if(age>=staleAfterSeconds){ el.textContent='● ATIVO'; if(status) status.textContent='Próximo scan'; return; }
+  if(age>=staleAfterSeconds){ el.textContent='● ATIVO'; if(status) status.textContent='Reconectando...'; return; }
   el.textContent='● ATUALIZADO ' + formatAge(age);
   if(status) status.textContent='Automático';
 }
@@ -599,8 +599,8 @@ function applySnapshot(d){
   renderStatsPanel(s);
   fillCapitalForm(s.capital_state || {});
   updateLiveBadge(s.meta || {});
+  window._lastMeta = s.meta || {};
   document.body.classList.remove('pre-hydrate');
-  // ON-DEMAND: sem startAutoRefresh(), sem polling de background.
 }
 async function refreshSnapshot(silent){
   if(refreshInFlight) return;
@@ -664,9 +664,13 @@ document.addEventListener('DOMContentLoaded', function(){
   // Leitura inicial ao abrir (sem scan)
   setTimeout(()=>refreshSnapshot(true), 300);
 
-  // Auto-refresh silencioso a cada 2 minutos — mostra o último scan do backend
-  // sem disparar novo scan. Compatível com background scanner e on-demand.
-  setInterval(()=>{ if(!document.hidden) refreshSnapshot(true); }, 120000);
+  // Auto-refresh dinâmico: 30s quando dados estão velhos, 60s quando frescos.
+  // Mantém a UI atualizada logo após o backend acordar no Render.
+  (function scheduleRefresh(){
+    const age = parseInt((window._lastMeta && window._lastMeta.last_scan_age_seconds) || 9999, 10);
+    const interval = (age > staleAfterSeconds) ? 30000 : 60000;
+    setTimeout(()=>{ if(!document.hidden) refreshSnapshot(true); scheduleRefresh(); }, interval);
+  })();
 
   // Atualiza exibição ao voltar para a aba
   document.addEventListener('visibilitychange', ()=>{
