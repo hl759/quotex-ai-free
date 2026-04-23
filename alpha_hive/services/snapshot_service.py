@@ -211,8 +211,10 @@ class SnapshotService:
             "journal_total": journal_total,
         }
 
-    def build(self, runtime: dict):
-        report = self._audit().compute_report()
+    def build(self, runtime: dict, audit_report: dict | None = None):
+        # Reutiliza relatório já computado (com cache 30s) para evitar criar
+        # nova instância de EdgeAuditEngine a cada request do UptimeRobot/BetterStack.
+        report = audit_report if audit_report is not None else self._audit().compute_report()
         learning_stats = self._coalesce_learning_stats(report)
 
         current = self._adapt_decision(runtime.get("current_decision", {}) or {})
