@@ -37,34 +37,23 @@ class Settings:
         if s.strip()
     ])
 
-    # ─── SCANNER ─────────────────────────────────────────────────────────────
-    # 600s = 10 min entre scans no background mode. Conservador para Render free
-    # (512 MB RAM, 0.1 vCPU). Reduza para 300s se quiser scans mais frequentes.
-    passive_interval_seconds: int = int(os.getenv("PASSIVE_INTERVAL_SECONDS", "600"))
+    # ─── SCANNER AUTÔNOMO ────────────────────────────────────────────────────
+    # A IA escaneia automaticamente a cada scan_interval_seconds.
+    # 60s = scan a cada expiração M1. Padrão: 60s para Render free.
+    scan_interval_seconds: int = int(os.getenv("SCAN_INTERVAL_SECONDS", "60"))
 
-    scan_interval_seconds: int = int(os.getenv("SCAN_INTERVAL_SECONDS", "600"))
+    # Mesmo intervalo para coleta de velas (PassiveWatcher).
+    passive_interval_seconds: int = int(os.getenv("PASSIVE_INTERVAL_SECONDS", "60"))
 
-    # Padrão ultra conservador para evitar pico de RAM em instâncias free.
+    # 1 worker conserva RAM no Render free (512 MB).
     scanner_max_workers: int = int(os.getenv("SCANNER_MAX_WORKERS", "1"))
 
-    # Modo on-demand em instância free: limita o lote para não matar o worker.
-    on_demand_scan_asset_limit: int = int(os.getenv("ON_DEMAND_SCAN_ASSET_LIMIT", "5"))
-    on_demand_scanner_max_workers: int = int(os.getenv("ON_DEMAND_SCANNER_MAX_WORKERS", "1"))
-
-    # ─── UI / POLLING ────────────────────────────────────────────────────────
-    # RENDER FREE: frontend atualiza a cada 90s (bem acima do scan_interval)
-    ui_auto_refresh_seconds: int = int(os.getenv("UI_AUTO_REFRESH_SECONDS", "90"))
-    ui_stale_after_seconds: int = int(os.getenv("UI_STALE_AFTER_SECONDS", "480"))
-    ui_force_scan_after_seconds: int = int(os.getenv("UI_FORCE_SCAN_AFTER_SECONDS", "600"))
-
-    # Cooldown entre scans manuais. 30s no modo on-demand (era 180s para background).
-    request_scan_min_interval_seconds: int = int(
-        os.getenv("REQUEST_SCAN_MIN_INTERVAL_SECONDS", "30")
-    )
+    # ─── UI ──────────────────────────────────────────────────────────────────
+    ui_auto_refresh_seconds: int = int(os.getenv("UI_AUTO_REFRESH_SECONDS", "60"))
+    ui_stale_after_seconds: int = int(os.getenv("UI_STALE_AFTER_SECONDS", "300"))
+    ui_force_scan_after_seconds: int = int(os.getenv("UI_FORCE_SCAN_AFTER_SECONDS", "120"))
 
     signal_min_lead_seconds: int = int(os.getenv("SIGNAL_MIN_LEAD_SECONDS", "18"))
-
-    # Tempo sem scan para ativar limpeza de histórico em idle (padrão: 10 min)
     inactivity_timeout_seconds: int = int(os.getenv("INACTIVITY_TIMEOUT_SECONDS", "600"))
 
     # ─── QUALIDADE DE DADOS ──────────────────────────────────────────────────
@@ -79,14 +68,9 @@ class Settings:
     app_name: str = os.getenv("APP_NAME", "Alpha Hive AI")
     port: int = int(os.getenv("PORT", "10000"))
 
-    # ON-DEMAND MODE é o padrão (0): PassiveWatcher não roda em background.
-    # Ativa modo background com RUN_BACKGROUND_SCANNER=1 (mais RAM e bandwidth).
+    # Scanner autônomo sempre ativo — pode desligar com RUN_BACKGROUND_SCANNER=0
     run_background_scanner: bool = (
-        os.getenv("RUN_BACKGROUND_SCANNER", "0").strip().lower()
-        not in ("0", "false", "no")
-    )
-    scan_route_enabled: bool = (
-        os.getenv("SCAN_ROUTE_ENABLED", "1").strip().lower()
+        os.getenv("RUN_BACKGROUND_SCANNER", "1").strip().lower()
         not in ("0", "false", "no")
     )
     scan_trigger_token: str = os.getenv("SCAN_TRIGGER_TOKEN", "").strip()

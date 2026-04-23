@@ -317,11 +317,7 @@ class ScanService:
         if self._has_expired_pending(now_ts):
             return True
 
-        if not SETTINGS.run_background_scanner:
-            request_min_interval = max(15, int(getattr(SETTINGS, "request_scan_min_interval_seconds", 25) or 25))
-            if scan_age >= request_min_interval:
-                return True
-        elif scan_age >= max(15, SETTINGS.scan_interval_seconds):
+        if scan_age >= max(15, SETTINGS.scan_interval_seconds):
             return True
 
         return False
@@ -690,7 +686,7 @@ class ScanService:
                 _signal_engine = SignalEngine()
                 self._scan_result_engine = ResultEngine()
 
-                if SETTINGS.run_background_scanner and self._started:
+                if self._started:
                     snapshots = self._snapshots_from_passive()
                 else:
                     snapshots = self.scanner.scan_assets()
@@ -751,8 +747,6 @@ class ScanService:
                 self.runtime["current_decision"] = current_payload
                 self._persist_runtime()
 
-                if not SETTINGS.run_background_scanner:
-                    self._release_market_memory()
 
                 return {
                     "ok": True,
@@ -780,8 +774,7 @@ class ScanService:
                     del _signal_engine
                 self._scan_result_engine = None
                 meta["scan_in_progress"] = False
-                if not SETTINGS.run_background_scanner:
-                    gc.collect()
+                gc.collect()
 
     def snapshot(self) -> Dict[str, object]:
         meta = self._meta()
@@ -867,9 +860,8 @@ class ScanService:
         return self.passive_watcher.diagnostics()
 
     def ensure_started(self):
-        """Inicia PassiveWatcher apenas no modo background (RUN_BACKGROUND_SCANNER=1)."""
+        """Inicia PassiveWatcher em background."""
         if self._started:
             return
-        if SETTINGS.run_background_scanner:
-            self.passive_watcher.ensure_started()
-            self._started = True
+        self.passive_watcher.ensure_started()
+        self._started = True
