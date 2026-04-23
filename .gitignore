@@ -13,3 +13,6 @@ build/
 .pytest_cache/
 .coverage
 htmlcov/
+data/
+*.db
+*.sqlite3
