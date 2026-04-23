@@ -46,8 +46,9 @@ class Settings:
     # 60s = scan a cada expiração M1. Padrão: 60s para Render free.
     scan_interval_seconds: int = int(os.getenv("SCAN_INTERVAL_SECONDS", "60"))
 
-    # 1 worker conserva RAM no Render free (512 MB).
-    scanner_max_workers: int = int(os.getenv("SCANNER_MAX_WORKERS", "1"))
+    # 3 workers paralelos: HTTP I/O libera o GIL, então 3 threads concorrem sem
+    # uso real de CPU extra. Reduz scan de ~80-105s (1 worker) para ~25-35s.
+    scanner_max_workers: int = int(os.getenv("SCANNER_MAX_WORKERS", "3"))
 
     # ─── UI ──────────────────────────────────────────────────────────────────
     ui_auto_refresh_seconds: int = int(os.getenv("UI_AUTO_REFRESH_SECONDS", "60"))
