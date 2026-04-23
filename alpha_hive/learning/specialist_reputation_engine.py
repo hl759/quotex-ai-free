@@ -13,13 +13,25 @@ LEGACY_STORE_KEY = "specialist_reputation"
 class SpecialistReputationEngine:
     def __init__(self):
         self.store = get_state_store()
+        self._memory: dict | None = None
+
+    def _load_memory(self) -> dict:
         memory = self.store.get_json(STORE_KEY, None)
         if not isinstance(memory, dict) or not memory:
             memory = self.store.get_json(LEGACY_STORE_KEY, {"segments": {}})
         if not isinstance(memory, dict):
             memory = {"segments": {}}
         memory.setdefault("segments", {})
-        self.memory = memory
+        return memory
+
+    @property
+    def memory(self) -> dict:
+        if self._memory is None:
+            self._memory = self._load_memory()
+        return self._memory
+
+    def release(self) -> None:
+        self._memory = None
 
     def _save(self) -> None:
         self.store.set_json(STORE_KEY, self.memory)

@@ -30,13 +30,11 @@ services:
     name: alpha-hive-backend
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --workers 1 --threads 1 --bind 0.0.0.0:$PORT --timeout 180 --keep-alive 5 --max-requests 200 --max-requests-jitter 20 app:app
+    startCommand: gunicorn --workers 1 --threads 2 --bind 0.0.0.0:$PORT --timeout 180 --keep-alive 5 app:app
     envVars:
       - key: DATABASE_URL
         sync: false   # Defina manualmente no painel do Render
       - key: CORS_ORIGINS
         value: ""     # Ex: https://alpha-hive-static.onrender.com
       - key: SCANNER_MAX_WORKERS
-        value: "1"
-      - key: ON_DEMAND_SCANNER_MAX_WORKERS
-        value: "1"
+        value: "3"

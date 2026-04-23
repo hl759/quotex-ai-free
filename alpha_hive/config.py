@@ -8,62 +8,54 @@ from typing import List
 @dataclass(frozen=True)
 class Settings:
     # ─── ATIVOS ──────────────────────────────────────────────────────────────
-    # Defaults conservadores para instância free: menos ativos = menos RAM/bandwidth.
-    # Quem quiser ampliar pode sobrescrever via env vars no Render.
+    # 11 pares USDT (Binance) — os mais líquidos e voláteis em M1.
+    # Ciclo estimado: ~55s scan + 60s sleep = ~2min por varredura completa.
+    # Sobrescreva via env var ASSETS_CRYPTO no Render se quiser personalizar.
     assets_crypto: List[str] = field(default_factory=lambda: [
         s.strip() for s in
-        os.getenv("ASSETS_CRYPTO", "BTCUSDT,ETHUSDT,XRPUSDT").split(",")
+        os.getenv(
+            "ASSETS_CRYPTO",
+            "BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,DOGEUSDT,ADAUSDT"
+        ).split(",")
         if s.strip()
     ])
 
-    # Instrumentos OTC/nomeados da EBINEX — dados via Yahoo Finance (BTC-USD etc.)
+    # Cripto OTC/nomeados (Yahoo Finance) — 5 ativos.
     assets_pure_crypto: List[str] = field(default_factory=lambda: [
         s.strip() for s in
-        os.getenv("ASSETS_PURE_CRYPTO", "BITCOIN").split(",")
+        os.getenv("ASSETS_PURE_CRYPTO", "BITCOIN,ETHEREUM,SOLANA,BNB,XRP").split(",")
         if s.strip()
     ])
 
-    # Forex disponíveis na EBINEX
+    # Forex — 4 pares mais líquidos em M1.
     assets_forex: List[str] = field(default_factory=lambda: [
         s.strip() for s in
-        os.getenv("ASSETS_FOREX", "EURUSD,GBPUSD").split(",")
+        os.getenv("ASSETS_FOREX", "EURUSD,GBPUSD,USDJPY,GBPJPY").split(",")
         if s.strip()
     ])
 
-    # Metais
+    # Metais (ex: XAUUSD) — vazio por padrão
     assets_metals: List[str] = field(default_factory=lambda: [
         s.strip() for s in
         os.getenv("ASSETS_METALS", "").split(",")
         if s.strip()
     ])
 
-    # ─── SCANNER ─────────────────────────────────────────────────────────────
-    # RENDER FREE: 300s = 5 min entre scans. Mude via env var se quiser.
-    passive_interval_seconds: int = int(os.getenv("PASSIVE_INTERVAL_SECONDS", "300"))
+    # ─── SCANNER AUTÔNOMO ────────────────────────────────────────────────────
+    # A IA escaneia automaticamente a cada scan_interval_seconds.
+    # 60s = scan a cada expiração M1. Padrão: 60s para Render free.
+    scan_interval_seconds: int = int(os.getenv("SCAN_INTERVAL_SECONDS", "60"))
 
-    scan_interval_seconds: int = int(os.getenv("SCAN_INTERVAL_SECONDS", "300"))
+    # 3 workers paralelos: HTTP I/O libera o GIL, então 3 threads concorrem sem
+    # uso real de CPU extra. Reduz scan de ~80-105s (1 worker) para ~25-35s.
+    scanner_max_workers: int = int(os.getenv("SCANNER_MAX_WORKERS", "3"))
 
-    # Padrão ultra conservador para evitar pico de RAM em instâncias free.
-    scanner_max_workers: int = int(os.getenv("SCANNER_MAX_WORKERS", "1"))
-
-    # Modo on-demand em instância free: limita o lote para não matar o worker.
-    on_demand_scan_asset_limit: int = int(os.getenv("ON_DEMAND_SCAN_ASSET_LIMIT", "5"))
-    on_demand_scanner_max_workers: int = int(os.getenv("ON_DEMAND_SCANNER_MAX_WORKERS", "1"))
-
-    # ─── UI / POLLING ────────────────────────────────────────────────────────
-    # RENDER FREE: frontend atualiza a cada 90s (bem acima do scan_interval)
-    ui_auto_refresh_seconds: int = int(os.getenv("UI_AUTO_REFRESH_SECONDS", "90"))
-    ui_stale_after_seconds: int = int(os.getenv("UI_STALE_AFTER_SECONDS", "480"))
-    ui_force_scan_after_seconds: int = int(os.getenv("UI_FORCE_SCAN_AFTER_SECONDS", "600"))
-
-    # Cooldown entre scans manuais. 30s no modo on-demand (era 180s para background).
-    request_scan_min_interval_seconds: int = int(
-        os.getenv("REQUEST_SCAN_MIN_INTERVAL_SECONDS", "30")
-    )
+    # ─── UI ──────────────────────────────────────────────────────────────────
+    ui_auto_refresh_seconds: int = int(os.getenv("UI_AUTO_REFRESH_SECONDS", "60"))
+    ui_stale_after_seconds: int = int(os.getenv("UI_STALE_AFTER_SECONDS", "300"))
+    ui_force_scan_after_seconds: int = int(os.getenv("UI_FORCE_SCAN_AFTER_SECONDS", "120"))
 
     signal_min_lead_seconds: int = int(os.getenv("SIGNAL_MIN_LEAD_SECONDS", "18"))
-
-    # Tempo sem scan para ativar limpeza de histórico em idle (padrão: 10 min)
     inactivity_timeout_seconds: int = int(os.getenv("INACTIVITY_TIMEOUT_SECONDS", "600"))
 
     # ─── QUALIDADE DE DADOS ──────────────────────────────────────────────────
@@ -78,14 +70,9 @@ class Settings:
     app_name: str = os.getenv("APP_NAME", "Alpha Hive AI")
     port: int = int(os.getenv("PORT", "10000"))
 
-    # ON-DEMAND MODE é o padrão (0): PassiveWatcher não roda em background.
-    # Ativa modo background com RUN_BACKGROUND_SCANNER=1 (mais RAM e bandwidth).
+    # Scanner autônomo sempre ativo — pode desligar com RUN_BACKGROUND_SCANNER=0
     run_background_scanner: bool = (
-        os.getenv("RUN_BACKGROUND_SCANNER", "0").strip().lower()
-        not in ("0", "false", "no")
-    )
-    scan_route_enabled: bool = (
-        os.getenv("SCAN_ROUTE_ENABLED", "1").strip().lower()
+        os.getenv("RUN_BACKGROUND_SCANNER", "1").strip().lower()
         not in ("0", "false", "no")
     )
     scan_trigger_token: str = os.getenv("SCAN_TRIGGER_TOKEN", "").strip()

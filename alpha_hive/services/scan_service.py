@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import gc
+import logging
 import threading
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
+
+log = logging.getLogger(__name__)
 
 from alpha_hive.audit.edge_audit import EdgeAuditEngine
 from alpha_hive.audit.journal_manager import JournalManager
@@ -14,7 +17,6 @@ from alpha_hive.core.contracts import FinalDecision, MarketSnapshot
 from alpha_hive.learning.learning_engine import LearningEngine
 from alpha_hive.learning.specialist_reputation_engine import SpecialistReputationEngine
 from alpha_hive.market.scanner import MarketScanner
-from alpha_hive.market.passive_watcher import PassiveWatcher
 from alpha_hive.services.capital_service import CapitalService
 from alpha_hive.storage.state_store import get_state_store
 
@@ -26,12 +28,10 @@ PENDING_COLLECTION = "pending_signals_v2"
 
 class ScanService:
     def __init__(self):
-        self.passive_watcher = PassiveWatcher()
-        self.scanner = MarketScanner(self.passive_watcher._data)  # DataManager compartilhado
+        # Scanner direto — sem PassiveWatcher. Dados buscados frescos a cada ciclo
+        # e liberados imediatamente após o scan. Zero buffers de velas em RAM.
+        self.scanner = MarketScanner()
 
-        # ENGINES STATEFUL — ficam em RAM entre scans (estado acumulado em DB).
-        # LearningEngine e SpecialistReputationEngine carregam dados do SQLite no
-        # __init__ e salvam de volta a cada update. São leves (~100-500 KB cada).
         self.capital_service = CapitalService()
         self.learning = LearningEngine()
         self.specialists = SpecialistReputationEngine()
@@ -68,6 +68,7 @@ class ScanService:
         self._lock = threading.Lock()
         self._started = False
         self._last_activity_ts: float = 0.0
+        self._restore_runtime()
 
     def _meta(self) -> Dict[str, Any]:
         return self.runtime.setdefault("meta", {})  # type: ignore[return-value]
@@ -79,6 +80,40 @@ class ScanService:
         if last_scan_ts <= 0:
             return 0
         return max(0, int(now_ts - last_scan_ts))
+
+    def _restore_runtime(self) -> None:
+        """Carrega o último estado do PostgreSQL no startup — IA nunca começa vazia."""
+        try:
+            saved = self.store.get_json("scan_runtime_v1", {})
+            if not saved:
+                return
+            for key in ("signals", "history", "current_decision"):
+                if key in saved:
+                    self.runtime[key] = saved[key]
+            saved_meta = saved.get("meta", {})
+            if saved_meta:
+                meta = self._meta()
+                meta.update(saved_meta)
+                meta["scan_in_progress"] = False
+                meta["ui_auto_refresh_seconds"] = SETTINGS.ui_auto_refresh_seconds
+                meta["ui_stale_after_seconds"] = SETTINGS.ui_stale_after_seconds
+                meta["ui_force_scan_after_seconds"] = SETTINGS.ui_force_scan_after_seconds
+            log.info("ScanService: runtime restaurado do PostgreSQL")
+        except Exception as exc:
+            log.warning("ScanService: falha ao restaurar runtime (%s) — iniciando vazio", exc)
+
+    def _persist_runtime(self) -> None:
+        """Persiste runtime no PostgreSQL após cada scan — sobrevive a restarts do Render."""
+        try:
+            meta = {k: v for k, v in self._meta().items() if k != "scan_in_progress"}
+            self.store.set_json("scan_runtime_v1", {
+                "signals": self.runtime.get("signals", []),
+                "history": (self.runtime.get("history", []) or [])[:20],
+                "current_decision": self.runtime.get("current_decision", {}),
+                "meta": meta,
+            })
+        except Exception as exc:
+            log.warning("ScanService: falha ao persistir runtime (%s)", exc)
 
     def _find_snapshot(self, snapshots: List[MarketSnapshot], asset: str) -> Optional[MarketSnapshot]:
         return next((snap for snap in snapshots if snap.asset == asset), None)
@@ -279,11 +314,7 @@ class ScanService:
         if self._has_expired_pending(now_ts):
             return True
 
-        if not SETTINGS.run_background_scanner:
-            request_min_interval = max(15, int(getattr(SETTINGS, "request_scan_min_interval_seconds", 25) or 25))
-            if scan_age >= request_min_interval:
-                return True
-        elif scan_age >= max(15, SETTINGS.scan_interval_seconds):
+        if scan_age >= max(15, SETTINGS.scan_interval_seconds):
             return True
 
         return False
@@ -652,10 +683,15 @@ class ScanService:
                 _signal_engine = SignalEngine()
                 self._scan_result_engine = ResultEngine()
 
-                if SETTINGS.run_background_scanner and self._started:
-                    snapshots = self._snapshots_from_passive()
-                else:
-                    snapshots = self.scanner.scan_assets()
+                snapshots = self.scanner.scan_assets()
+
+                # Registra horário do scan logo após os dados serem buscados.
+                # Assim mesmo que a fase de decisão falhe, o usuário vê dados frescos.
+                fetch_ts = time.time()
+                meta["last_scan"] = now_brazil().strftime("%H:%M:%S")
+                meta["last_scan_ts"] = fetch_ts
+                meta["asset_count"] = len(snapshots)
+                meta["last_scan_age_seconds"] = 0
 
                 evaluated_count = self._liquidate_pending(snapshots)
 
@@ -696,12 +732,8 @@ class ScanService:
 
                 pending_total, pending_expired = self._count_pending_state()
                 finished_at = time.time()
-                meta["last_scan"] = now_brazil().strftime("%H:%M:%S")
-                meta["last_scan_ts"] = finished_at
                 meta["scan_count"] = int(meta.get("scan_count", 0) or 0) + 1
                 meta["signal_count"] = len(signals)
-                meta["asset_count"] = len(snapshots)
-                meta["last_scan_age_seconds"] = 0
                 meta["last_scan_duration_ms"] = int((finished_at - started) * 1000)
                 meta["last_scan_trigger"] = trigger
                 meta["pending_total"] = pending_total
@@ -711,9 +743,8 @@ class ScanService:
                 self.runtime["signals"] = signals
                 self.runtime["history"] = history
                 self.runtime["current_decision"] = current_payload
+                self._persist_runtime()
 
-                if not SETTINGS.run_background_scanner:
-                    self._release_market_memory()
 
                 return {
                     "ok": True,
@@ -741,8 +772,8 @@ class ScanService:
                     del _signal_engine
                 self._scan_result_engine = None
                 meta["scan_in_progress"] = False
-                if not SETTINGS.run_background_scanner:
-                    gc.collect()
+                self._release_market_memory()
+                gc.collect()
 
     def snapshot(self) -> Dict[str, object]:
         meta = self._meta()
@@ -756,53 +787,8 @@ class ScanService:
         meta.setdefault("last_scan_error", "")
         return self.runtime
 
-    def _snapshots_from_passive(self):
-        from alpha_hive.core.contracts import MarketSnapshot
-        contexts = self.passive_watcher.get_all_contexts()
-        asset_order = {a: i for i, a in enumerate(SETTINGS.assets)}
-        snapshots = []
-        stale_assets = []
-
-        for asset, ctx in contexts.items():
-            if ctx.is_initialized and ctx.is_fresh and len(ctx.candles_m1) >= 12:
-                candles_m1 = list(ctx.candles_m1)
-                candles_m5 = list(ctx.candles_m5)
-                mt = "crypto" if asset in SETTINGS.assets_crypto or asset in SETTINGS.assets_pure_crypto else "forex" if asset in SETTINGS.assets_forex else "metals"
-                snap = MarketSnapshot(
-                    asset=asset, market_type=mt, provider=ctx.provider,
-                    provider_fallback_chain=ctx.provider_chain,
-                    data_quality_score=ctx.data_quality_score,
-                    data_quality_state=ctx.data_quality_state,
-                    candles_m1=candles_m1, candles_m5=candles_m5,
-                    warnings=ctx.warnings, display_asset=asset,
-                    source_symbol=getattr(ctx, "source_symbol", asset),
-                    source_kind=getattr(ctx, "source_kind", "standard"),
-                )
-                snapshots.append(snap)
-            else:
-                stale_assets.append(asset)
-
-        # Ativos sem dados frescos: scan paralelo (não sequencial)
-        if stale_assets:
-            fresh = self.scanner.scan_assets(stale_assets)
-            snapshots.extend(fresh)
-
-        # Passive não retornou nada: scan completo paralelo
-        if not snapshots:
-            snapshots = self.scanner.scan_assets()
-
-        snapshots.sort(key=lambda s: asset_order.get(s.asset, 10**9))
-        return snapshots
-
     def _release_market_memory(self) -> None:
-        """
-        Libera dados de mercado brutos após cada scan on-demand.
-        Candles, contextos e cache HTTP não precisam ficar em RAM entre operações.
-        """
-        try:
-            self.passive_watcher.clear_contexts()
-        except Exception:
-            pass
+        """Libera cache HTTP do DataManager após cada ciclo."""
         try:
             self.scanner.data.clear_cache()
         except Exception:
@@ -824,13 +810,24 @@ class ScanService:
             self.runtime["history"] = history[:5]
         gc.collect()
 
-    def _passive_diagnostics(self):
-        return self.passive_watcher.diagnostics()
-
     def ensure_started(self):
-        """Inicia PassiveWatcher apenas no modo background (RUN_BACKGROUND_SCANNER=1)."""
+        """Inicia o loop autônomo de scan em background."""
         if self._started:
             return
-        if SETTINGS.run_background_scanner:
-            self.passive_watcher.ensure_started()
-            self._started = True
+        self._started = True
+        t = threading.Thread(target=self._background_loop, daemon=True, name="scan-loop")
+        t.start()
+        log.info("ScanService: loop autônomo iniciado (intervalo=%ds)", SETTINGS.scan_interval_seconds)
+
+    def _background_loop(self):
+        """Loop infinito: executa run_once() a cada scan_interval_seconds."""
+        while True:
+            try:
+                self.run_once("auto")
+            except Exception as exc:
+                log.warning("ScanService: erro no ciclo de scan (%s)", exc)
+            finally:
+                self.learning.release()
+                self.specialists.release()
+                gc.collect()
+            time.sleep(SETTINGS.scan_interval_seconds)
