@@ -2,26 +2,27 @@ from __future__ import annotations
 
 from flask import Blueprint, current_app, jsonify, request
 
+from alpha_hive.services.snapshot_service import SnapshotService
+
 bp = Blueprint("control", __name__)
+snapshot_service = SnapshotService()
 
 
 @bp.route("/atualizar", methods=["GET", "POST"])
 @bp.route("/run-scan", methods=["GET", "POST"])
 def atualizar():
-    """Endpoint de diagnóstico — o scan já ocorre automaticamente a cada ciclo."""
+    """Executa um scan manual e devolve snapshot pronto para a UI renderizar."""
     settings = current_app.config["SETTINGS"]
     if settings.scan_trigger_token:
-        provided = (
-            request.args.get("token")
-            or request.headers.get("X-Scan-Token")
-            or ""
-        )
+        provided = request.args.get("token") or request.headers.get("X-Scan-Token") or ""
         if provided != settings.scan_trigger_token:
             return jsonify({"ok": False, "error": "unauthorized"}), 401
 
     service = current_app.config["SCAN_SERVICE"]
     result = service.run_once("manual")
-    return jsonify(result)
+    audit_report = service.audit.compute_report()
+    snapshot = snapshot_service.build(service.snapshot(), audit_report=audit_report)
+    return jsonify({"ok": True, "scan": result, "snapshot": snapshot})
 
 
 @bp.get("/scan-status")

@@ -22,6 +22,7 @@ class SignalEngine:
         return {
             "asset": decision.asset,
             "signal": decision.direction,
+            "direction": decision.direction,
             "decision": decision.decision,
             "state": decision.state,
             "confidence": confidence,
@@ -39,5 +40,10 @@ class SignalEngine:
             "timeframe": "M1",
             "trend_m1": trend_m1,
             "trend_m5": trend_m5,
+            "features": features,
+            "council": decision.council,
+            "meta_rank_score": decision.meta_rank_score,
+            "meta_state": decision.meta_state,
+            "meta_reasons": decision.meta_reasons,
             "reasons": reasons,
         }
