@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from alpha_hive.config import SETTINGS
@@ -8,11 +10,16 @@ from alpha_hive.core.contracts import MarketSnapshot
 from alpha_hive.market.data_manager import DataManager
 from alpha_hive.market.reliability_engine import ReliabilityEngine
 
+log = logging.getLogger(__name__)
+
 # 60 velas M1 = 60 minutos de histórico.
 # Suficiente para ATR(14), RSI(14), swing structure, FVG, Order Blocks e MSS.
-# Custo de bandwidth é marginal com a abordagem period1/period2 do Yahoo.
 _M1_OUTPUTSIZE = 60
 _M5_OUTPUTSIZE = 12
+
+# Candle M1 com mais de 120s de idade indica mercado fechado ou API atrasada.
+# Nesses casos o snapshot é descartado (requisito: não usar dados atrasados).
+_CANDLE_MAX_AGE_SECONDS = 120
 
 
 class MarketScanner:
@@ -28,21 +35,44 @@ class MarketScanner:
         return "metals"
 
     def _scan_timeout_seconds(self, asset_count: int, worker_count: int) -> int:
-        """
-        Deadline global do lote on-demand.
-        Antes, o timeout fixo de 90s abortava o scan inteiro em Render Free
-        quando alguns ativos demoravam mais, zerando sinais mesmo com resultados
-        parciais já disponíveis. Agora o timeout é adaptativo e nunca derruba o
-        lote completo: devolvemos o que ficou pronto dentro da janela.
-        """
+        """Deadline global do lote. Adaptativo para não derrubar scans parciais."""
         waves = max(1, (asset_count + worker_count - 1) // worker_count)
         return max(45, min(105, (waves * 12) + 10))
+
+    def _last_candle_age_seconds(self, candles: list) -> Optional[float]:
+        """Retorna a idade em segundos do último candle (index -1 = mais recente).
+        Retorna None se não for possível determinar a idade."""
+        if not candles:
+            return None
+        try:
+            ts_raw = str(getattr(candles[-1], "ts", "") or "").strip()[:19]
+            if not ts_raw:
+                return None
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+                try:
+                    dt = datetime.strptime(ts_raw, fmt).replace(tzinfo=timezone.utc)
+                    return (datetime.now(timezone.utc) - dt).total_seconds()
+                except ValueError:
+                    continue
+        except Exception:
+            pass
+        return None
 
     def scan_asset(self, asset: str) -> Optional[MarketSnapshot]:
         candles_m1, chain = self.data.get_candles(
             asset, interval="1min", outputsize=_M1_OUTPUTSIZE
         )
         if not candles_m1:
+            return None
+
+        # Valida frescor: descarta snapshot se o último candle fechado for muito antigo.
+        # Isso impede gerar sinais com dados de mercado fechado ou API com atraso grave.
+        age = self._last_candle_age_seconds(candles_m1)
+        if age is not None and age > _CANDLE_MAX_AGE_SECONDS:
+            log.warning(
+                "Scanner: %s descartado — último candle M1 com %.0fs de atraso (max %ds)",
+                asset, age, _CANDLE_MAX_AGE_SECONDS,
+            )
             return None
 
         # Constrói M5 a partir do M1 (evita segunda chamada de API)
@@ -68,6 +98,9 @@ class MarketScanner:
         dq_score, dq_state, warnings = self.reliability.evaluate(
             provider, chain, candles_m1, health_score
         )
+
+        if age is not None:
+            log.debug("Scanner: %s ok — candle_age=%.0fs dq=%.2f provider=%s", asset, age, dq_score, provider)
 
         return MarketSnapshot(
             asset=asset,
@@ -105,8 +138,8 @@ class MarketScanner:
                     except Exception:
                         pass
             except FuturesTimeoutError:
-                # Em ambiente limitado (Render Free), alguns ativos podem atrasar.
-                # Mantemos o scan válido com resultados parciais em vez de falhar tudo.
+                # Em Render Free alguns ativos podem atrasar o batch.
+                # Retorna o que ficou pronto em vez de falhar tudo.
                 pass
             finally:
                 for future in future_map:
