@@ -12,14 +12,10 @@ from alpha_hive.market.reliability_engine import ReliabilityEngine
 
 log = logging.getLogger(__name__)
 
-# 60 velas M1 = 60 minutos de histórico.
-# Suficiente para ATR(14), RSI(14), swing structure, FVG, Order Blocks e MSS.
-_M1_OUTPUTSIZE = 60
-_M5_OUTPUTSIZE = 12
-
-# Candle M1 com mais de 120s de idade indica mercado fechado ou API atrasada.
-# Nesses casos o snapshot é descartado (requisito: não usar dados atrasados).
-_CANDLE_MAX_AGE_SECONDS = 120
+# Render Free: 40 velas M1 bastam para RSI/ATR/EMA curta e reduzem payload.
+_M1_OUTPUTSIZE = int(__import__("os").getenv("M1_OUTPUTSIZE", "40"))
+_M5_OUTPUTSIZE = int(__import__("os").getenv("M5_OUTPUTSIZE", "8"))
+_CANDLE_MAX_AGE_SECONDS = int(__import__("os").getenv("CANDLE_MAX_AGE_SECONDS", "180"))
 
 
 class MarketScanner:
@@ -35,13 +31,10 @@ class MarketScanner:
         return "metals"
 
     def _scan_timeout_seconds(self, asset_count: int, worker_count: int) -> int:
-        """Deadline global do lote. Adaptativo para não derrubar scans parciais."""
         waves = max(1, (asset_count + worker_count - 1) // worker_count)
-        return max(45, min(105, (waves * 12) + 10))
+        return max(30, min(75, (waves * 10) + 10))
 
     def _last_candle_age_seconds(self, candles: list) -> Optional[float]:
-        """Retorna a idade em segundos do último candle (index -1 = mais recente).
-        Retorna None se não for possível determinar a idade."""
         if not candles:
             return None
         try:
@@ -59,48 +52,30 @@ class MarketScanner:
         return None
 
     def scan_asset(self, asset: str) -> Optional[MarketSnapshot]:
-        candles_m1, chain = self.data.get_candles(
-            asset, interval="1min", outputsize=_M1_OUTPUTSIZE
-        )
+        candles_m1, chain = self.data.get_candles(asset, interval="1min", outputsize=_M1_OUTPUTSIZE)
         if not candles_m1:
             return None
 
-        # Valida frescor: descarta snapshot se o último candle fechado for muito antigo.
-        # Isso impede gerar sinais com dados de mercado fechado ou API com atraso grave.
         age = self._last_candle_age_seconds(candles_m1)
         if age is not None and age > _CANDLE_MAX_AGE_SECONDS:
-            log.warning(
-                "Scanner: %s descartado — último candle M1 com %.0fs de atraso (max %ds)",
-                asset, age, _CANDLE_MAX_AGE_SECONDS,
-            )
+            log.warning("Scanner: %s descartado — último M1 com %.0fs de atraso", asset, age)
             return None
 
-        # Constrói M5 a partir do M1 (evita segunda chamada de API)
         candles_m5 = self.data.build_m5_from_m1(candles_m1, outputsize=_M5_OUTPUTSIZE)
-
-        # Só busca M5 direto se realmente insuficiente (mínimo = 8 velas)
-        if len(candles_m5) < 8:
-            direct_m5, _ = self.data.get_candles(
-                asset, interval="5min", outputsize=_M5_OUTPUTSIZE
-            )
+        if len(candles_m5) < 5:
+            # Fallback controlado: só faz uma segunda chamada quando o M5 derivado
+            # é realmente insuficiente.
+            direct_m5, _ = self.data.get_candles(asset, interval="5min", outputsize=_M5_OUTPUTSIZE)
             if len(direct_m5) > len(candles_m5):
                 candles_m5 = direct_m5
 
         if not candles_m5:
-            candles_m5 = (
-                self.data.build_m5_from_m1(candles_m1, outputsize=8)
-                or candles_m1[-8:]
-            )
+            candles_m5 = candles_m1[-5:]
 
         provider = self.data.last_provider_used.get(asset, chain[0] if chain else "unknown")
         provider_root = provider.split("-")[0] if provider else "unknown"
         health_score = self.data.health.get(provider_root).score() if provider else 0.5
-        dq_score, dq_state, warnings = self.reliability.evaluate(
-            provider, chain, candles_m1, health_score
-        )
-
-        if age is not None:
-            log.debug("Scanner: %s ok — candle_age=%.0fs dq=%.2f provider=%s", asset, age, dq_score, provider)
+        dq_score, dq_state, warnings = self.reliability.evaluate(provider, chain, candles_m1, health_score)
 
         return MarketSnapshot(
             asset=asset,
@@ -118,34 +93,37 @@ class MarketScanner:
         )
 
     def scan_assets(self, assets: Optional[List[str]] = None) -> List[MarketSnapshot]:
-        if assets is None:
-            assets = SETTINGS.assets
-        max_workers = max(1, min(SETTINGS.scanner_max_workers, len(assets)))
+        assets = list(assets or SETTINGS.assets)
+        if not assets:
+            return []
+        max_workers = max(1, min(int(SETTINGS.scanner_max_workers), len(assets)))
         out: List[MarketSnapshot] = []
-        scan_timeout = self._scan_timeout_seconds(len(assets), max_workers)
+        timeout = self._scan_timeout_seconds(len(assets), max_workers)
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_map = {
-                executor.submit(self.scan_asset, asset): asset
-                for asset in assets
-            }
+            future_map = {executor.submit(self.scan_asset, asset): asset for asset in assets}
             try:
-                for future in as_completed(future_map, timeout=scan_timeout):
+                for future in as_completed(future_map, timeout=timeout):
                     try:
                         snapshot = future.result()
                         if snapshot:
                             out.append(snapshot)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        log.debug("Scanner: erro em ativo (%s)", exc)
             except FuturesTimeoutError:
-                # Em Render Free alguns ativos podem atrasar o batch.
-                # Retorna o que ficou pronto em vez de falhar tudo.
-                pass
+                log.warning("Scanner: timeout parcial; usando %d snapshots prontos", len(out))
             finally:
                 for future in future_map:
                     if not future.done():
                         future.cancel()
 
-        asset_order = {asset: idx for idx, asset in enumerate(assets)}
-        out.sort(key=lambda item: asset_order.get(item.asset, 10**9))
+        order = {asset: idx for idx, asset in enumerate(assets)}
+        out.sort(key=lambda item: order.get(item.asset, 10**9))
         return out
+
+    def release_memory(self) -> None:
+        """Libera cache de candles após o ciclo para manter RAM mínima no Render."""
+        try:
+            self.data.clear_cache()
+        except Exception:
+            pass
