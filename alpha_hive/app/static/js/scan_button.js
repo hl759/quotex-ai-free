@@ -8,18 +8,25 @@
     box.textContent = message;
   }
 
+  function applyData(data) {
+    if (!data) return false;
+    if (typeof window.applySnapshot === 'function') {
+      window.applySnapshot(data);
+      return true;
+    }
+    if (typeof window.renderSnapshot === 'function') {
+      window.renderSnapshot(data);
+      return true;
+    }
+    return false;
+  }
+
   async function refreshSnapshot() {
     try {
       const resp = await fetch(apiBase + '/snapshot?ts=' + Date.now(), { cache: 'no-store' });
       if (!resp.ok) return null;
       const data = await resp.json();
-      if (typeof window.applySnapshot === 'function') {
-        window.applySnapshot(data);
-      } else if (typeof window.renderSnapshot === 'function') {
-        window.renderSnapshot(data);
-      } else if (typeof window.refresh === 'function') {
-        await window.refresh();
-      }
+      applyData(data);
       return data;
     } catch (_) {
       return null;
@@ -42,8 +49,10 @@
         headers: { 'Accept': 'application/json' }
       });
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
-      await resp.json().catch(function () { return null; });
-      await refreshSnapshot();
+      const payload = await resp.json().catch(function () { return null; });
+      if (!payload || !applyData(payload.snapshot)) {
+        await refreshSnapshot();
+      }
       const seconds = ((Date.now() - started) / 1000).toFixed(1).replace('.', ',');
       btn.textContent = '✓ Atualizado em ' + seconds + 's';
     } catch (err) {
