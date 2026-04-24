@@ -738,6 +738,7 @@ class ScanService:
                     ranked_decisions.append(adjusted)
 
                 ranked_decisions.sort(key=lambda item: (item.meta_rank_score, item.score, item.confidence), reverse=True)
+                t_decision_done = time.time()
 
                 current_analysis = ranked_decisions[0] if ranked_decisions else None
                 primary_signal = next((item for item in ranked_decisions if self._is_operable_candidate(item)), None)
@@ -761,14 +762,31 @@ class ScanService:
                     history = [self._decorate_current_decision(current_analysis), *history][:40]
 
                 pending_total, pending_expired = self._count_pending_state()
-                finished_at = time.time()
+                t_signal_done = time.time()
+                finished_at = t_signal_done
+
                 meta["scan_count"] = int(meta.get("scan_count", 0) or 0) + 1
                 meta["signal_count"] = len(signals)
                 meta["last_scan_duration_ms"] = int((finished_at - started) * 1000)
+                meta["timing_fetch_ms"] = int((fetch_ts - started) * 1000)
+                meta["timing_decision_ms"] = int((t_decision_done - fetch_ts) * 1000)
+                meta["timing_signal_ms"] = int((t_signal_done - t_decision_done) * 1000)
                 meta["last_scan_trigger"] = trigger
                 meta["pending_total"] = pending_total
                 meta["pending_expired"] = pending_expired
                 meta["pending_evaluated_last_scan"] = evaluated_count
+
+                log.info(
+                    "ScanService[%s]: fetch=%dms | decisão=%dms | sinal=%dms | total=%dms"
+                    " | ativos=%d | resultado=%s",
+                    trigger,
+                    meta["timing_fetch_ms"],
+                    meta["timing_decision_ms"],
+                    meta["timing_signal_ms"],
+                    meta["last_scan_duration_ms"],
+                    len(snapshots),
+                    current_payload.get("decision", "?"),
+                )
 
                 self.runtime["signals"] = signals
                 self.runtime["history"] = history
@@ -850,7 +868,12 @@ class ScanService:
         log.info("ScanService: loop autônomo iniciado (intervalo=%ds)", SETTINGS.scan_interval_seconds)
 
     def _background_loop(self):
-        """Loop infinito: executa run_once() a cada scan_interval_seconds."""
+        """Loop autônomo sincronizado com o fechamento do candle M1.
+
+        Aguarda :02 de cada minuto (2 segundos após o fechamento em :00) para
+        garantir que as APIs já disponibilizaram o candle fechado antes do scan.
+        Isso evita analisar o candle ainda em formação como se fosse fechado.
+        """
         while True:
             try:
                 self.run_once("auto")
@@ -860,4 +883,15 @@ class ScanService:
                 self.learning.release()
                 self.specialists.release()
                 gc.collect()
-            time.sleep(SETTINGS.scan_interval_seconds)
+
+            # Calcula sleep até o :02 do próximo minuto (2s após fechamento M1).
+            now = time.time()
+            seconds_past = now % 60
+            if seconds_past < 2.0:
+                sleep_seconds = 2.0 - seconds_past
+            else:
+                sleep_seconds = 62.0 - seconds_past
+            # Clamp de segurança: nunca esperar mais que o intervalo configurado
+            sleep_seconds = max(1.0, min(float(SETTINGS.scan_interval_seconds), sleep_seconds))
+            log.debug("ScanService: próximo scan M1 em %.1fs (alinhado ao fechamento)", sleep_seconds)
+            time.sleep(sleep_seconds)
