@@ -27,7 +27,7 @@ class SnapshotService:
         if confidence >= 82:
             return "FORTE"
         if confidence >= 70:
-            return "MEDIO"
+            return "MÉDIO"
         return "CAUTELOSO"
 
     def _reason_text(self, reasons):
@@ -102,11 +102,11 @@ class SnapshotService:
             main = "A governanca bloqueou a execucao para preservar capital e consistencia."
 
         points = [
+            f"Direção: {direction or 'N/A'}",
+            f"Risco: {setup_quality}",
+            f"Execução: {execution_permission}",
             f"Regime: {regime}",
-            f"Estado: {state}",
             f"Consenso: {consensus_quality}",
-            f"Execucao: {execution_permission}",
-            f"Setup: {setup_quality}",
         ]
         return title, main, points
 
@@ -132,6 +132,7 @@ class SnapshotService:
         out["summary_main"] = main
         out["summary_points"] = points
         out["stake_suggested"] = item.get("suggested_stake", 0.0)
+        out["signal"] = out.get("direction") or out.get("signal")
         out["provider"] = item.get("provider", "Alpha Hive")
         return out
 
