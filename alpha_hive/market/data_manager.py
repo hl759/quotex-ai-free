@@ -400,42 +400,32 @@ class DataManager:
             return []
 
         interval_value = "5m" if interval == "5min" else "1m"
-
-        # OTIMIZAÇÃO DE BANDWIDTH: usar period1/period2 em vez de range=1d.
-        # range=1d retorna ~400 KB de JSON por asset (dia inteiro de barras 1min).
-        # Com period1/period2 pedimos apenas os últimos N minutos necessários,
-        # reduzindo a resposta para ~20-40 KB — 10-20x menos bandwidth.
         now_ts = int(time.time())
-        if interval == "5min":
-            lookback = max(outputsize, 50) * 300 + 300          # barras 5min
-        elif outputsize > 180:
-            lookback = outputsize * 60 * 2                       # 2x buffer
-        else:
-            # Para outputsize=30 (padrão Render Free): 90 min de histórico
-            lookback = max(outputsize * 60 * 3, 5400)            # mín 90 min
 
-        params: dict = {
-            "interval": interval_value,
-            "period1": now_ts - lookback,
-            "period2": now_ts,
-            "includePrePost": "true",
-        }
+        if interval == "5min":
+            # M5: pede exatamente o necessário + 10min de margem
+            lookback = outputsize * 300 + 600
+        else:
+            # M1: pede barras necessárias + 20min de margem.
+            # Janela anterior (10800s = 3h) baixava 3x mais dados que o necessário.
+            lookback = outputsize * 60 + 1200  # ~80min para outputsize=60
 
         data = self._http_get_json(
             f"https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_symbol}",
-            params=params,
+            params={
+                "interval": interval_value,
+                "period1": now_ts - lookback,
+                "period2": now_ts,
+                "includePrePost": "true",
+            },
             timeout=5,
         )
         candles = self._trim(yahoo.normalize(data or {}, limit=outputsize), outputsize)
 
-        # Fallback: se period1/period2 não retornar dados suficientes, tenta range=1d
-        if not candles or len(candles) < max(8, outputsize // 3):
-            data = self._http_get_json(
-                f"https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_symbol}",
-                params={"interval": interval_value, "range": "1d", "includePrePost": "true"},
-                timeout=5,
-            )
-            candles = self._trim(yahoo.normalize(data or {}, limit=outputsize), outputsize)
+        # REMOVIDO: fallback range=1d baixava o dia inteiro (400–800 KB por ativo).
+        # Com 16 ativos × 60s de scan, esse fallback gerava centenas de GB/mês.
+        # Se a janela curta retornar poucos candles, o scanner descarta o ativo
+        # pela validação de frescor (candle_age > 120s) ou contagem mínima (>= 5).
 
         if candles:
             self._set_cache("yahoo", symbol, interval, candles)
