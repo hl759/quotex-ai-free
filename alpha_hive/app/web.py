@@ -14,21 +14,13 @@ from alpha_hive.app.routes.snapshot import bp as snapshot_bp
 from alpha_hive.config import SETTINGS
 from alpha_hive.services.scan_service import ScanService
 
-# Origens permitidas para CORS.
-# Render static site (ou qualquer outro frontend) deve ser adicionada via env var.
-# Exemplo: CORS_ORIGINS=https://alpha-hive.onrender.com,https://meuapp.com
-_CORS_ORIGINS = [
-    o.strip()
-    for o in os.getenv("CORS_ORIGINS", "").split(",")
-    if o.strip()
-]
+_CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
 
 
 def create_app() -> Flask:
     static_folder = str(Path(__file__).resolve().parent / "static")
     app = Flask(__name__, static_folder=static_folder, static_url_path="")
 
-    # ── CORS (para deploy split: frontend no Render, backend no Fly.io) ──────
     if _CORS_ORIGINS:
         try:
             from flask_cors import CORS
@@ -44,20 +36,23 @@ def create_app() -> Flask:
                     response.headers["Access-Control-Allow-Headers"] = "Content-Type"
                 return response
 
-    # ── Compressão gzip (RENDER FREE: reduz JSON em ~65-75%) ─────────────────
     try:
         from flask_compress import Compress
         Compress(app)
     except ImportError:
-        pass  # flask-compress não instalado: continua sem compressão
+        pass
 
     app.config["SETTINGS"] = SETTINGS
     scan_service = ScanService()
     app.config["SCAN_SERVICE"] = scan_service
-    scan_service.ensure_started()
+
+    # Render Free: não inicia thread autônoma por padrão. Isso impede consumo
+    # Service-Initiated em idle; o scan roda por demanda em POST /atualizar.
+    if SETTINGS.run_background_scanner:
+        scan_service.ensure_started()
+
     app.config["START_TIME"] = time.time()
 
-    # ── Cache-Control para arquivos estáticos ─────────────────────────────────
     @app.after_request
     def add_cache_headers(response):
         path = getattr(response, "_request_path", "")
@@ -71,5 +66,4 @@ def create_app() -> Flask:
     app.register_blueprint(capital_bp)
     app.register_blueprint(control_bp)
     app.register_blueprint(diagnostics_bp)
-
     return app
