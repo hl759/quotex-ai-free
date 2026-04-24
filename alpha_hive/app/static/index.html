@@ -270,6 +270,24 @@ body:after{width:220px;height:220px;right:-80px;top:340px;background:rgba(111,74
       </div>
     </div>
 
+
+    <div id='tab_vision' class='tab-content' style='display:none'>
+      <div class='panel-card' style='margin-bottom:14px'>
+        <div class='panel-head'><h3>📸 Análise Visual</h3><div class='mini-badge'>Gemini Vision</div></div>
+        <p style='color:#90a5c6;font-size:13px;margin:0 0 14px;line-height:1.55'>Tire um print do gráfico na corretora e envie abaixo. A IA analisa candles e tendência para indicar <b style='color:var(--teal)'>CALL ou PUT</b>.</p>
+        <div class='vision-drop' id='visionDrop' onclick='document.getElementById("visionInput").click()' style='display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;min-height:160px;border:2px dashed rgba(95,245,220,.20);border-radius:24px;background:linear-gradient(180deg,rgba(8,16,28,.98),rgba(5,11,20,.98));cursor:pointer;padding:24px;text-align:center'>
+          <div style='font-size:40px'>📊</div>
+          <div style='color:#90a5c6;font-size:14px;line-height:1.5'>Toque para selecionar o print<br><b style='color:var(--teal)'>ou arraste aqui</b></div>
+        </div>
+        <input type='file' id='visionInput' accept='image/*' style='display:none' onchange='visionFileSelected(this)'>
+        <div id='visionPreview' style='display:none;margin-top:14px;border-radius:20px;overflow:hidden;border:1px solid rgba(95,245,220,.16);position:relative'>
+          <img id='visionImg' src='' style='width:100%;display:block;border-radius:20px'>
+          <button onclick='visionClear()' style='position:absolute;top:10px;right:10px;background:rgba(3,8,18,.85);border:1px solid rgba(255,111,125,.30);color:#ff9aa3;border-radius:999px;padding:6px 12px;font-size:12px;font-weight:800;cursor:pointer'>✕ Remover</button>
+        </div>
+        <button id='visionBtn' onclick='visionAnalyze()' style='display:none;width:100%;margin-top:14px;padding:18px;border-radius:20px;background:linear-gradient(180deg,rgba(29,77,63,.98),rgba(15,47,40,.98));border:1px solid rgba(95,245,220,.28);color:#dffff7;font-size:16px;font-weight:900;cursor:pointer' disabled>🔍 Analisar com IA</button>
+      </div>
+      <div id='visionResult'></div>
+    </div>
     <div class='bottom-dock'>
       <button class='dock-btn active' data-tab='dashboard' onclick="showTab('dashboard', this)">⌂ Dashboard</button>
       <button class='dock-btn' data-tab='signals' onclick="showTab('signals', this)">⚡ Sinais</button>
@@ -279,6 +297,7 @@ body:after{width:220px;height:220px;right:-80px;top:340px;background:rgba(111,74
       <button class='dock-btn' data-tab='assets' onclick="showTab('assets', this)">🏆 Ativos</button>
       <button class='dock-btn' data-tab='hours' onclick="showTab('hours', this)">⏰ Horários</button>
       <button class='dock-btn' data-tab='capital' onclick="showTab('capital', this)">💰 Capital</button>
+      <button class='dock-btn' data-tab='vision' onclick="showTab('vision', this)">📸 Visão</button>
     </div>
 
     <div class='panel' id='signals'>
