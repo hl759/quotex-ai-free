@@ -13,6 +13,7 @@ from alpha_hive.app.routes.health import bp as health_bp
 from alpha_hive.app.routes.snapshot import bp as snapshot_bp
 from alpha_hive.config import SETTINGS
 from alpha_hive.services.scan_service import ScanService
+from alpha_hive.services.m1_m5_operability_patch import install_m1_m5_operability_patch
 
 _CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
 _SCAN_BUTTON_SCRIPT_TAG = '<script src="/js/scan_button.js?v=1"></script>'
@@ -44,6 +45,7 @@ def create_app() -> Flask:
         pass
 
     app.config["SETTINGS"] = SETTINGS
+    install_m1_m5_operability_patch()
     scan_service = ScanService()
     app.config["SCAN_SERVICE"] = scan_service
 
