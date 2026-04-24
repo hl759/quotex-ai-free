@@ -12,21 +12,21 @@ class Settings:
     # Padrão: apenas 3 pares crypto (mais líquidos na Quotex)
     assets_crypto: List[str] = field(default_factory=lambda: [
         s.strip() for s in
-        os.getenv("ASSETS_CRYPTO", "BTCUSDT,ETHUSDT,SOLUSDT").split(",")
+        os.getenv("ASSETS_CRYPTO","BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,BNBUSDT,ADAUSDT,DOGEUSDT,TRXUSDT,DOTUSDT,LTCUSDT").split(",")
         if s.strip()
     ])
 
     # Crypto "puro" desativado por padrão no free tier (duplica chamadas)
     assets_pure_crypto: List[str] = field(default_factory=lambda: [
         s.strip() for s in
-        os.getenv("ASSETS_PURE_CRYPTO", "").split(",")
+        os.getenv("ASSETS_PURE_CRYPTO","BITCOIN,ETHEREUM").split(",")
         if s.strip()
     ])
 
     # RENDER FREE: apenas 4 forex principais
     assets_forex: List[str] = field(default_factory=lambda: [
         s.strip() for s in
-        os.getenv("ASSETS_FOREX", "EURUSD,GBPUSD,USDJPY,AUDUSD").split(",")
+        os.getenv("ASSETS_FOREX","").split(",")
         if s.strip()
     ])
 

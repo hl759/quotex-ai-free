@@ -24,6 +24,8 @@ class DataManager:
         self.request_headers = {
             "User-Agent": "AlphaHiveAI/2.0",
             "Accept": "application/json,text/plain,*/*",
+            "Accept-Encoding": "gzip, deflate",
+            "Accept-Encoding": "gzip, deflate",
         }
         self.key_usage = [
             {"key": key, "daily": 0, "minute": 0, "minute_window_start": time.time()}
