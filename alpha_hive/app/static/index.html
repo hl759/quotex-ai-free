@@ -170,6 +170,10 @@ body:after{width:220px;height:220px;right:-80px;top:340px;background:rgba(111,74
   .bottom-metrics{grid-template-columns:repeat(4,1fr)}
   .bottom-dock{width:min(calc(100vw - 40px), 980px)}
 }
+
+.panel { display: none; }
+.panel.active { display: block; }
+
 </style>
 </head>
 <body class='pre-hydrate'>
@@ -272,7 +276,7 @@ body:after{width:220px;height:220px;right:-80px;top:340px;background:rgba(111,74
 
 
 
-    <div id='vision' class='panel' style='display:none'>
+    <div id='vision' class='panel'>
       <div class='shell'>
         <div class='hero-kicker'>📸 Análise Visual de Gráfico</div>
         <p style='color:#90a5c6;font-size:13px;margin:0 0 16px;line-height:1.6'>
