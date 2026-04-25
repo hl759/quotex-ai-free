@@ -48,11 +48,7 @@ def create_app() -> Flask:
     install_m1_m5_operability_patch()
     scan_service = ScanService()
     app.config["SCAN_SERVICE"] = scan_service
-
-    # Render Free: não inicia thread autônoma por padrão. Isso impede consumo
-    # Service-Initiated em idle; o scan roda por demanda em POST /atualizar.
-    if SETTINGS.run_background_scanner:
-        scan_service.ensure_started()
+    # Scan apenas via botão — loop autônomo permanentemente desligado.
 
     app.config["START_TIME"] = time.time()
 
