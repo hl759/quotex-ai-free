@@ -85,6 +85,7 @@ class PassiveWatcher:
         """Inicia loop daemon. Usar apenas quando RUN_BACKGROUND_SCANNER=1."""
         if self._started:
             return
+        return  # DESLIGADO - modo visão apenas
         t = threading.Thread(target=self._loop, daemon=True, name="passive-watcher")
         t.start()
         self._started = True

@@ -11,6 +11,7 @@ from alpha_hive.app.routes.control import bp as control_bp
 from alpha_hive.app.routes.diagnostics import bp as diagnostics_bp
 from alpha_hive.app.routes.health import bp as health_bp
 from alpha_hive.app.routes.snapshot import bp as snapshot_bp
+from alpha_hive.app.routes.vision import bp as vision_bp
 from alpha_hive.config import SETTINGS
 from alpha_hive.services.scan_service import ScanService
 from alpha_hive.services.m1_m5_operability_patch import install_m1_m5_operability_patch
@@ -75,4 +76,6 @@ def create_app() -> Flask:
     app.register_blueprint(capital_bp)
     app.register_blueprint(control_bp)
     app.register_blueprint(diagnostics_bp)
+    app.register_blueprint(vision_bp)
+
     return app

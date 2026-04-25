@@ -29,6 +29,7 @@ class Settings:
     scan_interval_seconds: int = int(os.getenv("SCAN_INTERVAL_SECONDS", "60"))
     scanner_max_workers: int = int(os.getenv("SCANNER_MAX_WORKERS", "2"))
     run_background_scanner: bool = _env_bool("RUN_BACKGROUND_SCANNER", "0")
+    scan_route_enabled: bool = _env_bool("SCAN_ROUTE_ENABLED", "1")
 
     ui_auto_refresh_seconds: int = int(os.getenv("UI_AUTO_REFRESH_SECONDS", "120"))
     ui_stale_after_seconds: int = int(os.getenv("UI_STALE_AFTER_SECONDS", "600"))
