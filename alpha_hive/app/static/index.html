@@ -271,23 +271,55 @@ body:after{width:220px;height:220px;right:-80px;top:340px;background:rgba(111,74
     </div>
 
 
+
     <div id='vision' class='panel' style='display:none'>
-      <div class='panel-card' style='margin-bottom:14px'>
-        <div class='panel-head'><h3>📸 Análise Visual</h3><div class='mini-badge'>Gemini Vision</div></div>
-        <p style='color:#90a5c6;font-size:13px;margin:0 0 14px;line-height:1.55'>Tire um print do gráfico na corretora e envie abaixo. A IA analisa candles e tendência para indicar <b style='color:var(--teal)'>CALL ou PUT</b>.</p>
-        <div class='vision-drop' id='visionDrop' onclick='document.getElementById("visionInput").click()' style='display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;min-height:160px;border:2px dashed rgba(95,245,220,.20);border-radius:24px;background:linear-gradient(180deg,rgba(8,16,28,.98),rgba(5,11,20,.98));cursor:pointer;padding:24px;text-align:center'>
-          <div style='font-size:40px'>📊</div>
-          <div style='color:#90a5c6;font-size:14px;line-height:1.5'>Toque para selecionar o print<br><b style='color:var(--teal)'>ou arraste aqui</b></div>
+      <div class='shell'>
+        <div class='hero-kicker'>📸 Análise Visual de Gráfico</div>
+        <p style='color:#90a5c6;font-size:13px;margin:0 0 16px;line-height:1.6'>
+          Tire um <b style='color:var(--teal)'>print do gráfico</b> na corretora (M1 ou M5),
+          envie abaixo e a IA retorna a melhor decisão para a próxima entrada.
+        </p>
+
+        <!-- Seletor de tempo -->
+        <div style='display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px'>
+          <button id='visionTfM1' onclick='visionSetTf("M1")' style='padding:14px;border-radius:18px;background:linear-gradient(180deg,rgba(37,99,103,.98),rgba(15,57,67,.98));border:1px solid rgba(95,245,220,.28);color:#ecfffc;font-size:15px;font-weight:900;cursor:pointer'>M1 — 1 minuto</button>
+          <button id='visionTfM5' onclick='visionSetTf("M5")' style='padding:14px;border-radius:18px;background:linear-gradient(180deg,rgba(9,20,33,.96),rgba(8,16,26,.96));border:1px solid rgba(105,175,255,.10);color:#90a5c6;font-size:15px;font-weight:900;cursor:pointer'>M5 — 5 minutos</button>
+        </div>
+
+        <!-- Drop zone -->
+        <div id='visionDrop' onclick='document.getElementById("visionInput").click()'
+          style='display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;min-height:170px;border:2px dashed rgba(95,245,220,.22);border-radius:24px;background:linear-gradient(180deg,rgba(8,16,28,.98),rgba(5,11,20,.98));cursor:pointer;padding:24px;text-align:center;transition:border-color .2s'>
+          <div style='font-size:44px'>📊</div>
+          <div style='color:#90a5c6;font-size:14px;line-height:1.6'>
+            <b style='color:var(--teal)'>Toque aqui</b> para selecionar o print<br>
+            <span style='font-size:12px'>JPG, PNG ou WebP da tela da corretora</span>
+          </div>
         </div>
         <input type='file' id='visionInput' accept='image/*' style='display:none' onchange='visionFileSelected(this)'>
-        <div id='visionPreview' style='display:none;margin-top:14px;border-radius:20px;overflow:hidden;border:1px solid rgba(95,245,220,.16);position:relative'>
-          <img id='visionImg' src='' style='width:100%;display:block;border-radius:20px'>
-          <button onclick='visionClear()' style='position:absolute;top:10px;right:10px;background:rgba(3,8,18,.85);border:1px solid rgba(255,111,125,.30);color:#ff9aa3;border-radius:999px;padding:6px 12px;font-size:12px;font-weight:800;cursor:pointer'>✕ Remover</button>
+
+        <!-- Preview -->
+        <div id='visionPreview' style='display:none;margin-top:14px;position:relative'>
+          <img id='visionImg' src='' style='width:100%;border-radius:20px;border:1px solid rgba(95,245,220,.16)'>
+          <button onclick='visionClear()' style='position:absolute;top:10px;right:10px;background:rgba(3,8,18,.88);border:1px solid rgba(255,111,125,.35);color:#ff9aa3;border-radius:999px;padding:7px 13px;font-size:12px;font-weight:800;cursor:pointer'>✕ Trocar</button>
         </div>
-        <button id='visionBtn' onclick='visionAnalyze()' style='display:none;width:100%;margin-top:14px;padding:18px;border-radius:20px;background:linear-gradient(180deg,rgba(29,77,63,.98),rgba(15,47,40,.98));border:1px solid rgba(95,245,220,.28);color:#dffff7;font-size:16px;font-weight:900;cursor:pointer' disabled>🔍 Analisar com IA</button>
+
+        <!-- Botão analisar -->
+        <button id='visionBtn' onclick='visionAnalyze()' disabled
+          style='display:none;width:100%;margin-top:14px;padding:20px;border-radius:20px;background:linear-gradient(180deg,rgba(29,77,63,.98),rgba(15,47,40,.98));border:1px solid rgba(95,245,220,.30);color:#dffff7;font-size:17px;font-weight:900;cursor:pointer;letter-spacing:.04em;box-shadow:0 0 28px rgba(95,245,220,.14)'>
+          🔍 Analisar Gráfico com IA
+        </button>
+
+        <!-- Loading -->
+        <div id='visionLoading' style='display:none;text-align:center;padding:32px;color:#90a5c6'>
+          <div style='width:44px;height:44px;border:3px solid rgba(95,245,220,.15);border-top-color:var(--teal);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 16px'></div>
+          <div style='font-size:14px'>Gemini Vision analisando o gráfico...</div>
+        </div>
       </div>
-      <div id='visionResult'></div>
+
+      <!-- Resultado -->
+      <div id='visionResult' style='margin-top:14px'></div>
     </div>
+
     <div class='bottom-dock'>
       <button class='dock-btn active' data-tab='dashboard' onclick="showTab('dashboard', this)">⌂ Dashboard</button>
       <button class='dock-btn' data-tab='signals' onclick="showTab('signals', this)">⚡ Sinais</button>
@@ -725,6 +757,102 @@ document.addEventListener('DOMContentLoaded', function(){
   setTimeout(()=>refreshSnapshot(true), 250);
   document.addEventListener('visibilitychange', function(){ if(!document.hidden){ refreshSnapshot(true); } });
 });
+
+// ── VISÃO ────────────────────────────────────────────────────────────────
+let visionFile = null;
+let visionTf = 'M1';
+
+function visionSetTf(tf) {
+  visionTf = tf;
+  const active = 'background:linear-gradient(180deg,rgba(37,99,103,.98),rgba(15,57,67,.98));border:1px solid rgba(95,245,220,.28);color:#ecfffc;font-size:15px;font-weight:900;cursor:pointer;padding:14px;border-radius:18px';
+  const inactive = 'background:linear-gradient(180deg,rgba(9,20,33,.96),rgba(8,16,26,.96));border:1px solid rgba(105,175,255,.10);color:#90a5c6;font-size:15px;font-weight:900;cursor:pointer;padding:14px;border-radius:18px';
+  document.getElementById('visionTfM1').style.cssText = tf==='M1' ? active : inactive;
+  document.getElementById('visionTfM5').style.cssText = tf==='M5' ? active : inactive;
+}
+
+function visionFileSelected(input) {
+  const file = input.files[0];
+  if (!file) return;
+  visionFile = file;
+  document.getElementById('visionImg').src = URL.createObjectURL(file);
+  document.getElementById('visionPreview').style.display = 'block';
+  document.getElementById('visionDrop').style.display = 'none';
+  const btn = document.getElementById('visionBtn');
+  btn.style.display = 'block';
+  btn.disabled = false;
+  document.getElementById('visionResult').innerHTML = '';
+}
+
+function visionClear() {
+  visionFile = null;
+  document.getElementById('visionImg').src = '';
+  document.getElementById('visionPreview').style.display = 'none';
+  document.getElementById('visionDrop').style.display = 'flex';
+  const btn = document.getElementById('visionBtn');
+  btn.style.display = 'none';
+  btn.disabled = true;
+  document.getElementById('visionResult').innerHTML = '';
+  document.getElementById('visionInput').value = '';
+}
+
+async function visionAnalyze() {
+  if (!visionFile) return;
+  const btn = document.getElementById('visionBtn');
+  const loading = document.getElementById('visionLoading');
+  const res = document.getElementById('visionResult');
+  btn.style.display = 'none';
+  loading.style.display = 'block';
+  res.innerHTML = '';
+  try {
+    const fd = new FormData();
+    fd.append('image', visionFile);
+    fd.append('timeframe', visionTf);
+    const resp = await fetch(API_BASE + '/vision/analyze', {method:'POST', body:fd});
+    const data = await resp.json();
+    if (!data.ok) {
+      res.innerHTML = "<div class='shell' style='color:var(--red);padding:16px'><b>Erro:</b> " + escapeHtml(data.error||'Falha') + "</div>";
+      return;
+    }
+    const r = data.result;
+    const dir = (r.direction||'OBSERVAR').toUpperCase();
+    const dirEmoji = dir==='CALL' ? '📈' : dir==='PUT' ? '📉' : '👁️';
+    const dirColor = dir==='CALL' ? 'var(--green)' : dir==='PUT' ? 'var(--purple)' : 'var(--gold)';
+    const confColor = r.confidence>=75 ? 'var(--green)' : r.confidence>=55 ? 'var(--gold)' : 'var(--red)';
+    const riskColor = r.risk==='baixo' ? 'var(--green)' : r.risk==='moderado' ? 'var(--gold)' : 'var(--red)';
+    const decisionColor = r.decision==='ENTRADA_FORTE' ? 'var(--green)' : r.decision==='ENTRADA_CAUTELA' ? 'var(--gold)' : 'var(--red)';
+    const reasons = (r.reasons||[]).map(x =>
+      "<div style='display:flex;gap:10px;padding:12px 14px;background:rgba(10,18,30,.95);border:1px solid rgba(105,175,255,.08);border-radius:14px;font-size:13px;color:#b8cde4;margin-bottom:8px'><span style='color:var(--teal);font-weight:900'>›</span>" + escapeHtml(x) + "</div>"
+    ).join('');
+
+    res.innerHTML = `
+      <div class='shell'>
+        <div style='text-align:center;margin-bottom:18px'>
+          <div style='font-size:48px;margin-bottom:8px'>${dirEmoji}</div>
+          <div style='font-size:32px;font-weight:900;color:${dirColor};letter-spacing:.04em'>${dir}</div>
+          <div style='font-size:13px;color:${decisionColor};font-weight:800;margin-top:6px;letter-spacing:.08em'>${escapeHtml(r.decision||'')}</div>
+          <div style='font-size:12px;color:#90a5c6;margin-top:4px'>Timeframe: ${visionTf}</div>
+        </div>
+        <div style='display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px'>
+          <div class='score-tile'><div class='label'>Confiança</div><div class='value' style='color:${confColor}'>${r.confidence}%</div></div>
+          <div class='score-tile'><div class='label'>Regime</div><div class='value' style='color:var(--cyan);font-size:15px'>${escapeHtml(r.regime||'--')}</div></div>
+          <div class='score-tile'><div class='label'>Setup</div><div class='value' style='color:var(--blue);font-size:15px'>${escapeHtml(r.setup||'--')}</div></div>
+          <div class='score-tile'><div class='label'>Risco</div><div class='value' style='color:${riskColor};font-size:15px'>${escapeHtml(r.risk||'--')}</div></div>
+        </div>
+        ${r.summary ? `<div style='padding:14px;background:rgba(95,245,220,.05);border:1px solid rgba(95,245,220,.12);border-radius:18px;color:#c4ffe8;font-size:14px;font-style:italic;text-align:center;margin-bottom:14px'>"${escapeHtml(r.summary)}"</div>` : ''}
+        <div style='margin-bottom:4px;font-size:11px;letter-spacing:.14em;color:#90a6c6;text-transform:uppercase'>Análise</div>
+        ${reasons}
+        <button onclick='visionClear()' style='width:100%;margin-top:10px;padding:14px;border-radius:18px;background:rgba(10,20,33,.95);border:1px solid rgba(105,175,255,.10);color:#90a5c6;font-size:14px;font-weight:800;cursor:pointer'>
+          📊 Analisar outro gráfico
+        </button>
+      </div>`;
+  } catch(e) {
+    res.innerHTML = "<div class='shell' style='color:var(--red);padding:16px'>Erro de conexão: " + escapeHtml(String(e)) + "</div>";
+  } finally {
+    loading.style.display = 'none';
+    btn.style.display = 'block';
+  }
+}
+
 </script>
 </body>
 </html>
