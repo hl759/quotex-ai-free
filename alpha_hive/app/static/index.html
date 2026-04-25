@@ -190,7 +190,7 @@ body:after{width:220px;height:220px;right:-80px;top:340px;background:rgba(111,74
       </div>
       <div class='right-stack'>
         <div id='liveBadge' class='live-pill'>● CARREGANDO</div>
-        <div id='scanStatusPill' class='refresh-btn' style='cursor:default;pointer-events:none;text-align:center;'>⟳ Escaneando</div>
+        <div id='scanStatusPill' class='refresh-btn' style='cursor:pointer;pointer-events:auto;text-align:center;'>↻ Atualizar agora</div>
       </div>
     </div>
     <div id='scan_error_msg' style='display:none;background:#7f1d1d;color:#fca5a5;padding:8px 14px;border-radius:8px;font-size:0.8rem;margin:6px 16px 0;word-break:break-all;'></div>
@@ -404,7 +404,7 @@ function saveCachedSnapshot(snapshot){
 }
 // ON-DEMAND MODE: sem polling automático — a IA só acorda quando você clica.
 const bootstrapSnapshot = window.__BOOTSTRAP_SNAPSHOT__ || null;
-const initialSnapshot = bootstrapSnapshot || loadCachedSnapshot();
+const initialSnapshot = null; // sem dados em cache — aguarda clique em "Atualizar agora"
 let staleAfterSeconds = 300;   // após 5 min mostra badge "INATIVO"
 let refreshInFlight = false;
 
@@ -632,7 +632,7 @@ function applySnapshot(d){
     if(pill){ pill.textContent='⟳ Escaneando...'; pill.style.color='var(--teal)'; }
     document.getElementById('scan_sub').textContent='Escaneando padrões de alta probabilidade...';
   } else {
-    if(pill){ pill.textContent='⟳ Escaneando'; pill.style.color=''; }
+    if(pill){ pill.textContent='↻ Atualizar agora'; pill.style.color=''; pill.style.pointerEvents='auto'; pill.style.cursor='pointer'; }
     if(refreshErr){
       document.getElementById('scan_sub').textContent='Erro: ' + String(refreshErr).slice(0, 120);
     } else {

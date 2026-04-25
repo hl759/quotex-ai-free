@@ -82,35 +82,15 @@ class ScanService:
         return max(0, int(now_ts - last_scan_ts))
 
     def _restore_runtime(self) -> None:
-        """Carrega o último estado do PostgreSQL no startup — IA nunca começa vazia."""
+        """Restaura apenas histórico do PostgreSQL — sinais e decisão começam vazios."""
         try:
             saved = self.store.get_json("scan_runtime_v1", {})
             if not saved:
                 return
-            for key in ("signals", "history", "current_decision"):
-                if key in saved:
-                    self.runtime[key] = saved[key]
-
-            now_ts = time.time()
-
-            # Marca current_decision expirado para não exibir sinal de ontem como ativo.
-            current = self.runtime.get("current_decision", {})
-            if isinstance(current, dict) and current:
-                expiration_ts = float(current.get("expiration_ts", 0) or 0)
-                if expiration_ts > 0 and now_ts > expiration_ts:
-                    current["expired"] = True
-                    current["entry_time"] = "--:--"
-                    current["expiration"] = "--:--"
-                    current["analysis_time"] = "--:--"
-
-            # Remove sinais cuja janela de entrada já passou.
-            signals = self.runtime.get("signals", [])
-            if isinstance(signals, list):
-                self.runtime["signals"] = [
-                    s for s in signals
-                    if float(s.get("expiration_ts", 0) or 0) <= 0
-                    or now_ts <= float(s.get("expiration_ts", 0) or 0)
-                ]
+            # Restaura só o histórico; sinais e current_decision ficam em branco
+            # até o usuário clicar em "Atualizar agora".
+            if "history" in saved:
+                self.runtime["history"] = saved["history"]
 
             saved_meta = saved.get("meta", {})
             if saved_meta:
