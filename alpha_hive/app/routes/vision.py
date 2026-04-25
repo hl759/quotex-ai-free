@@ -27,7 +27,11 @@ def analyze():
         resp = requests.post(GEMINI_URL,json=payload,params={"key":GEMINI_API_KEY},headers={"Content-Type":"application/json"},timeout=30)
         resp.raise_for_status()
         data = resp.json()
-        raw = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        candidates = data.get("candidates", [])
+        if not candidates:
+            reason = data.get("promptFeedback", {}).get("blockReason", "resposta vazia")
+            return jsonify({"ok": False, "error": f"Gemini bloqueou: {reason}", "raw": str(data)[:300]}), 500
+        raw = candidates[0]["content"]["parts"][0]["text"].strip()
         raw = re.sub(r"^```(?:json)?","",raw).strip()
         raw = re.sub(r"```$","",raw).strip()
         match = re.search(r"\{.*\}",raw,re.DOTALL)
