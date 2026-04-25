@@ -1,5 +1,6 @@
 from __future__ import annotations
 from flask import Blueprint, jsonify, current_app
+from alpha_hive.services.snapshot_service import SnapshotService
 
 bp = Blueprint("snapshot", __name__)
 
@@ -8,7 +9,6 @@ def _svc():
 
 @bp.get("/snapshot")
 def snapshot():
-    from alpha_hive.app.snapshot_service import SnapshotService
     scan_service = _svc()
     return jsonify(SnapshotService.build(scan_service.snapshot()))
 
