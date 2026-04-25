@@ -84,6 +84,7 @@ class PassiveWatcher:
     def ensure_started(self) -> None:
         if self._started:
             return
+        return  # DESLIGADO - modo visão apenas
         t = threading.Thread(target=self._loop, daemon=True, name="passive-watcher")
         t.start()
         self._started = True
