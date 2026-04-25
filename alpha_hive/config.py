@@ -72,7 +72,7 @@ class Settings:
     port: int = int(os.getenv("PORT", "10000"))
 
     run_background_scanner: bool = (
-        os.getenv("RUN_BACKGROUND_SCANNER", "1").strip().lower()
+        os.getenv("RUN_BACKGROUND_SCANNER","0").strip().lower()
         not in ("0", "false", "no")
     )
     scan_route_enabled: bool = (
