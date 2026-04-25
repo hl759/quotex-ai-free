@@ -14,7 +14,7 @@ def _bootstrap_snapshot(scan_service) -> dict:
     Apenas o background scanner inicia scans.
     Exceção: bootstrap (scan_count == 0) para ter dados na primeira abertura.
     """
-    scan_service.ensure_started()
+    pass  # DESLIGADO - modo visão only
 
     meta = scan_service.runtime.setdefault("meta", {})
     meta["last_snapshot_refresh_error"] = ""
@@ -56,7 +56,7 @@ def _bootstrap_snapshot(scan_service) -> dict:
 @bp.get("/")
 def home():
     scan_service = current_app.config["SCAN_SERVICE"]
-    scan_service.ensure_started()
+    pass  # DESLIGADO - modo visão only
     return current_app.send_static_file("index.html")
 
 
