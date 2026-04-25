@@ -811,7 +811,7 @@ async function visionAnalyze() {
     const fd = new FormData();
     fd.append('image', visionFile);
     fd.append('timeframe', visionTf);
-    const resp = await fetch(API_BASE + '/vision/analyze', {method:'POST', body:fd});
+    const resp = await fetch((window.API_BASE||'') + '/vision/analyze', {method:'POST', body:fd});
     const data = await resp.json();
     if (!data.ok) {
       res.innerHTML = "<div class='shell' style='color:var(--red);padding:16px'><b>Erro:</b> " + escapeHtml(data.error||'Falha') + "</div>";
