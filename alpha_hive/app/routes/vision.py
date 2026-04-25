@@ -11,8 +11,9 @@ PROMPT = """Analise este gráfico de opções binárias e retorne APENAS JSON se
 CALL=alta. PUT=baixa. Confiança>75=ENTRADA_FORTE, 55-75=ENTRADA_CAUTELA, <55=OBSERVAR. SOMENTE JSON."""
 
 MODELS = [
-    "gemini-2.0-flash",
+    "gemini-pro-vision",
     "gemini-1.5-flash",
+    "gemini-2.0-flash",
     "gemini-1.5-flash-8b",
 ]
 
