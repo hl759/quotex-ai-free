@@ -822,6 +822,8 @@ async function visionMarkResult(outcome){
     if(d.ok){
       const chosen=document.getElementById('visionBtn'+outcome.charAt(0).toUpperCase()+outcome.slice(1));
       if(chosen){ chosen.style.opacity='1'; chosen.style.fontWeight='900'; chosen.textContent=(outcome==='win'?'✅ WIN salvo!':'❌ LOSS salvo!'); }
+      // Atualiza stats imediatamente
+      setTimeout(()=>{ visionStatsLoad(); }, 500);
       lastAnalysisId=null;
     }
   } catch(e){ btns.forEach(b=>{ b.disabled=false; b.style.opacity='1'; }); }
