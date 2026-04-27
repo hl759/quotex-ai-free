@@ -346,6 +346,14 @@ body:after{width:220px;height:220px;right:-80px;top:340px;background:rgba(111,74
       <div class='panel-card'><div class='panel-head'><h3>Histórico recente</h3><div class='mini-badge'>Últimas leituras</div></div><div id='history_container' class='list-grid'></div></div>
     </div>
     <div class='panel' id='stats'>
+      <!-- Stats Visão IA -->
+      <div id='visionStatsPanel' style='display:none;margin-bottom:14px'>
+        <div class='panel-card' style='padding:16px'>
+          <div class='panel-head'><h3>📸 Visão IA — Desempenho</h3><div class='mini-badge' id='visionStatsWR'>--</div></div>
+          <div style='display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px' id='visionStatsTiles'></div>
+          <div id='visionStatsRegimes'></div>
+        </div>
+      </div>
       <div class='panel-card'><div class='panel-head'><h3>Aprendizado e performance</h3><div class='mini-badge'>IA adaptativa</div></div><div id='stats_panel_container'></div></div>
     </div>
     <div class='panel' id='assets'>
@@ -644,6 +652,7 @@ function applySnapshot(d){
   renderBestAssets(s.best_assets);
   renderBestHours(s.best_hours);
   renderStatsPanel(s);
+    visionStatsLoad();
   fillCapitalForm(s.capital_state || {});
   updateLiveBadge(s.meta || {});
   document.body.classList.remove('pre-hydrate');
@@ -762,79 +771,103 @@ document.addEventListener('DOMContentLoaded', function(){
   document.addEventListener('visibilitychange', function(){ if(!document.hidden){ refreshSnapshot(true); } });
 });
 
+
+
 // ── VISÃO ────────────────────────────────────────────────────────────────
-let visionFile = null;
-let visionTf = 'M1';
+let visionFile=null, visionTf='M1', lastAnalysisId=null;
 
-function visionSetTf(tf) {
-  visionTf = tf;
-  const active = 'background:linear-gradient(180deg,rgba(37,99,103,.98),rgba(15,57,67,.98));border:1px solid rgba(95,245,220,.28);color:#ecfffc;font-size:15px;font-weight:900;cursor:pointer;padding:14px;border-radius:18px';
-  const inactive = 'background:linear-gradient(180deg,rgba(9,20,33,.96),rgba(8,16,26,.96));border:1px solid rgba(105,175,255,.10);color:#90a5c6;font-size:15px;font-weight:900;cursor:pointer;padding:14px;border-radius:18px';
-  document.getElementById('visionTfM1').style.cssText = tf==='M1' ? active : inactive;
-  document.getElementById('visionTfM5').style.cssText = tf==='M5' ? active : inactive;
+function visionSetTf(tf){
+  visionTf=tf;
+  const a='padding:14px;border-radius:18px;background:linear-gradient(180deg,rgba(37,99,103,.98),rgba(15,57,67,.98));border:1px solid rgba(95,245,220,.28);color:#ecfffc;font-size:15px;font-weight:900;cursor:pointer';
+  const i='padding:14px;border-radius:18px;background:linear-gradient(180deg,rgba(9,20,33,.96),rgba(8,16,26,.96));border:1px solid rgba(105,175,255,.10);color:#90a5c6;font-size:15px;font-weight:900;cursor:pointer';
+  document.getElementById('visionTfM1').style.cssText=tf==='M1'?a:i;
+  document.getElementById('visionTfM5').style.cssText=tf==='M5'?a:i;
 }
 
-function visionFileSelected(input) {
-  const file = input.files[0];
-  if (!file) return;
-  visionFile = file;
-  document.getElementById('visionImg').src = URL.createObjectURL(file);
-  document.getElementById('visionPreview').style.display = 'block';
-  document.getElementById('visionDrop').style.display = 'none';
-  const btn = document.getElementById('visionBtn');
-  btn.style.display = 'block';
-  btn.disabled = false;
-  document.getElementById('visionResult').innerHTML = '';
+function visionFileSelected(input){
+  const file=input.files[0]; if(!file) return;
+  visionFile=file;
+  document.getElementById('visionImg').src=URL.createObjectURL(file);
+  document.getElementById('visionPreview').style.display='block';
+  document.getElementById('visionDrop').style.display='none';
+  const btn=document.getElementById('visionBtn');
+  btn.style.display='block'; btn.disabled=false;
+  document.getElementById('visionResult').innerHTML='';
+  lastAnalysisId=null;
 }
 
-function visionClear() {
-  visionFile = null;
-  document.getElementById('visionImg').src = '';
-  document.getElementById('visionPreview').style.display = 'none';
-  document.getElementById('visionDrop').style.display = 'flex';
-  const btn = document.getElementById('visionBtn');
-  btn.style.display = 'none';
-  btn.disabled = true;
-  document.getElementById('visionResult').innerHTML = '';
-  document.getElementById('visionInput').value = '';
+function visionClear(){
+  visionFile=null;
+  document.getElementById('visionImg').src='';
+  document.getElementById('visionPreview').style.display='none';
+  document.getElementById('visionDrop').style.display='flex';
+  const btn=document.getElementById('visionBtn');
+  btn.style.display='none'; btn.disabled=true;
+  document.getElementById('visionResult').innerHTML='';
+  document.getElementById('visionInput').value='';
+  lastAnalysisId=null;
 }
 
-async function visionAnalyze() {
-  if (!visionFile) return;
-  const btn = document.getElementById('visionBtn');
-  const loading = document.getElementById('visionLoading');
-  const res = document.getElementById('visionResult');
-  btn.style.display = 'none';
-  loading.style.display = 'block';
-  res.innerHTML = '';
-  try {
-    const fd = new FormData();
-    fd.append('image', visionFile);
-    fd.append('timeframe', visionTf);
-    const resp = await fetch((window.API_BASE||'') + '/vision/analyze', {method:'POST', body:fd});
-    const data = await resp.json();
-    if (!data.ok) {
-      res.innerHTML = "<div class='shell' style='color:var(--red);padding:16px'><b>Erro:</b> " + escapeHtml(data.error||'Falha') + "</div>";
-      return;
+async function visionMarkResult(outcome){
+  if(!lastAnalysisId){ alert('Análise sem ID - não foi possível salvar'); return; }
+  const btns=document.querySelectorAll('.vision-outcome-btn');
+  btns.forEach(b=>{ b.disabled=true; b.style.opacity='0.5'; });
+  try{
+    const r=await fetch((window.API_BASE||'')+'/vision/result',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({analysis_id:lastAnalysisId,result:outcome})
+    });
+    const d=await r.json();
+    if(d.ok){
+      const chosen=document.getElementById('visionBtn'+outcome.charAt(0).toUpperCase()+outcome.slice(1));
+      if(chosen){ chosen.style.opacity='1'; chosen.style.fontWeight='900'; chosen.textContent=(outcome==='win'?'✅ WIN salvo!':'❌ LOSS salvo!'); }
+      lastAnalysisId=null;
     }
-    const r = data.result;
-    const dir = (r.direction||'OBSERVAR').toUpperCase();
-    const dirEmoji = dir==='CALL' ? '📈' : dir==='PUT' ? '📉' : '👁️';
-    const dirColor = dir==='CALL' ? 'var(--green)' : dir==='PUT' ? 'var(--purple)' : 'var(--gold)';
-    const confColor = r.confidence>=75 ? 'var(--green)' : r.confidence>=55 ? 'var(--gold)' : 'var(--red)';
-    const riskColor = r.risk==='baixo' ? 'var(--green)' : r.risk==='moderado' ? 'var(--gold)' : 'var(--red)';
-    const decisionColor = r.decision==='ENTRADA_FORTE' ? 'var(--green)' : r.decision==='ENTRADA_CAUTELA' ? 'var(--gold)' : 'var(--red)';
-    const reasons = (r.reasons||[]).map(x =>
-      "<div style='display:flex;gap:10px;padding:12px 14px;background:rgba(10,18,30,.95);border:1px solid rgba(105,175,255,.08);border-radius:14px;font-size:13px;color:#b8cde4;margin-bottom:8px'><span style='color:var(--teal);font-weight:900'>›</span>" + escapeHtml(x) + "</div>"
-    ).join('');
+  } catch(e){ btns.forEach(b=>{ b.disabled=false; b.style.opacity='1'; }); }
+}
 
-    res.innerHTML = `
-      <div class='shell'>
-        <div style='text-align:center;margin-bottom:18px'>
+async function visionAnalyze(){
+  if(!visionFile) return;
+  const btn=document.getElementById('visionBtn');
+  const loading=document.getElementById('visionLoading');
+  const res=document.getElementById('visionResult');
+  btn.style.display='none';
+  loading.style.display='block';
+  res.innerHTML='';
+  try{
+    const fd=new FormData();
+    fd.append('image',visionFile);
+    fd.append('timeframe',visionTf);
+    const resp=await fetch((window.API_BASE||'')+'/vision/analyze',{method:'POST',body:fd});
+    const data=await resp.json();
+    if(!data.ok){ res.innerHTML="<div class='panel-card' style='padding:16px;color:var(--red)'>Erro: "+escapeHtml(data.error||'Falha')+"</div>"; return; }
+    const r=data.result;
+    lastAnalysisId=r.analysis_id||null;
+    const dir=(r.direction||'OBSERVAR').toUpperCase();
+    const dirEmoji=dir==='CALL'?'📈':dir==='PUT'?'📉':'👁️';
+    const dirColor=dir==='CALL'?'var(--green)':dir==='PUT'?'var(--purple)':'var(--gold)';
+    const confColor=r.confidence>=75?'var(--green)':r.confidence>=55?'var(--gold)':'var(--red)';
+    const riskColor=r.risk==='baixo'?'var(--green)':r.risk==='moderado'?'var(--gold)':'var(--red)';
+    const decColor=r.decision==='ENTRADA_FORTE'?'var(--green)':r.decision==='ENTRADA_CAUTELA'?'var(--gold)':'var(--red)';
+    const reasons=(r.reasons||[]).map(x=>"<div style='display:flex;gap:10px;padding:12px 14px;background:rgba(10,18,30,.95);border:1px solid rgba(105,175,255,.08);border-radius:14px;font-size:13px;color:#b8cde4;margin-bottom:8px'><span style='color:var(--teal);font-weight:900'>›</span>"+escapeHtml(x)+"</div>").join('');
+    const statsHtml=r.stats?`<div style='padding:10px 14px;background:rgba(95,245,220,.05);border:1px solid rgba(95,245,220,.10);border-radius:14px;font-size:12px;color:#90a5c6;margin-bottom:12px;text-align:center'>📊 Base histórica: <b style='color:var(--teal)'>${r.stats.total}</b> operações • Win rate: <b style='color:${r.stats.win_rate>=60?'var(--green)':r.stats.win_rate>=45?'var(--gold)':'var(--red)'}'>${r.stats.win_rate}%</b></div>`:'';
+    const winLossHtml=lastAnalysisId?`
+      <div style='margin-top:14px'>
+        <div style='font-size:11px;letter-spacing:.14em;color:#90a6c6;text-transform:uppercase;margin-bottom:8px;text-align:center'>Como foi a operação?</div>
+        <div style='display:grid;grid-template-columns:1fr 1fr;gap:10px'>
+          <button id='visionBtnWin' class='vision-outcome-btn' onclick='visionMarkResult("win")' style='padding:16px;border-radius:18px;background:linear-gradient(180deg,rgba(28,77,61,.96),rgba(16,42,35,.98));border:1px solid rgba(95,245,220,.24);color:#dffff7;font-size:15px;font-weight:900;cursor:pointer'>✅ WIN</button>
+          <button id='visionBtnLoss' class='vision-outcome-btn' onclick='visionMarkResult("loss")' style='padding:16px;border-radius:18px;background:linear-gradient(180deg,rgba(66,27,34,.96),rgba(37,13,18,.98));border:1px solid rgba(255,111,125,.24);color:#ffd0d5;font-size:15px;font-weight:900;cursor:pointer'>❌ LOSS</button>
+        </div>
+      </div>`:'' ;
+    res.innerHTML=`
+      <div class='panel-card' style='padding:16px'>
+        ${statsHtml}
+        <div style='text-align:center;margin-bottom:16px'>
           <div style='font-size:48px;margin-bottom:8px'>${dirEmoji}</div>
-          <div style='font-size:32px;font-weight:900;color:${dirColor};letter-spacing:.04em'>${dir}</div>
-          <div style='font-size:13px;color:${decisionColor};font-weight:800;margin-top:6px;letter-spacing:.08em'>${escapeHtml(r.decision||'')}</div>
-          <div style='font-size:12px;color:#90a5c6;margin-top:4px'>Timeframe: ${visionTf}</div>
+          <div style='font-size:34px;font-weight:900;color:${dirColor};letter-spacing:.04em'>${dir}</div>
+          <div style='font-size:14px;font-weight:900;color:${decColor};margin-top:6px;letter-spacing:.08em'>${escapeHtml(r.decision||'')}</div>
+          <div style='font-size:12px;color:#90a5c6;margin-top:4px'>Timeframe: ${visionTf} • Conselho de 100 traders</div>
         </div>
         <div style='display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px'>
           <div class='score-tile'><div class='label'>Confiança</div><div class='value' style='color:${confColor}'>${r.confidence}%</div></div>
@@ -842,18 +875,17 @@ async function visionAnalyze() {
           <div class='score-tile'><div class='label'>Setup</div><div class='value' style='color:var(--blue);font-size:15px'>${escapeHtml(r.setup||'--')}</div></div>
           <div class='score-tile'><div class='label'>Risco</div><div class='value' style='color:${riskColor};font-size:15px'>${escapeHtml(r.risk||'--')}</div></div>
         </div>
-        ${r.summary ? `<div style='padding:14px;background:rgba(95,245,220,.05);border:1px solid rgba(95,245,220,.12);border-radius:18px;color:#c4ffe8;font-size:14px;font-style:italic;text-align:center;margin-bottom:14px'>"${escapeHtml(r.summary)}"</div>` : ''}
-        <div style='margin-bottom:4px;font-size:11px;letter-spacing:.14em;color:#90a6c6;text-transform:uppercase'>Análise</div>
+        ${r.summary?`<div style='padding:12px;background:rgba(95,245,220,.05);border:1px solid rgba(95,245,220,.12);border-radius:16px;color:#c4ffe8;font-size:13px;font-style:italic;margin-bottom:12px;text-align:center'>"${escapeHtml(r.summary)}"</div>`:''}
+        <div style='margin-bottom:8px;font-size:11px;letter-spacing:.14em;color:#90a6c6;text-transform:uppercase'>Análise do conselho</div>
         ${reasons}
-        <button onclick='visionClear()' style='width:100%;margin-top:10px;padding:14px;border-radius:18px;background:rgba(10,20,33,.95);border:1px solid rgba(105,175,255,.10);color:#90a5c6;font-size:14px;font-weight:800;cursor:pointer'>
-          📊 Analisar outro gráfico
-        </button>
+        ${winLossHtml}
+        <button onclick='visionClear()' style='width:100%;margin-top:12px;padding:14px;border-radius:18px;background:rgba(10,20,33,.95);border:1px solid rgba(105,175,255,.10);color:#90a5c6;font-size:14px;font-weight:800;cursor:pointer'>📊 Analisar outro gráfico</button>
       </div>`;
-  } catch(e) {
-    res.innerHTML = "<div class='shell' style='color:var(--red);padding:16px'>Erro de conexão: " + escapeHtml(String(e)) + "</div>";
-  } finally {
-    loading.style.display = 'none';
-    btn.style.display = 'block';
+  } catch(e){
+    res.innerHTML="<div class='panel-card' style='padding:16px;color:var(--red)'>Erro: "+escapeHtml(String(e))+"</div>";
+  } finally{
+    loading.style.display='none';
+    btn.style.display='block';
   }
 }
 
