@@ -852,6 +852,21 @@ async function visionAnalyze(){
     const confColor=r.confidence>=75?'var(--green)':r.confidence>=55?'var(--gold)':'var(--red)';
     const riskColor=r.risk==='baixo'?'var(--green)':r.risk==='moderado'?'var(--gold)':'var(--red)';
     const decColor=r.decision==='ENTRADA_FORTE'?'var(--green)':r.decision==='ENTRADA_CAUTELA'?'var(--gold)':'var(--red)';
+    const votesHtml=r.votes?`
+      <div style='display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px'>
+        <div style='padding:12px;background:rgba(28,77,61,.3);border:1px solid rgba(95,245,220,.2);border-radius:14px;text-align:center'>
+          <div style='font-size:11px;color:#90a6c6;letter-spacing:.1em'>CALL</div>
+          <div style='font-size:22px;font-weight:900;color:var(--green)'>${r.votes.call}</div>
+        </div>
+        <div style='padding:12px;background:rgba(66,27,34,.3);border:1px solid rgba(255,111,125,.2);border-radius:14px;text-align:center'>
+          <div style='font-size:11px;color:#90a6c6;letter-spacing:.1em'>PUT</div>
+          <div style='font-size:22px;font-weight:900;color:var(--red)'>${r.votes.put}</div>
+        </div>
+        <div style='padding:12px;background:rgba(62,56,25,.3);border:1px solid rgba(255,204,89,.2);border-radius:14px;text-align:center'>
+          <div style='font-size:11px;color:#90a6c6;letter-spacing:.1em'>OBS</div>
+          <div style='font-size:22px;font-weight:900;color:var(--gold)'>${r.votes.observe}</div>
+        </div>
+      </div>`:'';
     const reasons=(r.reasons||[]).map(x=>"<div style='display:flex;gap:10px;padding:12px 14px;background:rgba(10,18,30,.95);border:1px solid rgba(105,175,255,.08);border-radius:14px;font-size:13px;color:#b8cde4;margin-bottom:8px'><span style='color:var(--teal);font-weight:900'>›</span>"+escapeHtml(x)+"</div>").join('');
     const statsHtml=r.stats?`<div style='padding:10px 14px;background:rgba(95,245,220,.05);border:1px solid rgba(95,245,220,.10);border-radius:14px;font-size:12px;color:#90a5c6;margin-bottom:12px;text-align:center'>📊 Base histórica: <b style='color:var(--teal)'>${r.stats.total}</b> operações • Win rate: <b style='color:${r.stats.win_rate>=60?'var(--green)':r.stats.win_rate>=45?'var(--gold)':'var(--red)'}'>${r.stats.win_rate}%</b></div>`:'';
     const winLossHtml=lastAnalysisId?`
@@ -879,7 +894,7 @@ async function visionAnalyze(){
         </div>
         ${r.summary?`<div style='padding:12px;background:rgba(95,245,220,.05);border:1px solid rgba(95,245,220,.12);border-radius:16px;color:#c4ffe8;font-size:13px;font-style:italic;margin-bottom:12px;text-align:center'>"${escapeHtml(r.summary)}"</div>`:''}
         <div style='margin-bottom:8px;font-size:11px;letter-spacing:.14em;color:#90a6c6;text-transform:uppercase'>Análise do conselho</div>
-        ${reasons}
+        ${votesHtml}${reasons}
         ${winLossHtml}
         <button onclick='visionClear()' style='width:100%;margin-top:12px;padding:14px;border-radius:18px;background:rgba(10,20,33,.95);border:1px solid rgba(105,175,255,.10);color:#90a5c6;font-size:14px;font-weight:800;cursor:pointer'>📊 Analisar outro gráfico</button>
       </div>`;
