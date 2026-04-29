@@ -22,10 +22,13 @@ class DataManager:
         self.router = ProviderRouter()
         self.health = ProviderHealthRegistry()
         self.request_headers = {
-            "User-Agent": "AlphaHiveAI/2.0",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
             "Accept": "application/json,text/plain,*/*",
-            "Accept-Encoding": "gzip, deflate",
-            "Accept-Encoding": "gzip, deflate",
+            "Accept-Language": "en-US,en;q=0.9",
         }
         self.key_usage = [
             {"key": key, "daily": 0, "minute": 0, "minute_window_start": time.time()}
@@ -397,25 +400,33 @@ class DataManager:
             return []
 
         interval_value = "5m" if interval == "5min" else "1m"
+        now_ts = int(time.time())
+
         if interval == "5min":
-            range_value = "5d"
-        elif outputsize > 390:
-            range_value = "5d"
-        elif outputsize > 180:
-            range_value = "2d"
+            # M5: pede exatamente o necessário + 10min de margem
+            lookback = outputsize * 300 + 600
         else:
-            range_value = "1d"
+            # M1: pede barras necessárias + 20min de margem.
+            # Janela anterior (10800s = 3h) baixava 3x mais dados que o necessário.
+            lookback = outputsize * 60 + 1200  # ~80min para outputsize=60
 
         data = self._http_get_json(
             f"https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_symbol}",
             params={
                 "interval": interval_value,
-                "range": range_value,
+                "period1": now_ts - lookback,
+                "period2": now_ts,
                 "includePrePost": "true",
             },
-            timeout=4,
+            timeout=5,
         )
         candles = self._trim(yahoo.normalize(data or {}, limit=outputsize), outputsize)
+
+        # REMOVIDO: fallback range=1d baixava o dia inteiro (400–800 KB por ativo).
+        # Com 16 ativos × 60s de scan, esse fallback gerava centenas de GB/mês.
+        # Se a janela curta retornar poucos candles, o scanner descarta o ativo
+        # pela validação de frescor (candle_age > 120s) ou contagem mínima (>= 5).
+
         if candles:
             self._set_cache("yahoo", symbol, interval, candles)
             self._remember(symbol, "yahoo")
@@ -424,6 +435,11 @@ class DataManager:
 
         self.health.mark_failure("yahoo", "request_failed")
         return []
+
+    def clear_cache(self) -> None:
+        """Limpa todo o cache HTTP em memória. Chamado após scan on-demand."""
+        with self.cache_lock:
+            self.cache.clear()
 
     def get_candles(self, symbol: str, interval: str = "1min", outputsize: int = 50) -> Tuple[List[Candle], List[str]]:
         chain = self.router.provider_chain_for(symbol)

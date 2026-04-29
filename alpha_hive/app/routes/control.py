@@ -1,59 +1,40 @@
 from __future__ import annotations
 
-import time
 from flask import Blueprint, current_app, jsonify, request
 
-bp = Blueprint("control", __name__)
+from alpha_hive.services.snapshot_service import SnapshotService
 
-_last_trigger_ts: float = 0.0
+bp = Blueprint("control", __name__)
+snapshot_service = SnapshotService()
 
 
 @bp.route("/atualizar", methods=["GET", "POST"])
 @bp.route("/run-scan", methods=["GET", "POST"])
 def atualizar():
-    """Active Decision Mode trigger — equivalente ao 'atualizar agora'."""
-    global _last_trigger_ts
-
+    """Executa um scan manual e devolve snapshot pronto para a UI renderizar."""
     settings = current_app.config["SETTINGS"]
-
-    if not settings.scan_route_enabled:
-        return jsonify({"ok": False, "error": "scan_route_disabled"}), 403
-
     if settings.scan_trigger_token:
-        provided = (
-            request.args.get("token")
-            or request.headers.get("X-Scan-Token")
-            or ""
-        )
+        provided = request.args.get("token") or request.headers.get("X-Scan-Token") or ""
         if provided != settings.scan_trigger_token:
             return jsonify({"ok": False, "error": "unauthorized"}), 401
 
-    now = time.time()
-    elapsed = now - _last_trigger_ts
-    min_interval = max(30, int(
-        getattr(settings, "request_scan_min_interval_seconds", 120) or 120
-    ))
-
-    if elapsed < min_interval and _last_trigger_ts > 0:
-        return jsonify({
-            "ok": False,
-            "skipped": True,
-            "reason": "cooldown",
-            "retry_after_seconds": int(min_interval - elapsed),
-        })
-
-    _last_trigger_ts = now
     service = current_app.config["SCAN_SERVICE"]
-    service.ensure_started()
-    result = service.run_once("atualizar_agora")
-    return jsonify(result)
+    result = service.run_once("manual")
+    audit_report = service.audit.compute_report()
+    snapshot = snapshot_service.build(service.snapshot(), audit_report=audit_report)
+    return jsonify({"ok": True, "scan": result, "snapshot": snapshot})
 
 
-@bp.get("/passive-status")
-def passive_status():
-    """Diagnóstico do Passive Intelligence Mode."""
+@bp.get("/scan-status")
+def scan_status():
+    """Status do loop autônomo de scan."""
     service = current_app.config["SCAN_SERVICE"]
-    watcher = getattr(service, "passive_watcher", None)
-    if not watcher:
-        return jsonify({"error": "passive_watcher_not_available"}), 503
-    return jsonify(watcher.diagnostics())
+    meta = service._meta()
+    return jsonify({
+        "loop_active": service._started,
+        "scan_interval_seconds": current_app.config["SETTINGS"].scan_interval_seconds,
+        "last_scan": meta.get("last_scan", "--"),
+        "last_scan_age_seconds": service._scan_age_seconds(),
+        "scan_count": meta.get("scan_count", 0),
+        "scan_in_progress": meta.get("scan_in_progress", False),
+    })

@@ -1,0 +1,40 @@
+# Render deployment — Alpha Hive AI
+#
+# Dois serviços:
+#  1. "alpha-hive-static"  → site estático (frontend only, não dorme)
+#     Aponta para o backend no Fly.io via config.js / BACKEND_URL.
+#
+#  2. "alpha-hive-backend" → web service Flask completo (monolito)
+#     Use este se preferir manter tudo no Render (dorme após 15 min de inatividade).
+#     Para evitar sono: use o Fly.io via fly.toml.
+
+services:
+
+  # ── Opção A: Frontend estático no Render (recomendado para split deploy) ──
+  - type: web
+    name: alpha-hive-static
+    env: static
+    staticPublishPath: alpha_hive/app/static
+    buildCommand: |
+      echo "window.BACKEND_URL = '${BACKEND_URL}';" > alpha_hive/app/static/config.js
+    envVars:
+      - key: BACKEND_URL
+        value: ""   # Preencha com a URL do Fly.io, ex: https://alpha-hive-ai.fly.dev
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
+  # ── Opção B: Backend Flask completo (monolito, dorme no free tier) ─────────
+  - type: web
+    name: alpha-hive-backend
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --workers 1 --threads 2 --bind 0.0.0.0:$PORT --timeout 180 --keep-alive 5 app:app
+    envVars:
+      - key: DATABASE_URL
+        sync: false   # Defina manualmente no painel do Render
+      - key: CORS_ORIGINS
+        value: ""     # Ex: https://alpha-hive-static.onrender.com
+      - key: SCANNER_MAX_WORKERS
+        value: "3"

@@ -10,25 +10,34 @@ from alpha_hive.council.council_engine import CouncilEngine
 from alpha_hive.audit.edge_audit import EdgeAuditEngine
 from alpha_hive.intelligence.feature_engine import FeatureEngine
 from alpha_hive.learning.learning_engine import LearningEngine
+from alpha_hive.learning.specialist_reputation_engine import SpecialistReputationEngine
 from alpha_hive.risk.capital_mind_engine import CapitalMindEngine
 from alpha_hive.risk.edge_guard import EdgeGuard
 from alpha_hive.specialists.breakout_specialist import BreakoutSpecialist
 from alpha_hive.specialists.data_quality_specialist import DataQualitySpecialist
 from alpha_hive.specialists.mean_reversion_specialist import MeanReversionSpecialist
+from alpha_hive.specialists.price_action_specialist import PriceActionSpecialist
 from alpha_hive.specialists.regime_specialist import RegimeSpecialist
 from alpha_hive.specialists.reversal_specialist import ReversalSpecialist
 from alpha_hive.specialists.session_specialist import SessionSpecialist
+from alpha_hive.specialists.smart_money_specialist import SmartMoneySpecialist
+from alpha_hive.specialists.structure_specialist import StructureSpecialist
 from alpha_hive.specialists.timing_specialist import TimingSpecialist
 from alpha_hive.specialists.trend_specialist import TrendSpecialist
 from alpha_hive.specialists.volatility_specialist import VolatilitySpecialist
 
 
 class DecisionEngine:
-    def __init__(self):
+    def __init__(
+        self,
+        learning_engine: LearningEngine | None = None,
+        audit_engine: EdgeAuditEngine | None = None,
+        reputation_engine: SpecialistReputationEngine | None = None,
+    ):
         self.feature_engine = FeatureEngine()
-        self.learning = LearningEngine()
-        self.audit = EdgeAuditEngine()
-        self.council = CouncilEngine()
+        self.learning = learning_engine or LearningEngine()
+        self.audit = audit_engine or EdgeAuditEngine()
+        self.council = CouncilEngine(reputation_engine=reputation_engine)
         self.edge_guard = EdgeGuard()
         self.capital_mind = CapitalMindEngine()
         self.specialists = [
@@ -41,6 +50,9 @@ class DecisionEngine:
             TimingSpecialist(),
             SessionSpecialist(),
             DataQualitySpecialist(),
+            PriceActionSpecialist(),
+            SmartMoneySpecialist(),
+            StructureSpecialist(),
         ]
 
     def _hour_bucket(self) -> str:

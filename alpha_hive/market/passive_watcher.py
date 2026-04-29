@@ -82,6 +82,7 @@ class PassiveWatcher:
             return dict(self._contexts)
 
     def ensure_started(self) -> None:
+        """Inicia loop daemon. Usar apenas quando RUN_BACKGROUND_SCANNER=1."""
         if self._started:
             return
         return  # DESLIGADO - modo visão apenas
@@ -91,6 +92,28 @@ class PassiveWatcher:
 
     def stop(self) -> None:
         self._stop_event.set()
+
+    def run_one_cycle(self) -> int:
+        """
+        Executa um ciclo síncrono de coleta para todos os assets.
+        Usado pelo modo on-demand (sem thread em background).
+        Retorna o número de assets atualizados com sucesso.
+        """
+        return self._passive_cycle()
+
+    def clear_contexts(self) -> None:
+        """
+        Libera candles e dados calculados de todos os contextos.
+        Chamado após cada scan on-demand para reduzir footprint de memória.
+        Os contextos são re-populados no próximo run_one_cycle().
+        """
+        with self._lock:
+            for ctx in self._contexts.values():
+                ctx.candles_m1.clear()
+                ctx.candles_m5 = []
+                ctx.is_initialized = False
+                ctx.last_updated_ts = 0.0
+                ctx._rsi_initialized = False
 
     def diagnostics(self) -> Dict[str, Any]:
         with self._lock:

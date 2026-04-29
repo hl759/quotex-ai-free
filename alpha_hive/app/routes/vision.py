@@ -1,17 +1,25 @@
 from __future__ import annotations
-import base64, json, os, re, hashlib
+import base64, hashlib, json, os, re, time, uuid
+from datetime import datetime, timezone
+
 import requests
 import psycopg2
 import psycopg2.extras
-from datetime import datetime
-from flask import Blueprint, jsonify, request, current_app
+from flask import Blueprint, jsonify, request
+
+from alpha_hive.audit.edge_audit import EdgeAuditEngine
+from alpha_hive.audit.journal_manager import JournalManager
+from alpha_hive.learning.learning_engine import LearningEngine
+from alpha_hive.storage.state_store import get_state_store
 
 bp = Blueprint("vision", __name__)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GROQ_API_KEY   = os.getenv("GROQ_API_KEY", "").strip()
 DATABASE_URL   = os.getenv("DATABASE_URL", "").strip()
 
-# ── DB ───────────────────────────────────────────────────────────────────────
+VISION_COLLECTION = "vision_analyses_v1"
+
+# ── DB ────────────────────────────────────────────────────────────────────────
 
 def _db():
     return psycopg2.connect(DATABASE_URL, connect_timeout=5)
@@ -45,71 +53,49 @@ def _init_db():
 
 _init_db()
 
-# ── STATS / CONTEXT ──────────────────────────────────────────────────────────
+# ── STATS / CONTEXT ───────────────────────────────────────────────────────────
 
 def _get_stats():
-    """Busca estatísticas dos últimos 200 resultados para montar contexto adaptativo."""
     if not DATABASE_URL:
         return None
     try:
         with _db() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                # Total e win rate geral
                 cur.execute("""
-                    SELECT
-                        COUNT(*) as total,
+                    SELECT COUNT(*) as total,
                         SUM(CASE WHEN result='win' THEN 1 ELSE 0 END) as wins,
                         SUM(CASE WHEN result='loss' THEN 1 ELSE 0 END) as losses,
                         ROUND(AVG(confidence)) as avg_confidence
-                    FROM vision_analyses
-                    WHERE result IN ('win','loss')
-                    ORDER BY created_at DESC
-                    LIMIT 200
+                    FROM vision_analyses WHERE result IN ('win','loss')
                 """)
                 overall = cur.fetchone()
-
-                # Win rate por regime
                 cur.execute("""
-                    SELECT regime,
-                        COUNT(*) as total,
+                    SELECT regime, COUNT(*) as total,
                         SUM(CASE WHEN result='win' THEN 1 ELSE 0 END) as wins
-                    FROM vision_analyses
-                    WHERE result IN ('win','loss') AND regime IS NOT NULL
+                    FROM vision_analyses WHERE result IN ('win','loss') AND regime IS NOT NULL
                     GROUP BY regime ORDER BY total DESC LIMIT 10
                 """)
                 by_regime = cur.fetchall()
-
-                # Win rate por setup
                 cur.execute("""
-                    SELECT setup,
-                        COUNT(*) as total,
+                    SELECT setup, COUNT(*) as total,
                         SUM(CASE WHEN result='win' THEN 1 ELSE 0 END) as wins
-                    FROM vision_analyses
-                    WHERE result IN ('win','loss') AND setup IS NOT NULL
+                    FROM vision_analyses WHERE result IN ('win','loss') AND setup IS NOT NULL
                     GROUP BY setup ORDER BY total DESC
                 """)
                 by_setup = cur.fetchall()
-
-                # Win rate por direção
                 cur.execute("""
-                    SELECT direction,
-                        COUNT(*) as total,
+                    SELECT direction, COUNT(*) as total,
                         SUM(CASE WHEN result='win' THEN 1 ELSE 0 END) as wins
-                    FROM vision_analyses
-                    WHERE result IN ('win','loss') AND direction IS NOT NULL
+                    FROM vision_analyses WHERE result IN ('win','loss') AND direction IS NOT NULL
                     GROUP BY direction
                 """)
                 by_direction = cur.fetchall()
-
-                # Últimas 10 análises para padrão recente
                 cur.execute("""
                     SELECT direction, regime, setup, confidence, result, summary
-                    FROM vision_analyses
-                    WHERE result IN ('win','loss')
+                    FROM vision_analyses WHERE result IN ('win','loss')
                     ORDER BY created_at DESC LIMIT 10
                 """)
                 recent = cur.fetchall()
-
                 return {
                     "overall": dict(overall) if overall else {},
                     "by_regime": [dict(r) for r in by_regime],
@@ -122,59 +108,47 @@ def _get_stats():
         return None
 
 def _build_context(stats, timeframe):
-    """Monta o contexto adaptativo com 'memória coletiva' dos trades anteriores."""
     if not stats or not stats["overall"].get("total"):
         return ""
-
     o = stats["overall"]
     total = int(o.get("total") or 0)
     if total == 0:
         return ""
-
     wins = int(o.get("wins") or 0)
     losses = int(o.get("losses") or 0)
     wr = round(wins / total * 100) if total > 0 else 0
-
-    lines = [f"\n\n=== MEMÓRIA COLETIVA DE {min(total,100)} TRADERS ==="]
+    lines = [f"\n\n=== MEMÓRIA COLETIVA DE {min(total,200)} OPERAÇÕES ==="]
     lines.append(f"Win rate geral: {wr}% ({wins}W/{losses}L de {total} operações)")
-
     if stats["by_regime"]:
-        lines.append("\nPerformance por regime de mercado:")
+        lines.append("\nPerformance por regime:")
         for r in stats["by_regime"]:
-            t = int(r["total"] or 0)
-            w = int(r["wins"] or 0)
+            t = int(r["total"] or 0); w = int(r["wins"] or 0)
             pct = round(w/t*100) if t > 0 else 0
             flag = "✅" if pct >= 60 else "⚠️" if pct >= 45 else "❌"
             lines.append(f"  {flag} {r['regime']}: {pct}% win ({t} ops)")
-
     if stats["by_setup"]:
         lines.append("\nPerformance por setup:")
         for r in stats["by_setup"]:
-            t = int(r["total"] or 0)
-            w = int(r["wins"] or 0)
+            t = int(r["total"] or 0); w = int(r["wins"] or 0)
             pct = round(w/t*100) if t > 0 else 0
             flag = "✅" if pct >= 60 else "⚠️" if pct >= 45 else "❌"
             lines.append(f"  {flag} {r['setup']}: {pct}% win ({t} ops)")
-
     if stats["by_direction"]:
         lines.append("\nPerformance por direção:")
         for r in stats["by_direction"]:
-            t = int(r["total"] or 0)
-            w = int(r["wins"] or 0)
+            t = int(r["total"] or 0); w = int(r["wins"] or 0)
             pct = round(w/t*100) if t > 0 else 0
             lines.append(f"  {'📈' if r['direction']=='CALL' else '📉'} {r['direction']}: {pct}% win ({t} ops)")
-
     if stats["recent"]:
-        lines.append("\nÚltimas operações (padrão recente):")
+        lines.append("\nÚltimas operações:")
         for r in stats["recent"]:
             icon = "✅" if r["result"] == "win" else "❌"
             lines.append(f"  {icon} {r['direction']} | {r['regime']} | {r['setup']} | {r['confidence']}% conf")
-
-    lines.append("\nUSE ESSES DADOS para calibrar sua análise. Se um regime/setup tem win rate baixo, seja mais conservador ou mude a direção. Se tem win rate alto, pode ser mais agressivo na confiança.")
+    lines.append("\nUSE ESSES DADOS para calibrar sua análise. Regime/setup com win rate baixo = mais conservador. Win rate alto = pode ser mais agressivo.")
     lines.append("=== FIM DA MEMÓRIA ===")
     return "\n".join(lines)
 
-# ── PARSING ──────────────────────────────────────────────────────────────────
+# ── PARSING ───────────────────────────────────────────────────────────────────
 
 def _parse(raw):
     raw = re.sub(r"^```(?:json)?", "", raw.strip()).strip()
@@ -182,7 +156,7 @@ def _parse(raw):
     m = re.search(r"\{.*\}", raw, re.DOTALL)
     return json.loads(m.group(0) if m else raw)
 
-# ── PROVIDERS ────────────────────────────────────────────────────────────────
+# ── PROVIDERS ─────────────────────────────────────────────────────────────────
 
 def _groq(image_data, mime, prompt):
     r = requests.post(
@@ -193,8 +167,7 @@ def _groq(image_data, mime, prompt):
                 {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{image_data}"}},
                 {"type": "text", "text": prompt}
             ]}],
-            "max_tokens": 600,
-            "temperature": 0.1
+            "max_tokens": 600, "temperature": 0.1
         },
         headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
         timeout=30
@@ -211,8 +184,7 @@ def _gemini(image_data, mime, prompt):
                     {"inline_data": {"mime_type": mime, "data": image_data}},
                     {"text": prompt}
                 ]}], "generationConfig": {"temperature": 0.1, "maxOutputTokens": 600}},
-                params={"key": GEMINI_API_KEY},
-                timeout=45
+                params={"key": GEMINI_API_KEY}, timeout=45
             )
             if r.status_code in (429, 404): continue
             r.raise_for_status()
@@ -223,7 +195,7 @@ def _gemini(image_data, mime, prompt):
             continue
     return None
 
-# ── SAVE ─────────────────────────────────────────────────────────────────────
+# ── SAVE ──────────────────────────────────────────────────────────────────────
 
 def _save(image_hash, timeframe, result_data):
     if not DATABASE_URL:
@@ -235,16 +207,12 @@ def _save(image_hash, timeframe, result_data):
                     INSERT INTO vision_analyses
                         (image_hash, timeframe, direction, confidence, regime,
                          setup, risk, decision, summary, reasons)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                    RETURNING id
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id
                 """, (
                     image_hash, timeframe,
-                    result_data.get("direction"),
-                    result_data.get("confidence"),
-                    result_data.get("regime"),
-                    result_data.get("setup"),
-                    result_data.get("risk"),
-                    result_data.get("decision"),
+                    result_data.get("direction"), result_data.get("confidence"),
+                    result_data.get("regime"), result_data.get("setup"),
+                    result_data.get("risk"), result_data.get("decision"),
                     result_data.get("summary"),
                     json.dumps(result_data.get("reasons", []))
                 ))
@@ -255,7 +223,7 @@ def _save(image_hash, timeframe, result_data):
         print(f"[vision] save error: {e}")
         return None
 
-# ── ROUTES ───────────────────────────────────────────────────────────────────
+# ── PROMPT ────────────────────────────────────────────────────────────────────
 
 BASE_PROMPT = """Você é um sistema de votação de 100 traders profissionais especializados em opções binárias M1/M5. Cada trader tem uma especialidade diferente e vota de forma independente. Você deve sintetizar o consenso deles.
 
@@ -271,121 +239,207 @@ OS 100 TRADERS E SUAS ESPECIALIDADES:
 - 8 traders: Continuação de Tendência (pullbacks em tendência, flags, reacumulação)
 - 7 traders: Scalping M1 (micro-estrutura, rejeições rápidas, fluxo de ordens visível)
 
-PROCESSO DE ANÁLISE (execute mentalmente para cada grupo):
-
-1. PRICE ACTION (15 votos): Identifique o último candle e os 3 anteriores. Há padrão de reversão? Continuação? Qual a força dos corpos vs sombras?
-
-2. TENDÊNCIA (15 votos): A sequência de candles mostra higher highs e higher lows (CALL) ou lower highs e lower lows (PUT)? Ou lateral?
-
-3. SUPORTE/RESISTÊNCIA (12 votos): O preço atual está próximo de algum nível relevante? Está rompendo, rejeitando ou consolidando?
-
-4. VOLUME (10 votos): O volume dos últimos candles confirma ou contradiz o movimento? Volume alto em candle de alta = CALL confirmado.
-
-5. PADRÕES (10 votos): Há formação de padrão gráfico reconhecível? Está completo ou em formação?
-
-6. TIMING (8 votos): Quantos segundos/minutos restam no candle atual? Entrada no início, meio ou fim do candle?
-
-7. RISCO (8 votos): O contexto geral favorece entrada? Há sinais contraditórios que aumentam o risco?
-
-8. REVERSÃO (7 votos): O movimento atual mostra sinais de exaustão? Candles menores após movimento grande?
-
-9. CONTINUAÇÃO (8 votos): Se há tendência, o pullback/retração foi adequado para nova entrada na direção?
-
-10. SCALPING (7 votos): A micro-estrutura do M1 favorece entrada imediata? Há rejeição clara de nível?
-
 REGRAS DE CONSENSO:
-- Some os votos de cada lado (CALL vs PUT vs OBSERVAR)
 - ENTRADA_FORTE: 76+ votos concordam (confiança 76-98)
 - ENTRADA_CAUTELA: 55-75 votos concordam (confiança 55-75)
 - OBSERVAR: menos de 55 votos concordam (confiança <55)
-- Nunca retorne confiança 100 - sempre há incerteza
-- Se volume contradiz direção, reduza confiança em 10-15 pontos
-- Se próximo de suporte/resistência forte, ajuste direção
+- Nunca retorne confiança 100
 
-CALIBRAÇÃO ADAPTATIVA: Se você tiver dados históricos de performance, ajuste sua análise:
-- Se regime 'sideways' tem win rate baixo historicamente: aumente o threshold para ENTRADA_FORTE para 82+ votos
-- Se setup 'premium' tem win rate alto: confirme com 70+ votos ao invés de 76+
-- Use os dados históricos para validar ou questionar sua análise visual
+CALIBRAÇÃO ADAPTATIVA: Se tiver dados históricos, ajuste sua análise conforme performance passada.
 
-Retorne APENAS este JSON válido sem markdown, sem texto extra:
-{"direction":"CALL ou PUT","confidence":0-100,"regime":"trend/sideways/reversal/chaotic","setup":"premium/standard/fraco","reasons":["análise price action detalhada","análise de tendência e estrutura","análise de suporte/resistência e volume","padrão identificado e timing","conclusão do consenso dos 100 traders"],"risk":"baixo/moderado/alto","decision":"ENTRADA_FORTE/ENTRADA_CAUTELA/OBSERVAR","summary":"síntese do consenso em uma frase objetiva","votes":{"call":0,"put":0,"observe":0}}
+Retorne APENAS este JSON válido sem markdown:
+{"direction":"CALL ou PUT","confidence":0-100,"regime":"trend/sideways/reversal/chaotic","setup":"premium/standard/fraco","reasons":["r1","r2","r3","r4","r5"],"risk":"baixo/moderado/alto","decision":"ENTRADA_FORTE/ENTRADA_CAUTELA/OBSERVAR","summary":"frase curta","votes":{"call":0,"put":0,"observe":0}}
 """
+
+# ── LOSS CAUSE ────────────────────────────────────────────────────────────────
+
+def _infer_loss_cause(regime: str, setup: str, confidence: int, risk: str) -> str:
+    regime = (regime or "").lower()
+    if regime in ("sideways", "lateral"):
+        return "sideways_noise"
+    if regime == "chaotic":
+        return "volatility_trap"
+    if regime == "reversal":
+        return "reversal_ignored"
+    if (risk or "").lower() == "alto":
+        return "volatility_trap"
+    return "wrong_direction"
+
+# ── ROUTES ────────────────────────────────────────────────────────────────────
 
 @bp.post("/vision/analyze")
 def analyze():
     if "image" not in request.files:
         return jsonify({"ok": False, "error": "Nenhuma imagem enviada"}), 400
-
     file = request.files["image"]
     mime = file.mimetype or "image/jpeg"
     if mime not in {"image/jpeg", "image/jpg", "image/png", "image/webp"}:
         mime = "image/jpeg"
-
     image_bytes = file.read()
     image_data  = base64.standard_b64encode(image_bytes).decode("utf-8")
     image_hash  = hashlib.md5(image_bytes).hexdigest()
     timeframe   = request.form.get("timeframe", "M1")
 
-    # Busca estatísticas adaptativas do banco
     stats   = _get_stats()
     context = _build_context(stats, timeframe)
     prompt  = BASE_PROMPT + context
 
-    result     = None
+    result = None
     last_error = ""
+    provider_used = ""
 
     if GROQ_API_KEY:
         try:
             result = _groq(image_data, mime, prompt)
+            provider_used = "groq"
         except Exception as e:
             last_error = str(e)
 
     if result is None and GEMINI_API_KEY:
         try:
             result = _gemini(image_data, mime, prompt)
+            provider_used = "gemini"
         except Exception as e:
             last_error = str(e)
 
     if result is None:
         return jsonify({"ok": False, "error": last_error or "Todos provedores falharam"}), 500
 
-    # Salva no banco para aprendizado futuro
-    analysis_id = _save(image_hash, timeframe, result)
-    result["analysis_id"] = analysis_id
+    # Persiste no banco dedicado (contexto adaptativo futuro)
+    db_id = _save(image_hash, timeframe, result)
+    result["analysis_id"] = db_id
 
-    # Inclui estatísticas no retorno para mostrar na UI
+    # Também salva no KV store para enriquecimento no feedback
+    kv_id = uuid.uuid4().hex[:16]
+    now_ts = time.time()
+    try:
+        store = get_state_store()
+        store.upsert_collection_item(VISION_COLLECTION, kv_id, {
+            "uid": kv_id, "db_id": db_id, "created_at_ts": now_ts,
+            "timeframe": timeframe, "provider": provider_used,
+            "direction": result.get("direction", ""),
+            "confidence": result.get("confidence", 0),
+            "regime": result.get("regime", "unknown"),
+            "setup": result.get("setup", ""),
+            "risk": result.get("risk", ""),
+            "decision": result.get("decision", ""),
+            "reasons": result.get("reasons", []),
+            "result": None,
+        })
+    except Exception:
+        pass
+
     if stats and stats["overall"].get("total"):
         o = stats["overall"]
         t = int(o.get("total") or 0)
         w = int(o.get("wins") or 0)
-        result["stats"] = {
-            "total": t,
-            "win_rate": round(w / t * 100) if t > 0 else 0
-        }
+        result["stats"] = {"total": t, "win_rate": round(w / t * 100) if t > 0 else 0}
 
-    return jsonify({"ok": True, "result": result})
+    return jsonify({"ok": True, "result": result, "kv_id": kv_id, "provider": provider_used})
+
+
+@bp.post("/vision/feedback")
+def feedback():
+    body = request.get_json(force=True, silent=True) or {}
+    result = str(body.get("result", "")).upper().strip()
+    if result not in ("WIN", "LOSS"):
+        return jsonify({"ok": False, "error": "result deve ser WIN ou LOSS"}), 400
+
+    analysis_id = body.get("analysis_id")   # numeric DB id
+    kv_id       = str(body.get("kv_id", "") or "").strip()
+    direction   = str(body.get("direction", "CALL")).upper()
+    regime      = str(body.get("regime", "unknown")).lower()
+    setup       = str(body.get("setup", "standard")).lower()
+    confidence  = int(body.get("confidence", 65) or 65)
+    risk        = str(body.get("risk", "moderado")).lower()
+    timeframe   = str(body.get("timeframe", "M1"))
+    reasons     = list(body.get("reasons", []) or [])
+    provider    = str(body.get("provider", "vision_ai"))
+    outcome_lower = result.lower()
+
+    # 1. Atualiza vision_analyses table
+    if analysis_id and DATABASE_URL:
+        try:
+            with _db() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE vision_analyses SET result=%s WHERE id=%s",
+                                (outcome_lower, analysis_id))
+                conn.commit()
+        except Exception as e:
+            print(f"[vision] feedback db error: {e}")
+
+    # 2. Enriquece do KV store
+    if kv_id:
+        try:
+            store = get_state_store()
+            for row in store.list_collection(VISION_COLLECTION, limit=200):
+                if row.get("uid") == kv_id:
+                    direction  = direction  or str(row.get("direction", "CALL")).upper()
+                    regime     = regime     or str(row.get("regime", "unknown")).lower()
+                    setup      = setup      or str(row.get("setup", "standard")).lower()
+                    confidence = confidence or int(row.get("confidence", 65) or 65)
+                    risk       = risk       or str(row.get("risk", "moderado")).lower()
+                    timeframe  = timeframe  or str(row.get("timeframe", "M1"))
+                    reasons    = reasons    or list(row.get("reasons", []) or [])
+                    provider   = provider   or str(row.get("provider", "vision_ai"))
+                    store.upsert_collection_item(VISION_COLLECTION, kv_id,
+                        {**row, "result": result, "evaluated_at_ts": time.time()})
+                    break
+        except Exception:
+            pass
+
+    now_ts      = time.time()
+    now_str     = datetime.fromtimestamp(now_ts, tz=timezone.utc).strftime("%H:%M")
+    hour_bucket = datetime.fromtimestamp(now_ts, tz=timezone.utc).strftime("%H:00")
+    uid         = kv_id or f"vision-{direction}-{now_str}"
+    loss_cause  = "none" if result == "WIN" else _infer_loss_cause(regime, setup, confidence, risk)
+
+    trade_payload = {
+        "uid": uid, "asset": "VISION_MANUAL", "direction": direction,
+        "signal": direction, "result": result, "loss_cause": loss_cause,
+        "regime": regime, "setup_quality": setup, "confidence": confidence,
+        "timeframe": timeframe, "provider": provider, "market_type": "manual_vision",
+        "hour_bucket": hour_bucket, "analysis_time": now_str,
+        "created_at_ts": now_ts, "evaluated_at_ts": now_ts,
+        "source": "vision_feedback", "reasons": reasons,
+    }
+
+    # 3. Registra no EdgeAuditEngine + JournalManager (aparece nos Stats)
+    try:
+        EdgeAuditEngine().record_trade(trade_payload)
+        JournalManager().add_trade(trade_payload)
+    except Exception:
+        pass
+
+    # 4. Alimenta LearningEngine
+    try:
+        LearningEngine().register_outcome(
+            asset="VISION_MANUAL", direction=direction, regime=regime,
+            specialist="vision_ai", provider=provider, market_type="manual_vision",
+            hour_bucket=hour_bucket, setup_quality=setup, result=result,
+            loss_cause=loss_cause, operating_state="ENTRADA_FORTE", signal_type="vision",
+        )
+    except Exception:
+        pass
+
+    return jsonify({"ok": True, "result_registered": result, "loss_cause": loss_cause})
 
 
 @bp.post("/vision/result")
 def save_result():
-    """Salva Win ou Loss de uma análise anterior."""
-    data = request.get_json()
+    """Alias legado — mantido para compatibilidade."""
+    data = request.get_json(force=True, silent=True) or {}
     analysis_id = data.get("analysis_id")
-    outcome     = data.get("result", "").lower()
-
+    outcome = str(data.get("result", "")).lower()
     if not analysis_id or outcome not in ("win", "loss"):
         return jsonify({"ok": False, "error": "Parâmetros inválidos"}), 400
-
     if not DATABASE_URL:
         return jsonify({"ok": False, "error": "Banco não configurado"}), 500
-
     try:
         with _db() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE vision_analyses SET result=%s WHERE id=%s",
-                    (outcome, analysis_id)
-                )
+                cur.execute("UPDATE vision_analyses SET result=%s WHERE id=%s",
+                            (outcome, analysis_id))
             conn.commit()
         return jsonify({"ok": True})
     except Exception as e:

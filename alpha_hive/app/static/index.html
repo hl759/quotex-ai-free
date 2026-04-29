@@ -175,6 +175,7 @@ body:after{width:220px;height:220px;right:-80px;top:340px;background:rgba(111,74
 .panel.active { display: block; }
 
 </style>
+<script src="/config.js"></script>
 </head>
 <body class='pre-hydrate'>
 <div class='app'>
@@ -189,9 +190,10 @@ body:after{width:220px;height:220px;right:-80px;top:340px;background:rgba(111,74
       </div>
       <div class='right-stack'>
         <div id='liveBadge' class='live-pill'>● CARREGANDO</div>
-        <button id='refreshBtn' class='refresh-btn' onclick='triggerActiveScan()'>↻ Atualizar agora</button>
+        <div id='scanStatusPill' class='refresh-btn' style='cursor:pointer;pointer-events:auto;text-align:center;'>↻ Atualizar agora</div>
       </div>
     </div>
+    <div id='scan_error_msg' style='display:none;background:#7f1d1d;color:#fca5a5;padding:8px 14px;border-radius:8px;font-size:0.8rem;margin:6px 16px 0;word-break:break-all;'></div>
 
     <div class='top-grid'>
       <div class='top-pill'><div class='k'>Ativo</div><div class='v' id='top_asset_value'>--</div></div>
@@ -380,6 +382,9 @@ body:after{width:220px;height:220px;right:-80px;top:340px;background:rgba(111,74
   </div>
 </div>
 <script>
+// API_BASE: vazio = mesmo servidor (monolito). Defina window.BACKEND_URL
+// no config.js para apontar a um backend remoto (ex: Fly.io).
+const API_BASE = (typeof window !== 'undefined' && window.BACKEND_URL) ? window.BACKEND_URL.replace(/\/$/, '') : '';
 function loadCachedSnapshot(){
   try{
     const raw = localStorage.getItem('alpha_hive_last_snapshot');
@@ -405,15 +410,11 @@ function saveCachedSnapshot(snapshot){
     }
   }catch(e){}
 }
+// ON-DEMAND MODE: sem polling automático — a IA só acorda quando você clica.
 const bootstrapSnapshot = window.__BOOTSTRAP_SNAPSHOT__ || null;
-const initialSnapshot = bootstrapSnapshot || loadCachedSnapshot();
-let autoRefreshHandle = null;
-let autoRefreshSeconds = (initialSnapshot && initialSnapshot.meta && initialSnapshot.meta.ui_auto_refresh_seconds) || 90;
-let staleAfterSeconds = (initialSnapshot && initialSnapshot.meta && initialSnapshot.meta.ui_stale_after_seconds) || 95;
-let forceScanAfterSeconds = (initialSnapshot && initialSnapshot.meta && initialSnapshot.meta.ui_force_scan_after_seconds) || 110;
+const initialSnapshot = null; // sem dados em cache — aguarda clique em "Atualizar agora"
+let staleAfterSeconds = 300;   // após 5 min mostra badge "INATIVO"
 let refreshInFlight = false;
-let lastAutoRunScanAt = 0;
-let bootstrapPollHandle = null;
 
 function activateTab(tabId, btn){
   const fallbackId = document.getElementById(tabId) ? tabId : 'dashboard';
@@ -436,7 +437,8 @@ window.saveCapitalState = saveCapitalState;
 function escapeHtml(text){ if(text===null||text===undefined) return ''; return String(text).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;'); }
 function formatText(text){ return escapeHtml(text).replace(/\\n/g,'<br>'); }
 function formatAge(seconds){ const s=Math.max(0, parseInt(seconds||0,10)||0); if(s<60) return '00:'+String(s).padStart(2,'0'); const m=Math.floor(s/60); const r=s%60; return String(m).padStart(2,'0')+':'+String(r).padStart(2,'0'); }
-function badgeInfo(decision, direction){
+function badgeInfo(decision, direction, expired){
+  if(expired) return {cls:'block', text:'EXPIRADO'};
   const dir = direction || 'CALL';
   if(decision==='ENTRADA_FORTE') return {cls: dir==='PUT'?'put':'call', text:'ENTRADA FORTE'};
   if(decision==='ENTRADA_CAUTELA') return {cls: dir==='PUT'?'put':'call', text:'ENTRADA CAUTELA'};
@@ -480,18 +482,22 @@ function updateLiveBadge(meta){
   const status=document.getElementById('top_connection_value');
   if(!el || !meta) return;
   const age=parseInt(meta.last_scan_age_seconds||0,10)||0;
-  const stale=parseInt(meta.ui_stale_after_seconds||staleAfterSeconds||95,10)||95;
-  if(meta.scan_in_progress){ el.textContent='● ESCANEANDO'; if(status) status.textContent='Ao vivo'; return; }
-  if(age>=stale){ el.textContent='● ATRASADO'; if(status) status.textContent='Atenção'; return; }
-  el.textContent=age<=5?'● AO VIVO':('● ATUALIZADO ' + formatAge(age));
-  if(status) status.textContent='Modo live';
+  if(meta.scan_in_progress){ el.textContent='● ESCANEANDO'; if(status) status.textContent='Processando...'; return; }
+  if(age<=0 || !meta.last_scan || meta.last_scan==='--'){
+    el.textContent='● ATIVO'; if(status) status.textContent='Aguardando scan'; return;
+  }
+  if(age>=staleAfterSeconds){ el.textContent='● ATIVO'; if(status) status.textContent='Reconectando...'; return; }
+  el.textContent='● ATUALIZADO ' + formatAge(age);
+  if(status) status.textContent='Automático';
 }
 function renderDashboardDecision(d){
   const c=document.getElementById('dashboard_decision');
   if(!c) return;
   if(!d || !d.decision){ c.innerHTML=`<div class='empty'>Sem decisão disponível agora.</div>`; return; }
-  const b=badgeInfo(d.decision,d.direction);
+  const isExpired = !!(d.expired) || (d.expiration_ts > 0 && (Date.now()/1000) > d.expiration_ts);
+  const b=badgeInfo(d.decision,d.direction,isExpired);
   const conf=Math.max(2, Math.min(100, parseFloat(d.confidence||0)||0));
+  const expiredNote=isExpired ? `<div style='margin-top:8px;font-size:12px;color:var(--muted)'>Sinal expirado • aguardando próximo scan</div>` : '';
   c.innerHTML=`
     <div class='hero-head'>
       <div>
@@ -500,6 +506,7 @@ function renderDashboardDecision(d){
       </div>
       <div class='action-badge ${b.cls}'>✓ ${escapeHtml(b.text)}</div>
     </div>
+    ${expiredNote}
     <div class='stake-chip'>Stake sugerida: ${escapeHtml(d.stake_suggested != null ? d.stake_suggested : (d.stake || '0.0'))}</div>
     <div class='score-row'>
       <div class='score-tile'><div class='label'>Score</div><div class='value'>${escapeHtml(d.score || '0')}</div></div>
@@ -549,7 +556,8 @@ function renderSignals(signals){
 function renderDecision(d){
   const c=document.getElementById('decision_container'); if(!c) return;
   if(!d || !d.decision){ c.innerHTML=`<div class='empty'>Sem decisão disponível agora.</div>`; return; }
-  const b=badgeInfo(d.decision,d.direction);
+  const isExpired = !!(d.expired) || (d.expiration_ts > 0 && (Date.now()/1000) > d.expiration_ts);
+  const b=badgeInfo(d.decision,d.direction,isExpired);
   c.innerHTML=`<div class='signal-card'>
     <div class='decision-head'><div class='asset-name'>${escapeHtml(d.asset || 'MERCADO')}</div><div class='badge ${b.cls}'>${escapeHtml(b.text)}</div></div>
     <div class='grid-2'>
@@ -611,24 +619,33 @@ function applySnapshot(d){
   ){
     saveCachedSnapshot(s);
   }
-  autoRefreshSeconds=parseInt((s.meta && s.meta.ui_auto_refresh_seconds) || autoRefreshSeconds || 20,10)||20;
-  staleAfterSeconds=parseInt((s.meta && s.meta.ui_stale_after_seconds) || staleAfterSeconds || 95,10)||95;
-  forceScanAfterSeconds=parseInt((s.meta && s.meta.ui_force_scan_after_seconds) || forceScanAfterSeconds || 110,10)||110;
+  // Decisão ativa: prefere sinal operável, depois current_decision.
+  // Se current_decision está expirado, usa para ativo/regime mas não para horários.
+  const cd = s.current_decision || {};
+  const cdExpired = !!(cd.expired) || (cd.expiration_ts > 0 && (Date.now()/1000) > cd.expiration_ts);
   const liveDecision =
     (s.signals && s.signals[0]) ||
-    ((s.current_decision && s.current_decision.decision) ? s.current_decision : {});
+    ((cd && cd.decision) ? cd : {});
   document.getElementById('top_asset_value').textContent=liveDecision.asset || 'Mercado';
   document.getElementById('top_regime_value').textContent=liveDecision.regime || 'Misto';
-  document.getElementById('dash_analysis').textContent=liveDecision.analysis_time || '--:--';
-  document.getElementById('dash_entry').textContent=liveDecision.entry_time || '--:--';
-  document.getElementById('dash_expiration').textContent=liveDecision.expiration || '--:--';
+  // Mostra horário de análise mesmo para OBSERVAR; limpa quando sinal expirado aguarda novo scan.
+  document.getElementById('dash_analysis').textContent=(!cdExpired && liveDecision.analysis_time) || '--:--';
+  document.getElementById('dash_entry').textContent=(!cdExpired && liveDecision.entry_time) || '--:--';
+  document.getElementById('dash_expiration').textContent=(!cdExpired && liveDecision.expiration) || '--:--';
   document.getElementById('dash_regime').textContent=liveDecision.regime || '--';
   document.getElementById('scan_age_big').textContent=formatAge((s.meta && s.meta.last_scan_age_seconds) || 0);
   const refreshErr = (s.meta && (s.meta.last_snapshot_refresh_error || s.meta.last_scan_error)) || '';
-  if(refreshErr){
-    document.getElementById('scan_sub').textContent='Erro de refresh: ' + String(refreshErr).slice(0, 120);
-  }else{
-    document.getElementById('scan_sub').textContent=s.meta.scan_in_progress ? 'Escaneando padrões de alta probabilidade...' : ('Último scan em ' + (s.meta.last_scan || '--'));
+  const pill = document.getElementById('scanStatusPill');
+  if(s.meta && s.meta.scan_in_progress){
+    if(pill){ pill.textContent='⟳ Escaneando...'; pill.style.color='var(--teal)'; }
+    document.getElementById('scan_sub').textContent='Escaneando padrões de alta probabilidade...';
+  } else {
+    if(pill){ pill.textContent='↻ Atualizar agora'; pill.style.color=''; pill.style.pointerEvents='auto'; pill.style.cursor='pointer'; }
+    if(refreshErr){
+      document.getElementById('scan_sub').textContent='Erro: ' + String(refreshErr).slice(0, 120);
+    } else {
+      document.getElementById('scan_sub').textContent='Último scan em ' + (s.meta && s.meta.last_scan || '--');
+    }
   }
   document.getElementById('dash_health_badge').textContent=((s.current_decision && s.current_decision.decision==='NAO_OPERAR') ? 'Modo defensivo' : 'Nível saudável');
   document.getElementById('stats_total').textContent=s.learning_stats.total || 0;
@@ -652,77 +669,29 @@ function applySnapshot(d){
   renderBestAssets(s.best_assets);
   renderBestHours(s.best_hours);
   renderStatsPanel(s);
-    visionStatsLoad();
+    refreshSnapshot(true);
   fillCapitalForm(s.capital_state || {});
   updateLiveBadge(s.meta || {});
+  window._lastMeta = s.meta || {};
   document.body.classList.remove('pre-hydrate');
-  startAutoRefresh();
-}
-async function maybeTriggerScan(meta){
-  const age = parseInt((meta && meta.last_scan_age_seconds) || 0, 10) || 0;
-  const count = parseInt((meta && meta.scan_count) || 0, 10) || 0;
-  const missingBootstrap = !meta || !meta.last_scan || meta.last_scan === '--' || count <= 0;
-  if(!missingBootstrap && age < (parseInt((meta && meta.ui_force_scan_after_seconds) || forceScanAfterSeconds || 110, 10) || 110)) return;
-  const now = Date.now();
-  if(now - lastAutoRunScanAt < (missingBootstrap ? 15000 : 120000)) return;
-  lastAutoRunScanAt = now;
-  try{ await fetch('/run-scan', {cache:'no-store'}); }catch(e){ console.error('run-scan warning', e); }
-}
-async function triggerActiveScan(){
-  const btn = document.getElementById('refreshBtn');
-  if(btn){ btn.disabled = true; btn.textContent = 'Analisando...'; }
-  try{
-    const ctrl2 = new AbortController();
-    const t2 = setTimeout(()=>ctrl2.abort(), 90000);
-    const resp = await fetch('/atualizar', {method:'POST', cache:'no-store', signal:ctrl2.signal});
-    clearTimeout(t2);
-    const data = await resp.json();
-    if(data && data.skipped && data.retry_after_seconds){
-      if(btn){ btn.textContent = 'Aguarde ' + data.retry_after_seconds + 's'; }
-      setTimeout(()=>{ if(btn){ btn.disabled=false; btn.textContent='↻ Atualizar agora'; } }, data.retry_after_seconds * 1000);
-      return;
-    }
-  }catch(e){ console.warn('trigger error', e); }
-  await refreshSnapshot(false);
 }
 async function refreshSnapshot(silent){
   if(refreshInFlight) return;
   refreshInFlight = true;
-  const btn = document.getElementById('refreshBtn');
-  if(btn && !silent){ btn.disabled = true; btn.textContent = 'Atualizando...'; }
   const controller = new AbortController();
-  const timeout = setTimeout(()=>controller.abort(), 90000);
+  const timeout = setTimeout(()=>controller.abort(), 30000);
   try{
-    const resp = await fetch('/snapshot', {cache:'no-store', signal:controller.signal});
+    const resp = await fetch(API_BASE + '/snapshot', {cache:'no-store', signal:controller.signal});
     const data = await resp.json();
     applySnapshot(data);
-    await maybeTriggerScan(data.meta || {});
-  }catch(e){ console.error('snapshot refresh error', e); document.getElementById('scan_sub').textContent='Atualização demorou ou falhou; tentando novamente...'; }
+  }catch(e){
+    const sub = document.getElementById('scan_sub');
+    if(sub && !silent) sub.textContent='Atualizando...';
+  }
   finally{
     clearTimeout(timeout);
     refreshInFlight = false;
-    if(btn && !silent){ setTimeout(()=>{ btn.disabled=false; btn.textContent='↻ Atualizar agora'; }, 600); }
   }
-}
-function startAutoRefresh(){
-  if(autoRefreshHandle) clearInterval(autoRefreshHandle);
-  autoRefreshHandle = setInterval(()=>{ if(document.hidden) return; refreshSnapshot(true); }, Math.max(8, autoRefreshSeconds) * 1000);
-}
-function startBootstrapPolling(){
-  if(bootstrapPollHandle) clearInterval(bootstrapPollHandle);
-  const current = safeSnapshot(window.__lastSnapshot || initialSnapshot || null);
-  if((current.meta && current.meta.scan_count) > 0 && (current.signals.length > 0 || (current.current_decision && current.current_decision.asset && current.current_decision.asset !== 'MERCADO'))){
-    return;
-  }
-  bootstrapPollHandle = setInterval(async ()=>{
-    const latest = safeSnapshot(window.__lastSnapshot || initialSnapshot || null);
-    if((latest.meta && latest.meta.scan_count) > 0 && (latest.signals.length > 0 || (latest.current_decision && latest.current_decision.asset && latest.current_decision.asset !== 'MERCADO'))){
-      clearInterval(bootstrapPollHandle);
-      bootstrapPollHandle = null;
-      return;
-    }
-    await refreshSnapshot(true);
-  }, 15000);
 }
 async function saveCapitalState(){
   const btn=document.getElementById('saveCapitalBtn');
@@ -738,7 +707,7 @@ async function saveCapitalState(){
     daily_stop_pct: parseFloat(document.getElementById('daily_stop_pct').value || 3.0)
   };
   try{
-    await fetch('/capital-state', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+    await fetch(API_BASE + '/capital-state', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
     status.textContent='Capital salvo com sucesso.';
     setTimeout(()=>status.textContent='', 2200);
   }catch(e){ status.textContent='Erro ao salvar capital.'; }
@@ -755,26 +724,38 @@ document.addEventListener('DOMContentLoaded', function(){
       return;
     }
   });
+
   if(initialSnapshot){
-    try{
-      applySnapshot(initialSnapshot);
-    }catch(e){
-      console.error('initial cached snapshot error', e);
-    }
+    try{ applySnapshot(initialSnapshot); }catch(e){ console.error('cached snapshot error', e); }
   }else{
-    document.getElementById('scan_sub').textContent='Carregando snapshot salvo e dados ao vivo...';
-    document.getElementById('liveBadge').textContent='● CARREGANDO';
+    const sub = document.getElementById('scan_sub');
+    const badge = document.getElementById('liveBadge');
+    if(sub) sub.textContent='IA escaneando o mercado automaticamente...';
+    if(badge) badge.textContent='● ATIVO';
   }
-  startAutoRefresh();
-  startBootstrapPolling();
-  setTimeout(()=>refreshSnapshot(true), 250);
-  document.addEventListener('visibilitychange', function(){ if(!document.hidden){ refreshSnapshot(true); } });
+
+  // Leitura inicial ao abrir (sem scan)
+  setTimeout(()=>refreshSnapshot(true), 300);
+
+  // Auto-refresh dinâmico: 30s quando dados estão velhos, 60s quando frescos.
+  // Mantém a UI atualizada logo após o backend acordar no Render.
+  (function scheduleRefresh(){
+    const age = parseInt((window._lastMeta && window._lastMeta.last_scan_age_seconds) || 9999, 10);
+    const interval = (age > staleAfterSeconds) ? 30000 : 60000;
+    setTimeout(()=>{ if(!document.hidden) refreshSnapshot(true); scheduleRefresh(); }, interval);
+  })();
+
+  // Atualiza exibição ao voltar para a aba
+  document.addEventListener('visibilitychange', ()=>{
+    if(!document.hidden) refreshSnapshot(true);
+  });
 });
 
 
 
 // ── VISÃO ────────────────────────────────────────────────────────────────
-let visionFile=null, visionTf='M1', lastAnalysisId=null;
+let visionFile = null, visionTf = 'M1', lastAnalysisId = null;
+let _currentVisionAnalysis = null;
 
 function visionSetTf(tf){
   visionTf=tf;
@@ -808,26 +789,7 @@ function visionClear(){
   lastAnalysisId=null;
 }
 
-async function visionMarkResult(outcome){
-  if(!lastAnalysisId){ alert('Análise sem ID - não foi possível salvar'); return; }
-  const btns=document.querySelectorAll('.vision-outcome-btn');
-  btns.forEach(b=>{ b.disabled=true; b.style.opacity='0.5'; });
-  try{
-    const r=await fetch((window.API_BASE||'')+'/vision/result',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({analysis_id:lastAnalysisId,result:outcome})
-    });
-    const d=await r.json();
-    if(d.ok){
-      const chosen=document.getElementById('visionBtn'+outcome.charAt(0).toUpperCase()+outcome.slice(1));
-      if(chosen){ chosen.style.opacity='1'; chosen.style.fontWeight='900'; chosen.textContent=(outcome==='win'?'✅ WIN salvo!':'❌ LOSS salvo!'); }
-      // Atualiza stats imediatamente
-      setTimeout(()=>{ visionStatsLoad(); }, 500);
-      lastAnalysisId=null;
-    }
-  } catch(e){ btns.forEach(b=>{ b.disabled=false; b.style.opacity='1'; }); }
-}
+async function visionMarkResult(outcome){ visionFeedback(outcome.toUpperCase()); }
 
 async function visionAnalyze(){
   if(!visionFile) return;
@@ -846,6 +808,13 @@ async function visionAnalyze(){
     if(!data.ok){ res.innerHTML="<div class='panel-card' style='padding:16px;color:var(--red)'>Erro: "+escapeHtml(data.error||'Falha')+"</div>"; return; }
     const r=data.result;
     lastAnalysisId=r.analysis_id||null;
+    _currentVisionAnalysis={
+      analysis_id: r.analysis_id||null, kv_id: data.kv_id||'',
+      provider: data.provider||'vision_ai',
+      direction: r.direction||'CALL', regime: r.regime||'unknown',
+      setup: r.setup||'standard', confidence: r.confidence||65,
+      risk: r.risk||'moderado', timeframe: visionTf, reasons: r.reasons||[],
+    };
     const dir=(r.direction||'OBSERVAR').toUpperCase();
     const dirEmoji=dir==='CALL'?'📈':dir==='PUT'?'📉':'👁️';
     const dirColor=dir==='CALL'?'var(--green)':dir==='PUT'?'var(--purple)':'var(--gold)';
@@ -873,8 +842,8 @@ async function visionAnalyze(){
       <div style='margin-top:14px'>
         <div style='font-size:11px;letter-spacing:.14em;color:#90a6c6;text-transform:uppercase;margin-bottom:8px;text-align:center'>Como foi a operação?</div>
         <div style='display:grid;grid-template-columns:1fr 1fr;gap:10px'>
-          <button id='visionBtnWin' class='vision-outcome-btn' onclick='visionMarkResult("win")' style='padding:16px;border-radius:18px;background:linear-gradient(180deg,rgba(28,77,61,.96),rgba(16,42,35,.98));border:1px solid rgba(95,245,220,.24);color:#dffff7;font-size:15px;font-weight:900;cursor:pointer'>✅ WIN</button>
-          <button id='visionBtnLoss' class='vision-outcome-btn' onclick='visionMarkResult("loss")' style='padding:16px;border-radius:18px;background:linear-gradient(180deg,rgba(66,27,34,.96),rgba(37,13,18,.98));border:1px solid rgba(255,111,125,.24);color:#ffd0d5;font-size:15px;font-weight:900;cursor:pointer'>❌ LOSS</button>
+          <button id='visionBtnWin' class='vision-outcome-btn' onclick='visionFeedback("WIN")' style='padding:16px;border-radius:18px;background:linear-gradient(180deg,rgba(28,77,61,.96),rgba(16,42,35,.98));border:1px solid rgba(95,245,220,.24);color:#dffff7;font-size:15px;font-weight:900;cursor:pointer'>✅ WIN</button>
+          <button id='visionBtnLoss' class='vision-outcome-btn' onclick='visionFeedback("LOSS")' style='padding:16px;border-radius:18px;background:linear-gradient(180deg,rgba(66,27,34,.96),rgba(37,13,18,.98));border:1px solid rgba(255,111,125,.24);color:#ffd0d5;font-size:15px;font-weight:900;cursor:pointer'>❌ LOSS</button>
         </div>
       </div>`:'' ;
     res.innerHTML=`
@@ -903,6 +872,38 @@ async function visionAnalyze(){
   } finally{
     loading.style.display='none';
     btn.style.display='block';
+  }
+}
+
+async function visionFeedback(result) {
+  if (!_currentVisionAnalysis) return;
+  const isWin = result === 'WIN' || result === 'win';
+  const resultUpper = isWin ? 'WIN' : 'LOSS';
+  const winBtn  = document.getElementById('visionBtnWin');
+  const lossBtn = document.getElementById('visionBtnLoss');
+  const allBtns = document.querySelectorAll('.vision-outcome-btn');
+  allBtns.forEach(b=>{ b.disabled=true; b.style.opacity='0.45'; });
+  try {
+    const resp = await fetch((window.API_BASE||'') + '/vision/feedback', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({..._currentVisionAnalysis, result: resultUpper}),
+      cache: 'no-store',
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      const activeBtn = isWin ? winBtn : lossBtn;
+      if (activeBtn) {
+        activeBtn.style.opacity='1';
+        activeBtn.textContent = isWin ? '✅ WIN salvo!' : '❌ LOSS salvo!';
+      }
+      _currentVisionAnalysis = null;
+      setTimeout(function(){ if(typeof refreshSnapshot==='function') refreshSnapshot(true); }, 800);
+    } else {
+      allBtns.forEach(b=>{ b.disabled=false; b.style.opacity='1'; });
+    }
+  } catch(e) {
+    allBtns.forEach(b=>{ b.disabled=false; b.style.opacity='1'; });
   }
 }
 

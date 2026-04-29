@@ -5,20 +5,34 @@ from typing import Dict, List
 
 from alpha_hive.core.contracts import Candle
 
+
 def normalize(data: Dict[str, list]) -> List[Candle]:
+    """Converte resposta do Finnhub para lista de Candle (oldest-to-newest).
+
+    A API do Finnhub retorna candles em ordem ASCENDENTE (index 0 = mais antigo).
+    """
     if data.get("s") != "ok" or not data.get("c"):
         return []
     out: List[Candle] = []
-    for i in range(len(data["c"])):
-        out.append(
-            Candle(
-                ts=datetime.utcfromtimestamp(data["t"][i]).strftime("%Y-%m-%d %H:%M:%S"),
-                open=float(data["o"][i]),
-                high=float(data["h"][i]),
-                low=float(data["l"][i]),
-                close=float(data["c"][i]),
-                volume=float(data["v"][i] if i < len(data["v"]) else 0),
+    timestamps = data.get("t", [])
+    opens = data.get("o", [])
+    highs = data.get("h", [])
+    lows = data.get("l", [])
+    closes = data.get("c", [])
+    volumes = data.get("v", [])
+    for i in range(len(closes)):
+        try:
+            out.append(
+                Candle(
+                    ts=datetime.utcfromtimestamp(timestamps[i]).strftime("%Y-%m-%d %H:%M:%S"),
+                    open=float(opens[i]),
+                    high=float(highs[i]),
+                    low=float(lows[i]),
+                    close=float(closes[i]),
+                    volume=float(volumes[i]) if i < len(volumes) else 0.0,
+                )
             )
-        )
-    out.reverse()
+        except Exception:
+            continue
+    # Sem reversal: Finnhub retorna ascendente (oldest first) → ordem já correta
     return out

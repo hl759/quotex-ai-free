@@ -9,16 +9,25 @@ from alpha_hive.services.capital_service import CapitalService
 
 
 class SnapshotService:
+    """
+    Stateless — não mantém instâncias pesadas em RAM.
+    EdgeAuditEngine e JournalManager são criados por chamada e descartados.
+    CapitalService é leve (apenas lê/escreve uma chave no SQLite).
+    """
     def __init__(self):
-        self.audit = EdgeAuditEngine()
-        self.journal = JournalManager()
         self.capital = CapitalService()
+
+    def _audit(self) -> EdgeAuditEngine:
+        return EdgeAuditEngine()
+
+    def _journal(self) -> JournalManager:
+        return JournalManager()
 
     def _confidence_label(self, confidence: int) -> str:
         if confidence >= 82:
             return "FORTE"
         if confidence >= 70:
-            return "MEDIO"
+            return "MÉDIO"
         return "CAUTELOSO"
 
     def _reason_text(self, reasons):
@@ -93,11 +102,11 @@ class SnapshotService:
             main = "A governanca bloqueou a execucao para preservar capital e consistencia."
 
         points = [
+            f"Direção: {direction or 'N/A'}",
+            f"Risco: {setup_quality}",
+            f"Execução: {execution_permission}",
             f"Regime: {regime}",
-            f"Estado: {state}",
             f"Consenso: {consensus_quality}",
-            f"Execucao: {execution_permission}",
-            f"Setup: {setup_quality}",
         ]
         return title, main, points
 
@@ -123,6 +132,7 @@ class SnapshotService:
         out["summary_main"] = main
         out["summary_points"] = points
         out["stake_suggested"] = item.get("suggested_stake", 0.0)
+        out["signal"] = out.get("direction") or out.get("signal")
         out["provider"] = item.get("provider", "Alpha Hive")
         return out
 
@@ -169,7 +179,7 @@ class SnapshotService:
 
     def _coalesce_learning_stats(self, report: dict) -> dict:
         summary = dict(report.get("summary", {}) or {})
-        journal_stats = dict(self.journal.stats() or {})
+        journal_stats = dict(self._journal().stats() or {})
 
         audit_total = int(summary.get("total", 0) or 0)
         audit_wins = int(summary.get("wins", 0) or 0)
@@ -202,8 +212,10 @@ class SnapshotService:
             "journal_total": journal_total,
         }
 
-    def build(self, runtime: dict):
-        report = self.audit.compute_report()
+    def build(self, runtime: dict, audit_report: dict | None = None):
+        # Reutiliza relatório já computado (com cache 30s) para evitar criar
+        # nova instância de EdgeAuditEngine a cada request do UptimeRobot/BetterStack.
+        report = audit_report if audit_report is not None else self._audit().compute_report()
         learning_stats = self._coalesce_learning_stats(report)
 
         current = self._adapt_decision(runtime.get("current_decision", {}) or {})
