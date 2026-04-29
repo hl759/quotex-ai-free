@@ -1,8 +1,10 @@
 from __future__ import annotations
-import base64, json, os, re, time, uuid
+import base64, hashlib, json, os, re, time, uuid
 from datetime import datetime, timezone
 
 import requests
+import psycopg2
+import psycopg2.extras
 from flask import Blueprint, jsonify, request
 
 from alpha_hive.audit.edge_audit import EdgeAuditEngine
@@ -12,47 +14,244 @@ from alpha_hive.storage.state_store import get_state_store
 
 bp = Blueprint("vision", __name__)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+GROQ_API_KEY   = os.getenv("GROQ_API_KEY", "").strip()
+DATABASE_URL   = os.getenv("DATABASE_URL", "").strip()
 
 VISION_COLLECTION = "vision_analyses_v1"
 
-PROMPT = """Analise este grafico de opcoes binarias e retorne APENAS JSON sem markdown:
-{"direction":"CALL ou PUT","confidence":0-100,"regime":"trend/sideways/reversal/chaotic","setup":"premium/standard/fraco","reasons":["r1","r2","r3"],"risk":"baixo/moderado/alto","decision":"ENTRADA_FORTE/ENTRADA_CAUTELA/OBSERVAR","summary":"frase curta"}
-CALL=alta. PUT=baixa. Confianca>75=ENTRADA_FORTE, 55-75=ENTRADA_CAUTELA, <55=OBSERVAR. SOMENTE JSON."""
+# ── DB ────────────────────────────────────────────────────────────────────────
+
+def _db():
+    return psycopg2.connect(DATABASE_URL, connect_timeout=5)
+
+def _init_db():
+    if not DATABASE_URL:
+        return
+    try:
+        with _db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS vision_analyses (
+                        id SERIAL PRIMARY KEY,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        image_hash TEXT,
+                        timeframe TEXT,
+                        direction TEXT,
+                        confidence INT,
+                        regime TEXT,
+                        setup TEXT,
+                        risk TEXT,
+                        decision TEXT,
+                        summary TEXT,
+                        reasons JSONB,
+                        result TEXT DEFAULT 'pending'
+                    )
+                """)
+            conn.commit()
+    except Exception as e:
+        print(f"[vision] db init error: {e}")
+
+_init_db()
+
+# ── STATS / CONTEXT ───────────────────────────────────────────────────────────
+
+def _get_stats():
+    if not DATABASE_URL:
+        return None
+    try:
+        with _db() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT COUNT(*) as total,
+                        SUM(CASE WHEN result='win' THEN 1 ELSE 0 END) as wins,
+                        SUM(CASE WHEN result='loss' THEN 1 ELSE 0 END) as losses,
+                        ROUND(AVG(confidence)) as avg_confidence
+                    FROM vision_analyses WHERE result IN ('win','loss')
+                """)
+                overall = cur.fetchone()
+                cur.execute("""
+                    SELECT regime, COUNT(*) as total,
+                        SUM(CASE WHEN result='win' THEN 1 ELSE 0 END) as wins
+                    FROM vision_analyses WHERE result IN ('win','loss') AND regime IS NOT NULL
+                    GROUP BY regime ORDER BY total DESC LIMIT 10
+                """)
+                by_regime = cur.fetchall()
+                cur.execute("""
+                    SELECT setup, COUNT(*) as total,
+                        SUM(CASE WHEN result='win' THEN 1 ELSE 0 END) as wins
+                    FROM vision_analyses WHERE result IN ('win','loss') AND setup IS NOT NULL
+                    GROUP BY setup ORDER BY total DESC
+                """)
+                by_setup = cur.fetchall()
+                cur.execute("""
+                    SELECT direction, COUNT(*) as total,
+                        SUM(CASE WHEN result='win' THEN 1 ELSE 0 END) as wins
+                    FROM vision_analyses WHERE result IN ('win','loss') AND direction IS NOT NULL
+                    GROUP BY direction
+                """)
+                by_direction = cur.fetchall()
+                cur.execute("""
+                    SELECT direction, regime, setup, confidence, result, summary
+                    FROM vision_analyses WHERE result IN ('win','loss')
+                    ORDER BY created_at DESC LIMIT 10
+                """)
+                recent = cur.fetchall()
+                return {
+                    "overall": dict(overall) if overall else {},
+                    "by_regime": [dict(r) for r in by_regime],
+                    "by_setup": [dict(r) for r in by_setup],
+                    "by_direction": [dict(r) for r in by_direction],
+                    "recent": [dict(r) for r in recent],
+                }
+    except Exception as e:
+        print(f"[vision] stats error: {e}")
+        return None
+
+def _build_context(stats, timeframe):
+    if not stats or not stats["overall"].get("total"):
+        return ""
+    o = stats["overall"]
+    total = int(o.get("total") or 0)
+    if total == 0:
+        return ""
+    wins = int(o.get("wins") or 0)
+    losses = int(o.get("losses") or 0)
+    wr = round(wins / total * 100) if total > 0 else 0
+    lines = [f"\n\n=== MEMÓRIA COLETIVA DE {min(total,200)} OPERAÇÕES ==="]
+    lines.append(f"Win rate geral: {wr}% ({wins}W/{losses}L de {total} operações)")
+    if stats["by_regime"]:
+        lines.append("\nPerformance por regime:")
+        for r in stats["by_regime"]:
+            t = int(r["total"] or 0); w = int(r["wins"] or 0)
+            pct = round(w/t*100) if t > 0 else 0
+            flag = "✅" if pct >= 60 else "⚠️" if pct >= 45 else "❌"
+            lines.append(f"  {flag} {r['regime']}: {pct}% win ({t} ops)")
+    if stats["by_setup"]:
+        lines.append("\nPerformance por setup:")
+        for r in stats["by_setup"]:
+            t = int(r["total"] or 0); w = int(r["wins"] or 0)
+            pct = round(w/t*100) if t > 0 else 0
+            flag = "✅" if pct >= 60 else "⚠️" if pct >= 45 else "❌"
+            lines.append(f"  {flag} {r['setup']}: {pct}% win ({t} ops)")
+    if stats["by_direction"]:
+        lines.append("\nPerformance por direção:")
+        for r in stats["by_direction"]:
+            t = int(r["total"] or 0); w = int(r["wins"] or 0)
+            pct = round(w/t*100) if t > 0 else 0
+            lines.append(f"  {'📈' if r['direction']=='CALL' else '📉'} {r['direction']}: {pct}% win ({t} ops)")
+    if stats["recent"]:
+        lines.append("\nÚltimas operações:")
+        for r in stats["recent"]:
+            icon = "✅" if r["result"] == "win" else "❌"
+            lines.append(f"  {icon} {r['direction']} | {r['regime']} | {r['setup']} | {r['confidence']}% conf")
+    lines.append("\nUSE ESSES DADOS para calibrar sua análise. Regime/setup com win rate baixo = mais conservador. Win rate alto = pode ser mais agressivo.")
+    lines.append("=== FIM DA MEMÓRIA ===")
+    return "\n".join(lines)
+
+# ── PARSING ───────────────────────────────────────────────────────────────────
 
 def _parse(raw):
-    raw = re.sub(r"^```(?:json)?","",raw.strip()).strip()
-    raw = re.sub(r"```$","",raw).strip()
-    m = re.search(r"\{.*\}",raw,re.DOTALL)
+    raw = re.sub(r"^```(?:json)?", "", raw.strip()).strip()
+    raw = re.sub(r"```$", "", raw).strip()
+    m = re.search(r"\{.*\}", raw, re.DOTALL)
     return json.loads(m.group(0) if m else raw)
 
-def _gemini(image_data, mime):
-    for model in ["gemini-1.5-pro","gemini-1.5-flash","gemini-pro-vision"]:
+# ── PROVIDERS ─────────────────────────────────────────────────────────────────
+
+def _groq(image_data, mime, prompt):
+    r = requests.post(
+        "https://api.groq.com/openai/v1/chat/completions",
+        json={
+            "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+            "messages": [{"role": "user", "content": [
+                {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{image_data}"}},
+                {"type": "text", "text": prompt}
+            ]}],
+            "max_tokens": 600, "temperature": 0.1
+        },
+        headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+        timeout=30
+    )
+    r.raise_for_status()
+    return _parse(r.json()["choices"][0]["message"]["content"])
+
+def _gemini(image_data, mime, prompt):
+    for model in ["gemini-1.5-pro", "gemini-1.5-flash", "gemini-pro-vision"]:
         try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-            r = requests.post(url, json={
-                "contents":[{"parts":[{"inline_data":{"mime_type":mime,"data":image_data}},{"text":PROMPT}]}],
-                "generationConfig":{"temperature":0.1,"maxOutputTokens":512}
-            }, params={"key":GEMINI_API_KEY}, timeout=45)
-            if r.status_code in (429,404): continue
+            r = requests.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                json={"contents": [{"parts": [
+                    {"inline_data": {"mime_type": mime, "data": image_data}},
+                    {"text": prompt}
+                ]}], "generationConfig": {"temperature": 0.1, "maxOutputTokens": 600}},
+                params={"key": GEMINI_API_KEY}, timeout=45
+            )
+            if r.status_code in (429, 404): continue
             r.raise_for_status()
             d = r.json()
             if not d.get("candidates"): continue
             return _parse(d["candidates"][0]["content"]["parts"][0]["text"])
-        except: continue
+        except Exception:
+            continue
     return None
 
-def _groq(image_data, mime):
-    r = requests.post("https://api.groq.com/openai/v1/chat/completions", json={
-        "model": "meta-llama/llama-4-scout-17b-16e-instruct",
-        "messages":[{"role":"user","content":[
-            {"type":"image_url","image_url":{"url":f"data:{mime};base64,{image_data}"}},
-            {"type":"text","text":PROMPT}
-        ]}],
-        "max_tokens": 512, "temperature": 0.1
-    }, headers={"Authorization":f"Bearer {GROQ_API_KEY}","Content-Type":"application/json"}, timeout=30)
-    r.raise_for_status()
-    return _parse(r.json()["choices"][0]["message"]["content"])
+# ── SAVE ──────────────────────────────────────────────────────────────────────
+
+def _save(image_hash, timeframe, result_data):
+    if not DATABASE_URL:
+        return None
+    try:
+        with _db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO vision_analyses
+                        (image_hash, timeframe, direction, confidence, regime,
+                         setup, risk, decision, summary, reasons)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id
+                """, (
+                    image_hash, timeframe,
+                    result_data.get("direction"), result_data.get("confidence"),
+                    result_data.get("regime"), result_data.get("setup"),
+                    result_data.get("risk"), result_data.get("decision"),
+                    result_data.get("summary"),
+                    json.dumps(result_data.get("reasons", []))
+                ))
+                row = cur.fetchone()
+            conn.commit()
+            return row[0] if row else None
+    except Exception as e:
+        print(f"[vision] save error: {e}")
+        return None
+
+# ── PROMPT ────────────────────────────────────────────────────────────────────
+
+BASE_PROMPT = """Você é um sistema de votação de 100 traders profissionais especializados em opções binárias M1/M5. Cada trader tem uma especialidade diferente e vota de forma independente. Você deve sintetizar o consenso deles.
+
+OS 100 TRADERS E SUAS ESPECIALIDADES:
+- 15 traders: Price Action puro (padrões de candles: doji, engolfo, martelo, estrela cadente, harami, pin bar, inside bar)
+- 15 traders: Análise de Tendência (EMAs, direção do mercado, higher highs/lower lows, estrutura de mercado)
+- 12 traders: Suporte e Resistência (níveis chave, zonas de preço, breaks e retestes)
+- 10 traders: Volume e Momentum (confirmação por volume, divergências, força do movimento)
+- 10 traders: Padrões Gráficos (triângulos, canais, bandeiras, cunhas, topos/fundos duplos)
+- 8 traders: Análise de Tempo (qual minuto do candle, timing de entrada, segundos restantes)
+- 8 traders: Gestão de Risco (relação risco/retorno, contexto macro do gráfico, filtros de ruído)
+- 7 traders: Reversão (oversold/overbought visual, exaustão de tendência, armadilhas de bulls/bears)
+- 8 traders: Continuação de Tendência (pullbacks em tendência, flags, reacumulação)
+- 7 traders: Scalping M1 (micro-estrutura, rejeições rápidas, fluxo de ordens visível)
+
+REGRAS DE CONSENSO:
+- ENTRADA_FORTE: 76+ votos concordam (confiança 76-98)
+- ENTRADA_CAUTELA: 55-75 votos concordam (confiança 55-75)
+- OBSERVAR: menos de 55 votos concordam (confiança <55)
+- Nunca retorne confiança 100
+
+CALIBRAÇÃO ADAPTATIVA: Se tiver dados históricos, ajuste sua análise conforme performance passada.
+
+Retorne APENAS este JSON válido sem markdown:
+{"direction":"CALL ou PUT","confidence":0-100,"regime":"trend/sideways/reversal/chaotic","setup":"premium/standard/fraco","reasons":["r1","r2","r3","r4","r5"],"risk":"baixo/moderado/alto","decision":"ENTRADA_FORTE/ENTRADA_CAUTELA/OBSERVAR","summary":"frase curta","votes":{"call":0,"put":0,"observe":0}}
+"""
+
+# ── LOSS CAUSE ────────────────────────────────────────────────────────────────
 
 def _infer_loss_cause(regime: str, setup: str, confidence: int, risk: str) -> str:
     regime = (regime or "").lower()
@@ -64,47 +263,60 @@ def _infer_loss_cause(regime: str, setup: str, confidence: int, risk: str) -> st
         return "reversal_ignored"
     if (risk or "").lower() == "alto":
         return "volatility_trap"
-    if (setup or "").lower() == "fraco":
-        return "wrong_direction"
     return "wrong_direction"
+
+# ── ROUTES ────────────────────────────────────────────────────────────────────
 
 @bp.post("/vision/analyze")
 def analyze():
     if "image" not in request.files:
-        return jsonify({"ok":False,"error":"Nenhuma imagem enviada"}),400
+        return jsonify({"ok": False, "error": "Nenhuma imagem enviada"}), 400
     file = request.files["image"]
     mime = file.mimetype or "image/jpeg"
-    if mime not in {"image/jpeg","image/jpg","image/png","image/webp"}: mime="image/jpeg"
-    image_data = base64.standard_b64encode(file.read()).decode("utf-8")
+    if mime not in {"image/jpeg", "image/jpg", "image/png", "image/webp"}:
+        mime = "image/jpeg"
+    image_bytes = file.read()
+    image_data  = base64.standard_b64encode(image_bytes).decode("utf-8")
+    image_hash  = hashlib.md5(image_bytes).hexdigest()
+    timeframe   = request.form.get("timeframe", "M1")
+
+    stats   = _get_stats()
+    context = _build_context(stats, timeframe)
+    prompt  = BASE_PROMPT + context
+
     result = None
     last_error = ""
     provider_used = ""
-    if GEMINI_API_KEY:
+
+    if GROQ_API_KEY:
         try:
-            result = _gemini(image_data, mime)
-            provider_used = "gemini"
-        except Exception as e: last_error = str(e)
-    if result is None and GROQ_API_KEY:
-        try:
-            result = _groq(image_data, mime)
+            result = _groq(image_data, mime, prompt)
             provider_used = "groq"
-        except Exception as e: last_error = str(e)
+        except Exception as e:
+            last_error = str(e)
+
+    if result is None and GEMINI_API_KEY:
+        try:
+            result = _gemini(image_data, mime, prompt)
+            provider_used = "gemini"
+        except Exception as e:
+            last_error = str(e)
+
     if result is None:
-        return jsonify({"ok":False,"error":last_error or "Todos provedores falharam"}),500
+        return jsonify({"ok": False, "error": last_error or "Todos provedores falharam"}), 500
 
-    analysis_id = uuid.uuid4().hex[:16]
-    timeframe = request.form.get("timeframe", "M1")
+    # Persiste no banco dedicado (contexto adaptativo futuro)
+    db_id = _save(image_hash, timeframe, result)
+    result["analysis_id"] = db_id
+
+    # Também salva no KV store para enriquecimento no feedback
+    kv_id = uuid.uuid4().hex[:16]
     now_ts = time.time()
-    now_str = datetime.fromtimestamp(now_ts, tz=timezone.utc).strftime("%H:%M")
-
     try:
         store = get_state_store()
-        store.upsert_collection_item(VISION_COLLECTION, analysis_id, {
-            "uid": analysis_id,
-            "created_at_ts": now_ts,
-            "analysis_time": now_str,
-            "timeframe": timeframe,
-            "provider": provider_used,
+        store.upsert_collection_item(VISION_COLLECTION, kv_id, {
+            "uid": kv_id, "db_id": db_id, "created_at_ts": now_ts,
+            "timeframe": timeframe, "provider": provider_used,
             "direction": result.get("direction", ""),
             "confidence": result.get("confidence", 0),
             "regime": result.get("regime", "unknown"),
@@ -117,97 +329,126 @@ def analyze():
     except Exception:
         pass
 
-    return jsonify({"ok":True,"result":result,"analysis_id":analysis_id,"provider":provider_used})
+    if stats and stats["overall"].get("total"):
+        o = stats["overall"]
+        t = int(o.get("total") or 0)
+        w = int(o.get("wins") or 0)
+        result["stats"] = {"total": t, "win_rate": round(w / t * 100) if t > 0 else 0}
+
+    return jsonify({"ok": True, "result": result, "kv_id": kv_id, "provider": provider_used})
 
 
 @bp.post("/vision/feedback")
 def feedback():
     body = request.get_json(force=True, silent=True) or {}
-    analysis_id = str(body.get("analysis_id", "")).strip()
     result = str(body.get("result", "")).upper().strip()
-
     if result not in ("WIN", "LOSS"):
-        return jsonify({"ok":False,"error":"result deve ser WIN ou LOSS"}), 400
+        return jsonify({"ok": False, "error": "result deve ser WIN ou LOSS"}), 400
 
-    direction = str(body.get("direction", "CALL")).upper()
-    regime = str(body.get("regime", "unknown")).lower()
-    setup = str(body.get("setup", "standard")).lower()
-    confidence = int(body.get("confidence", 65) or 65)
-    risk = str(body.get("risk", "moderado")).lower()
-    timeframe = str(body.get("timeframe", "M1"))
-    reasons = list(body.get("reasons", []) or [])
-    provider = str(body.get("provider", "vision_ai"))
+    analysis_id = body.get("analysis_id")   # numeric DB id
+    kv_id       = str(body.get("kv_id", "") or "").strip()
+    direction   = str(body.get("direction", "CALL")).upper()
+    regime      = str(body.get("regime", "unknown")).lower()
+    setup       = str(body.get("setup", "standard")).lower()
+    confidence  = int(body.get("confidence", 65) or 65)
+    risk        = str(body.get("risk", "moderado")).lower()
+    timeframe   = str(body.get("timeframe", "M1"))
+    reasons     = list(body.get("reasons", []) or [])
+    provider    = str(body.get("provider", "vision_ai"))
+    outcome_lower = result.lower()
 
-    # Enrich from saved analysis and mark it with outcome
-    if analysis_id:
+    # 1. Atualiza vision_analyses table
+    if analysis_id and DATABASE_URL:
+        try:
+            with _db() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE vision_analyses SET result=%s WHERE id=%s",
+                                (outcome_lower, analysis_id))
+                conn.commit()
+        except Exception as e:
+            print(f"[vision] feedback db error: {e}")
+
+    # 2. Enriquece do KV store
+    if kv_id:
         try:
             store = get_state_store()
-            for row in store.list_collection(VISION_COLLECTION, limit=500):
-                if row.get("uid") == analysis_id:
-                    direction = direction or str(row.get("direction", "CALL")).upper()
-                    regime = regime or str(row.get("regime", "unknown")).lower()
-                    setup = setup or str(row.get("setup", "standard")).lower()
+            for row in store.list_collection(VISION_COLLECTION, limit=200):
+                if row.get("uid") == kv_id:
+                    direction  = direction  or str(row.get("direction", "CALL")).upper()
+                    regime     = regime     or str(row.get("regime", "unknown")).lower()
+                    setup      = setup      or str(row.get("setup", "standard")).lower()
                     confidence = confidence or int(row.get("confidence", 65) or 65)
-                    risk = risk or str(row.get("risk", "moderado")).lower()
-                    timeframe = timeframe or str(row.get("timeframe", "M1"))
-                    reasons = reasons or list(row.get("reasons", []) or [])
-                    provider = provider or str(row.get("provider", "vision_ai"))
-                    store.upsert_collection_item(VISION_COLLECTION, analysis_id,
+                    risk       = risk       or str(row.get("risk", "moderado")).lower()
+                    timeframe  = timeframe  or str(row.get("timeframe", "M1"))
+                    reasons    = reasons    or list(row.get("reasons", []) or [])
+                    provider   = provider   or str(row.get("provider", "vision_ai"))
+                    store.upsert_collection_item(VISION_COLLECTION, kv_id,
                         {**row, "result": result, "evaluated_at_ts": time.time()})
                     break
         except Exception:
             pass
 
-    now_ts = time.time()
-    now_str = datetime.fromtimestamp(now_ts, tz=timezone.utc).strftime("%H:%M")
+    now_ts      = time.time()
+    now_str     = datetime.fromtimestamp(now_ts, tz=timezone.utc).strftime("%H:%M")
     hour_bucket = datetime.fromtimestamp(now_ts, tz=timezone.utc).strftime("%H:00")
-    uid = analysis_id or f"vision-{direction}-{now_str}"
-    loss_cause = "none" if result == "WIN" else _infer_loss_cause(regime, setup, confidence, risk)
+    uid         = kv_id or f"vision-{direction}-{now_str}"
+    loss_cause  = "none" if result == "WIN" else _infer_loss_cause(regime, setup, confidence, risk)
 
     trade_payload = {
-        "uid": uid,
-        "asset": "VISION_MANUAL",
-        "direction": direction,
-        "signal": direction,
-        "result": result,
-        "loss_cause": loss_cause,
-        "regime": regime,
-        "setup_quality": setup,
-        "confidence": confidence,
-        "timeframe": timeframe,
-        "provider": provider,
-        "market_type": "manual_vision",
-        "hour_bucket": hour_bucket,
-        "analysis_time": now_str,
-        "created_at_ts": now_ts,
-        "evaluated_at_ts": now_ts,
-        "source": "vision_feedback",
-        "reasons": reasons,
+        "uid": uid, "asset": "VISION_MANUAL", "direction": direction,
+        "signal": direction, "result": result, "loss_cause": loss_cause,
+        "regime": regime, "setup_quality": setup, "confidence": confidence,
+        "timeframe": timeframe, "provider": provider, "market_type": "manual_vision",
+        "hour_bucket": hour_bucket, "analysis_time": now_str,
+        "created_at_ts": now_ts, "evaluated_at_ts": now_ts,
+        "source": "vision_feedback", "reasons": reasons,
     }
 
+    # 3. Registra no EdgeAuditEngine + JournalManager (aparece nos Stats)
     try:
         EdgeAuditEngine().record_trade(trade_payload)
         JournalManager().add_trade(trade_payload)
     except Exception:
         pass
 
+    # 4. Alimenta LearningEngine
     try:
-        learning = LearningEngine()
-        learning.register_outcome(
-            asset="VISION_MANUAL",
-            direction=direction,
-            regime=regime,
-            specialist="vision_ai",
-            provider=provider,
-            market_type="manual_vision",
-            hour_bucket=hour_bucket,
-            setup_quality=setup,
-            result=result,
-            loss_cause=loss_cause,
-            operating_state="ENTRADA_FORTE",
-            signal_type="vision",
+        LearningEngine().register_outcome(
+            asset="VISION_MANUAL", direction=direction, regime=regime,
+            specialist="vision_ai", provider=provider, market_type="manual_vision",
+            hour_bucket=hour_bucket, setup_quality=setup, result=result,
+            loss_cause=loss_cause, operating_state="ENTRADA_FORTE", signal_type="vision",
         )
     except Exception:
         pass
 
     return jsonify({"ok": True, "result_registered": result, "loss_cause": loss_cause})
+
+
+@bp.post("/vision/result")
+def save_result():
+    """Alias legado — mantido para compatibilidade."""
+    data = request.get_json(force=True, silent=True) or {}
+    analysis_id = data.get("analysis_id")
+    outcome = str(data.get("result", "")).lower()
+    if not analysis_id or outcome not in ("win", "loss"):
+        return jsonify({"ok": False, "error": "Parâmetros inválidos"}), 400
+    if not DATABASE_URL:
+        return jsonify({"ok": False, "error": "Banco não configurado"}), 500
+    try:
+        with _db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE vision_analyses SET result=%s WHERE id=%s",
+                            (outcome, analysis_id))
+            conn.commit()
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@bp.get("/vision/stats")
+def get_stats():
+    stats = _get_stats()
+    if not stats:
+        return jsonify({"ok": False, "error": "Sem dados"})
+    return jsonify({"ok": True, "stats": stats})
