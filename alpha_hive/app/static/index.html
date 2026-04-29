@@ -745,6 +745,7 @@ document.addEventListener('DOMContentLoaded', function(){
 // ── VISÃO ────────────────────────────────────────────────────────────────
 let visionFile = null;
 let visionTf = 'M1';
+let _currentVisionAnalysis = null;
 
 function visionSetTf(tf) {
   visionTf = tf;
@@ -798,6 +799,18 @@ async function visionAnalyze() {
       return;
     }
     const r = data.result;
+    // Store analysis state for Win/Loss feedback
+    _currentVisionAnalysis = {
+      analysis_id: data.analysis_id || '',
+      provider: data.provider || 'vision_ai',
+      direction: r.direction || 'CALL',
+      regime: r.regime || 'unknown',
+      setup: r.setup || 'standard',
+      confidence: r.confidence || 65,
+      risk: r.risk || 'moderado',
+      timeframe: visionTf,
+      reasons: r.reasons || [],
+    };
     const dir = (r.direction||'OBSERVAR').toUpperCase();
     const dirEmoji = dir==='CALL' ? '📈' : dir==='PUT' ? '📉' : '👁️';
     const dirColor = dir==='CALL' ? 'var(--green)' : dir==='PUT' ? 'var(--purple)' : 'var(--gold)';
@@ -825,7 +838,15 @@ async function visionAnalyze() {
         ${r.summary ? `<div style='padding:14px;background:rgba(95,245,220,.05);border:1px solid rgba(95,245,220,.12);border-radius:18px;color:#c4ffe8;font-size:14px;font-style:italic;text-align:center;margin-bottom:14px'>"${escapeHtml(r.summary)}"</div>` : ''}
         <div style='margin-bottom:4px;font-size:11px;letter-spacing:.14em;color:#90a6c6;text-transform:uppercase'>Análise</div>
         ${reasons}
-        <button onclick='visionClear()' style='width:100%;margin-top:10px;padding:14px;border-radius:18px;background:rgba(10,20,33,.95);border:1px solid rgba(105,175,255,.10);color:#90a5c6;font-size:14px;font-weight:800;cursor:pointer'>
+        <div style='margin-top:18px;border-top:1px solid rgba(105,175,255,.08);padding-top:18px'>
+          <div style='font-size:11px;letter-spacing:.14em;color:#90a6c6;text-transform:uppercase;text-align:center;margin-bottom:12px'>Como foi a operação?</div>
+          <div style='display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px'>
+            <button id='visionWinBtn' onclick='visionFeedback("WIN")' style='padding:14px;border-radius:18px;background:rgba(0,200,100,.12);border:1px solid rgba(0,200,100,.30);color:#00c864;font-size:15px;font-weight:900;cursor:pointer'>✅ Win</button>
+            <button id='visionLossBtn' onclick='visionFeedback("LOSS")' style='padding:14px;border-radius:18px;background:rgba(255,90,90,.12);border:1px solid rgba(255,90,90,.30);color:#ff6b6b;font-size:15px;font-weight:900;cursor:pointer'>❌ Loss</button>
+          </div>
+          <div id='visionFbStatus' style='text-align:center;font-size:13px;color:#90a5c6;min-height:18px'></div>
+        </div>
+        <button onclick='visionClear()' style='width:100%;margin-top:14px;padding:14px;border-radius:18px;background:rgba(10,20,33,.95);border:1px solid rgba(105,175,255,.10);color:#90a5c6;font-size:14px;font-weight:800;cursor:pointer'>
           📊 Analisar outro gráfico
         </button>
       </div>`;
@@ -834,6 +855,48 @@ async function visionAnalyze() {
   } finally {
     loading.style.display = 'none';
     btn.style.display = 'block';
+  }
+}
+
+async function visionFeedback(result) {
+  if (!_currentVisionAnalysis) return;
+  const winBtn = document.getElementById('visionWinBtn');
+  const lossBtn = document.getElementById('visionLossBtn');
+  const fbStatus = document.getElementById('visionFbStatus');
+
+  if (winBtn) { winBtn.disabled = true; winBtn.style.opacity = '0.45'; }
+  if (lossBtn) { lossBtn.disabled = true; lossBtn.style.opacity = '0.45'; }
+  if (fbStatus) { fbStatus.textContent = 'Registrando...'; fbStatus.style.color = '#90a5c6'; }
+
+  try {
+    const resp = await fetch((window.API_BASE||'') + '/vision/feedback', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({..._currentVisionAnalysis, result}),
+      cache: 'no-store',
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      const emoji = result === 'WIN' ? '✅' : '❌';
+      if (fbStatus) {
+        fbStatus.textContent = emoji + ' Registrado! IA atualizando aprendizado...';
+        fbStatus.style.color = result === 'WIN' ? 'var(--green)' : 'var(--red)';
+      }
+      // Highlight the clicked button
+      const activeBtn = result === 'WIN' ? winBtn : lossBtn;
+      if (activeBtn) { activeBtn.style.opacity = '1'; activeBtn.style.fontWeight = '900'; }
+      _currentVisionAnalysis = null;
+      // Refresh stats tab so the new outcome appears immediately
+      setTimeout(function(){ if(typeof refreshSnapshot==='function') refreshSnapshot(true); }, 800);
+    } else {
+      if (fbStatus) fbStatus.textContent = '⚠ Erro: ' + (data.error || 'Falha');
+      if (winBtn) { winBtn.disabled = false; winBtn.style.opacity = '1'; }
+      if (lossBtn) { lossBtn.disabled = false; lossBtn.style.opacity = '1'; }
+    }
+  } catch(e) {
+    if (fbStatus) fbStatus.textContent = '⚠ Erro de conexão';
+    if (winBtn) { winBtn.disabled = false; winBtn.style.opacity = '1'; }
+    if (lossBtn) { lossBtn.disabled = false; lossBtn.style.opacity = '1'; }
   }
 }
 
