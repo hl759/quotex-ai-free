@@ -298,6 +298,73 @@ def _infer_loss_cause(regime: str, setup: str, confidence: int, risk: str) -> st
         return "volatility_trap"
     return "wrong_direction"
 
+def _normalize_result(r: dict) -> dict:
+    """Corrige typos e valores inválidos que o modelo pode gerar."""
+    # entry_timing
+    timing = str(r.get("entry_timing", "") or "").lower().strip()
+    if "aguar" in timing:
+        r["entry_timing"] = "aguardar"
+    elif "evit" in timing or "avoid" in timing:
+        r["entry_timing"] = "evitar"
+    elif "agora" in timing or "now" in timing or "enter" in timing:
+        r["entry_timing"] = "agora"
+    elif timing not in ("agora", "aguardar", "evitar"):
+        r["entry_timing"] = "aguardar"
+
+    # regime
+    regime = str(r.get("regime", "") or "").lower()
+    if regime not in ("trend_up","trend_down","sideways","reversal","spike_reversal","chaotic"):
+        if "spike" in regime:
+            r["regime"] = "spike_reversal"
+        elif "trend" in regime and ("up" in regime or "alta" in regime or "bull" in regime):
+            r["regime"] = "trend_up"
+        elif "trend" in regime and ("down" in regime or "baixa" in regime or "bear" in regime):
+            r["regime"] = "trend_down"
+        elif "revers" in regime:
+            r["regime"] = "reversal"
+        elif "later" in regime or "side" in regime or "consol" in regime:
+            r["regime"] = "sideways"
+        elif "caot" in regime or "chaot" in regime or "chaos" in regime:
+            r["regime"] = "chaotic"
+
+    # trend_strength
+    strength = str(r.get("trend_strength", "") or "").lower()
+    if strength not in ("forte","moderado","fraco"):
+        if "strong" in strength or "fort" in strength:
+            r["trend_strength"] = "forte"
+        elif "weak" in strength or "fraco" in strength or "fraq" in strength:
+            r["trend_strength"] = "fraco"
+        else:
+            r["trend_strength"] = "moderado"
+
+    # setup
+    setup = str(r.get("setup", "") or "").lower()
+    if setup not in ("premium","standard","fraco"):
+        if "prem" in setup:
+            r["setup"] = "premium"
+        elif "fraco" in setup or "weak" in setup or "poor" in setup:
+            r["setup"] = "fraco"
+        else:
+            r["setup"] = "standard"
+
+    # decision
+    dec = str(r.get("decision", "") or "").upper()
+    if dec not in ("ENTRADA_FORTE","ENTRADA_CAUTELA","OBSERVAR"):
+        if "FORTE" in dec or "STRONG" in dec:
+            r["decision"] = "ENTRADA_FORTE"
+        elif "CAUT" in dec or "LIMIT" in dec:
+            r["decision"] = "ENTRADA_CAUTELA"
+        else:
+            r["decision"] = "OBSERVAR"
+
+    # confidence clamp
+    try:
+        r["confidence"] = max(0, min(95, int(r.get("confidence", 50) or 50)))
+    except (TypeError, ValueError):
+        r["confidence"] = 50
+
+    return r
+
 # ── ROUTES ────────────────────────────────────────────────────────────────────
 
 @bp.post("/vision/analyze")
@@ -339,6 +406,7 @@ def analyze():
         return jsonify({"ok": False, "error": last_error or "Todos provedores falharam"}), 500
 
     # Persiste no banco dedicado (contexto adaptativo futuro)
+    result = _normalize_result(result)
     db_id = _save(image_hash, timeframe, result)
     result["analysis_id"] = db_id
 
