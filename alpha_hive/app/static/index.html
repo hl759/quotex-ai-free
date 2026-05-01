@@ -823,7 +823,25 @@ async function visionAnalyze(){
     const decColor=r.decision==='ENTRADA_FORTE'?'var(--green)':r.decision==='ENTRADA_CAUTELA'?'var(--gold)':'var(--red)';
     const timingColor=r.entry_timing==='agora'?'var(--green)':r.entry_timing==='aguardar'?'var(--gold)':'var(--red)';
     const timingEmoji=r.entry_timing==='agora'?'⚡':r.entry_timing==='aguardar'?'⏳':'🚫';
+    const timingLabel=r.entry_timing==='agora'?'Agora':r.entry_timing==='aguardar'?'Próximo candle':'Evitar';
     const strengthColor=r.trend_strength==='forte'?'var(--green)':r.trend_strength==='moderado'?'var(--gold)':'var(--red)';
+    const entryBlockHtml=(r.entry_time&&r.expiry_time)?`
+      <div style='margin-bottom:14px;padding:14px 16px;background:linear-gradient(180deg,rgba(10,22,40,.98),rgba(7,15,27,.98));border:1px solid ${timingColor}33;border-radius:18px;text-align:center'>
+        <div style='font-size:11px;letter-spacing:.18em;color:#90a6c6;text-transform:uppercase;margin-bottom:8px'>${timingEmoji} ${timingLabel} — Expiração ${visionTf}</div>
+        <div style='display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:8px'>
+          <div>
+            <div style='font-size:11px;color:#90a6c6;margin-bottom:4px'>Entrada</div>
+            <div style='font-size:28px;font-weight:900;color:${timingColor};letter-spacing:.02em'>${escapeHtml(r.entry_time)}</div>
+          </div>
+          <div style='font-size:18px;color:#5f7393'>→</div>
+          <div>
+            <div style='font-size:11px;color:#90a6c6;margin-bottom:4px'>Expiração</div>
+            <div style='font-size:28px;font-weight:900;color:var(--cyan);letter-spacing:.02em'>${escapeHtml(r.expiry_time)}</div>
+          </div>
+        </div>
+        <div style='margin-top:6px;font-size:12px;color:#5f7393'>${escapeHtml(r.expiry_duration||'')} de operação</div>
+      </div>`
+    :(r.entry_timing==='evitar'?`<div style='margin-bottom:14px;padding:12px;background:rgba(66,27,34,.3);border:1px solid rgba(255,111,125,.18);border-radius:14px;text-align:center;color:var(--red);font-size:13px;font-weight:800'>🚫 Não entrar neste candle</div>`:'');
     const votesHtml=r.votes?`
       <div style='display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px'>
         <div style='padding:12px;background:rgba(28,77,61,.3);border:1px solid rgba(95,245,220,.2);border-radius:14px;text-align:center'>
@@ -858,9 +876,10 @@ async function visionAnalyze(){
           <div style='font-size:14px;font-weight:900;color:${decColor};margin-top:6px;letter-spacing:.08em'>${escapeHtml(r.decision||'')}</div>
           <div style='font-size:12px;color:#90a5c6;margin-top:4px'>Timeframe: ${visionTf} • Conselho de 100 traders</div>
         </div>
+        ${entryBlockHtml}
         <div style='display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px'>
           <div class='score-tile'><div class='label'>Confiança</div><div class='value' style='color:${confColor}'>${r.confidence}%</div></div>
-          <div class='score-tile'><div class='label'>Entrada</div><div class='value' style='color:${timingColor};font-size:13px'>${timingEmoji} ${escapeHtml(r.entry_timing||'--')}</div></div>
+          <div class='score-tile'><div class='label'>Timing</div><div class='value' style='color:${timingColor};font-size:13px'>${timingEmoji} ${escapeHtml(timingLabel)}</div></div>
           <div class='score-tile'><div class='label'>Regime</div><div class='value' style='color:var(--cyan);font-size:13px'>${escapeHtml(r.regime||'--')}</div></div>
           <div class='score-tile'><div class='label'>Força</div><div class='value' style='color:${strengthColor};font-size:13px'>${escapeHtml(r.trend_strength||'--')}</div></div>
           <div class='score-tile'><div class='label'>Setup</div><div class='value' style='color:var(--blue);font-size:13px'>${escapeHtml(r.setup||'--')}</div></div>
