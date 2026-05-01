@@ -171,7 +171,9 @@ def _groq(image_data, mime, prompt):
                 {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{image_data}"}},
                 {"type": "text", "text": prompt}
             ]}],
-            "max_tokens": 600, "temperature": 0.1
+            "max_tokens": 700,
+            "temperature": 0.1,
+            "response_format": {"type": "json_object"},
         },
         headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
         timeout=30
@@ -181,14 +183,18 @@ def _groq(image_data, mime, prompt):
     return _parse(content)
 
 def _gemini(image_data, mime, prompt):
-    for model in ["gemini-1.5-pro", "gemini-1.5-flash", "gemini-pro-vision"]:
+    for model in ["gemini-1.5-pro", "gemini-1.5-flash"]:
         try:
             r = requests.post(
                 f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
                 json={"contents": [{"parts": [
                     {"inline_data": {"mime_type": mime, "data": image_data}},
                     {"text": prompt}
-                ]}], "generationConfig": {"temperature": 0.1, "maxOutputTokens": 600}},
+                ]}], "generationConfig": {
+                    "temperature": 0.1,
+                    "maxOutputTokens": 700,
+                    "responseMimeType": "application/json",
+                }},
                 params={"key": GEMINI_API_KEY}, timeout=45
             )
             if r.status_code in (429, 404): continue
@@ -231,137 +237,51 @@ def _save(image_hash, timeframe, result_data):
 
 # ── PROMPT ────────────────────────────────────────────────────────────────────
 
-BASE_PROMPT = """Você é um sistema de análise técnica de elite para opções binárias M1/M5. Analise CADA elemento visual do gráfico com máxima precisão antes de votar.
+BASE_PROMPT = """INSTRUÇÃO CRÍTICA: Responda APENAS com um objeto JSON válido. NENHUM texto, título, explicação ou markdown antes ou depois do JSON. Só o JSON.
 
-═══════════════════════════════════════════════════
-FASE 1 — LEITURA TÉCNICA COMPLETA DO GRÁFICO
-═══════════════════════════════════════════════════
+Você é um sistema de análise técnica de elite para opções binárias M1/M5. Analise o gráfico internamente usando os critérios abaixo e preencha o JSON de saída.
 
-1. ESTRUTURA DE MERCADO
-   • Tendência: alta (HH+HL), baixa (LH+LL) ou lateral?
-   • Última sequência de candles: impulso ou correção?
-   • Houve quebra de estrutura (BOS)? Em qual direção?
-   • Onde o preço está em relação às últimas 15–20 velas?
+ANÁLISE INTERNA (não escreva, só use para preencher o JSON):
 
-2. PADRÕES DE CANDLES — foco nas últimas 5 velas
-   Identifique o padrão dominante:
-   • Reversão: doji, engolfo de alta/baixa, martelo, shooting star, pin bar,
-     estrela da manhã/noite, harami, dark cloud cover, piercing line
-   • Continuação: marubozu, three soldiers/crows, inside bar, flag candle
-   • Indecisão: spinning top, doji de pernas longas
-   Avalie: corpo vs sombra (força), e se é reversão ou continuação.
+A) ESTRUTURA: tendência alta (HH+HL) / baixa (LH+LL) / lateral? Quebra de estrutura (BOS)?
 
-3. SPIKES E EXAUSTÃO — CRÍTICO para M1
-   • Há spike (vela anormalmente maior que as anteriores)?
-     → Spike + velas menores depois = EXAUSTÃO → sinal oposto ao spike
-     → Spike sem volume = armadilha de liquidez → oposto
-     → Spike com volume explosivo = possível início de tendência → favor do spike
-   • Vela de rejeição (sombra ≥ 2× o corpo) em nível = sinal forte na direção oposta
-   • Sequência de 3+ velas do mesmo lado = momentum confirmado
+B) PADRÕES DE CANDLE (últimas 5 velas): doji, engolfo, martelo, shooting star, pin bar, harami, marubozu, three soldiers/crows, inside bar, dark cloud cover, piercing line, spinning top. Corpo vs sombra. Reversão ou continuação?
 
-4. SUPORTE E RESISTÊNCIA
-   • Identifique 2–3 níveis visíveis no gráfico (topos, fundos, zonas de congestão)
-   • Números redondos visíveis (ex: 2300, 84.00, 1.2000) = magnetismo natural
-   • Preço está: rompendo com força / rejeitando / consolidando no nível?
-   • Reteste de nível rompido = entrada de alta probabilidade
+C) SPIKES E EXAUSTÃO (CRÍTICO):
+   - Spike (vela muito maior que as anteriores) + velas menores depois = exaustão → PUT
+   - Spike + volume explosivo = possível tendência → favor do spike
+   - Vela de rejeição (sombra ≥2× corpo) em nível = sinal oposto à sombra
+   - 3+ velas consecutivas = momentum confirmado nessa direção
 
-5. VOLUME (analise somente se o histograma estiver visível)
-   • Volume crescente no movimento = tendência confirmada
-   • Volume decrescente = fraqueza, possível reversão
-   • Volume spike no topo/fundo = exaustão e reversão iminente
-   • Volume baixo em lateralização = breakout se aproximando
-   • Se volume NÃO estiver visível: não especule
+D) SUPORTE/RESISTÊNCIA: topos, fundos, zonas de congestão, números redondos (2300, 84.00). Preço rompendo / rejeitando / consolidando?
 
-6. MOMENTUM E VELOCIDADE
-   • Velas estão ficando MENORES? → momentum perdendo força → possível reversão
-   • Velas estão ficando MAIORES? → aceleração → favor do movimento
-   • Fechamentos: no topo do corpo = força CALL | na base = força PUT
-   • Distância entre abertura/fechamento vs candles anteriores
-   • Sombras simétricas = indecisão | sombra de um lado só = rejeição direcional
+E) VOLUME (só se histograma visível): spike no topo/fundo = reversão. Crescente = confirma. Decrescente = fraqueza.
 
-7. INDICADORES TÉCNICOS — analise SOMENTE os visíveis no gráfico
-   • EMA/SMA: preço acima = viés CALL | abaixo = viés PUT
-     Múltiplas EMAs: alinhamento (todas subindo = tendência forte)
-     Cruzamento de médias = sinal de mudança
-   • Bandas de Bollinger: toque na banda superior = pressão de venda
-     toque na banda inferior = pressão de compra | squeeze = breakout próximo
-   • RSI: >70 = sobrecomprado (sinal PUT) | <30 = sobrevendido (sinal CALL)
-     Divergência: preço faz novo topo mas RSI não = reversão iminente
-   • MACD: cruzamento do sinal = mudança de momentum
-     Histograma crescendo = momentum aumentando
-   • Estocástico: >80 = sobrecomprado | <20 = sobrevendido
-   • Se indicador NÃO aparecer no gráfico: IGNORE, não invente valores
+F) MOMENTUM: velas ficando menores = fraqueza. Fechamento no topo = força CALL. Fechamento na base = força PUT.
 
-8. PADRÕES GRÁFICOS AVANÇADOS
-   • Topo/fundo duplo ou triplo = reversão forte
-   • Cabeça e ombros (normal ou invertido) = reversão
-   • Triângulo ascendente/descendente/simétrico = breakout direcional
-   • Canal de alta/baixa: toque na linha = reversão dentro do canal
-   • Bandeira (flag) ou flâmula: continuação após consolidação breve
-   • Cunha ascendente = PUT | Cunha descendente = CALL
+G) INDICADORES (APENAS os visíveis no gráfico, nunca invente):
+   - EMA acima = CALL | abaixo = PUT | cruzamento = mudança
+   - Bollinger: toque na banda superior = PUT | inferior = CALL
+   - RSI >70 = sobrecomprado (PUT) | <30 = sobrevendido (CALL) | divergência = reversão
+   - MACD: cruzamento = mudança de momentum
+   - Estocástico: >80 = PUT | <20 = CALL
 
-9. CONTEXTO TEMPORAL E SESSÃO
-   • Horário visível: sessão asiática (~23h–8h BRT) = volatilidade baixa
-     Sessão europeia (~9h–17h BRT) = volatilidade crescente
-     Sessão americana (~14h–22h BRT) = volatilidade alta
-   • Spike repentino em horário incomum = provavelmente notícia → EVITAR entrar no spike
-   • Início de sessão: movimentos mais confiáveis | fim de sessão: cautela
+H) PADRÕES GRÁFICOS: topo/fundo duplo, cabeça e ombros, triângulos, canal, bandeira, cunha ascendente=PUT, cunha descendente=CALL.
 
-10. TIMING DA ENTRADA (use o contador visível no gráfico se disponível)
-    • 0–20s restantes no candle: entrada segura, máximo tempo de vela restante
-    • 20–40s restantes: ainda válido se sinal muito claro
-    • 40–60s restantes: arriscado, considere aguardar próxima vela
-    • entry_timing retornar: "agora" / "aguardar" / "evitar"
+I) SESSÃO (se horário visível): asiática=baixa volatilidade, europeia/americana=alta. Spike em horário incomum = notícia → risco alto.
 
-═══════════════════════════════════════════════════
-FASE 2 — VOTAÇÃO DOS 100 ESPECIALISTAS
-═══════════════════════════════════════════════════
+J) TIMING: segundos restantes no candle. 0-20s=agora, 20-40s=aguardar, 40-60s=evitar.
 
-Distribua os 100 votos entre CALL, PUT e OBSERVAR ponderando:
-  • Price action + padrões de candle ........... 25 votos
-  • Estrutura de mercado + S/R ................. 25 votos
-  • Volume + momentum + velocidade ............. 20 votos
-  • Indicadores visíveis ....................... 15 votos
-  • Padrões gráficos avançados ................. 10 votos
-  • Timing + contexto de sessão ................ 5 votos
+REGRAS DE VOTAÇÃO (100 votos totais entre call/put/observe):
+- Spike + reversão confirmada → ≥80 votos no oposto ao spike
+- 3+ velas consecutivas → ≥70 votos nessa direção
+- Rejeição em S/R forte → ≥75 votos no sentido da rejeição
+- RSI extremo + padrão de reversão → ≥72 votos
+- Mercado lateral sem sinal → ≥60 votos em observe
+- Confidence máximo = 95. Se confidence < 55: decision = OBSERVAR.
 
-REGRAS ABSOLUTAS DE VOTAÇÃO:
-  ✦ Spike + reversão confirmada → ≥80 votos no sentido OPOSTO ao spike
-  ✦ 3+ velas consecutivas mesmo lado → ≥70 votos nessa direção
-  ✦ Rejeição clara em S/R com volume → ≥75 votos no sentido da rejeição
-  ✦ RSI/Estocástico em zona extrema + padrão de reversão → ≥72 votos
-  ✦ Mercado lateral sem sinal claro → ≥60 votos em OBSERVAR
-  ✦ Divergência indicador + preço → ≥68 votos na direção do indicador
-  ✦ Spike sem confirmação (vela única) → ≥65 votos em OBSERVAR ou oposto
-  ✦ Confidence máxima = 95 (nunca 100)
-  ✦ Se confidence < 55: decision DEVE ser OBSERVAR
-
-═══════════════════════════════════════════════════
-FASE 3 — OUTPUT JSON
-═══════════════════════════════════════════════════
-
-Retorne SOMENTE este JSON válido, sem markdown, sem texto extra:
-{
-  "direction": "CALL ou PUT",
-  "confidence": 0-95,
-  "regime": "trend_up/trend_down/sideways/reversal/spike_reversal/chaotic",
-  "setup": "premium/standard/fraco",
-  "pattern": "nome exato do padrão principal identificado",
-  "entry_timing": "agora/aguardar/evitar",
-  "trend_strength": "forte/moderado/fraco",
-  "key_level": "descrição do nível chave mais próximo (ou vazio se nenhum)",
-  "reasons": [
-    "análise price action e padrão de candle",
-    "estrutura de mercado e suporte/resistência",
-    "volume e momentum",
-    "indicadores técnicos visíveis",
-    "timing, sessão e síntese final"
-  ],
-  "risk": "baixo/moderado/alto",
-  "decision": "ENTRADA_FORTE/ENTRADA_CAUTELA/OBSERVAR",
-  "summary": "síntese objetiva em uma frase",
-  "votes": {"call": 0, "put": 0, "observe": 0}
-}
+SAÍDA — retorne EXATAMENTE este JSON preenchido:
+{"direction":"CALL ou PUT","confidence":0-95,"regime":"trend_up/trend_down/sideways/reversal/spike_reversal/chaotic","setup":"premium/standard/fraco","pattern":"nome do padrão identificado","entry_timing":"agora/aguardar/evitar","trend_strength":"forte/moderado/fraco","key_level":"nível chave mais próximo ou vazio","reasons":["price action e padrão","estrutura e S/R","volume e momentum","indicadores visíveis","timing e síntese"],"risk":"baixo/moderado/alto","decision":"ENTRADA_FORTE/ENTRADA_CAUTELA/OBSERVAR","summary":"frase curta objetiva","votes":{"call":0,"put":0,"observe":0}}
 """
 
 # ── LOSS CAUSE ────────────────────────────────────────────────────────────────
