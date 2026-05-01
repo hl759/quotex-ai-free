@@ -821,6 +821,9 @@ async function visionAnalyze(){
     const confColor=r.confidence>=75?'var(--green)':r.confidence>=55?'var(--gold)':'var(--red)';
     const riskColor=r.risk==='baixo'?'var(--green)':r.risk==='moderado'?'var(--gold)':'var(--red)';
     const decColor=r.decision==='ENTRADA_FORTE'?'var(--green)':r.decision==='ENTRADA_CAUTELA'?'var(--gold)':'var(--red)';
+    const timingColor=r.entry_timing==='agora'?'var(--green)':r.entry_timing==='aguardar'?'var(--gold)':'var(--red)';
+    const timingEmoji=r.entry_timing==='agora'?'⚡':r.entry_timing==='aguardar'?'⏳':'🚫';
+    const strengthColor=r.trend_strength==='forte'?'var(--green)':r.trend_strength==='moderado'?'var(--gold)':'var(--red)';
     const votesHtml=r.votes?`
       <div style='display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px'>
         <div style='padding:12px;background:rgba(28,77,61,.3);border:1px solid rgba(95,245,220,.2);border-radius:14px;text-align:center'>
@@ -857,10 +860,15 @@ async function visionAnalyze(){
         </div>
         <div style='display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px'>
           <div class='score-tile'><div class='label'>Confiança</div><div class='value' style='color:${confColor}'>${r.confidence}%</div></div>
-          <div class='score-tile'><div class='label'>Regime</div><div class='value' style='color:var(--cyan);font-size:15px'>${escapeHtml(r.regime||'--')}</div></div>
-          <div class='score-tile'><div class='label'>Setup</div><div class='value' style='color:var(--blue);font-size:15px'>${escapeHtml(r.setup||'--')}</div></div>
-          <div class='score-tile'><div class='label'>Risco</div><div class='value' style='color:${riskColor};font-size:15px'>${escapeHtml(r.risk||'--')}</div></div>
+          <div class='score-tile'><div class='label'>Entrada</div><div class='value' style='color:${timingColor};font-size:13px'>${timingEmoji} ${escapeHtml(r.entry_timing||'--')}</div></div>
+          <div class='score-tile'><div class='label'>Regime</div><div class='value' style='color:var(--cyan);font-size:13px'>${escapeHtml(r.regime||'--')}</div></div>
+          <div class='score-tile'><div class='label'>Força</div><div class='value' style='color:${strengthColor};font-size:13px'>${escapeHtml(r.trend_strength||'--')}</div></div>
+          <div class='score-tile'><div class='label'>Setup</div><div class='value' style='color:var(--blue);font-size:13px'>${escapeHtml(r.setup||'--')}</div></div>
+          <div class='score-tile'><div class='label'>Risco</div><div class='value' style='color:${riskColor};font-size:13px'>${escapeHtml(r.risk||'--')}</div></div>
         </div>
+        ${r.pattern?`<div style='padding:10px 14px;background:rgba(105,175,255,.06);border:1px solid rgba(105,175,255,.14);border-radius:14px;margin-bottom:10px;text-align:center'><span style='font-size:11px;color:#90a6c6;letter-spacing:.12em;text-transform:uppercase'>Padrão Detectado</span><br><span style='font-size:14px;font-weight:900;color:#c8dcf5'>${escapeHtml(r.pattern)}</span></div>`:''}
+        ${r.key_level?`<div style='padding:10px 14px;background:rgba(255,204,89,.05);border:1px solid rgba(255,204,89,.14);border-radius:14px;margin-bottom:10px;text-align:center'><span style='font-size:11px;color:#90a6c6;letter-spacing:.12em;text-transform:uppercase'>Nível Chave</span><br><span style='font-size:13px;color:#ffe08a'>${escapeHtml(r.key_level)}</span></div>`:''}
+
         ${r.summary?`<div style='padding:12px;background:rgba(95,245,220,.05);border:1px solid rgba(95,245,220,.12);border-radius:16px;color:#c4ffe8;font-size:13px;font-style:italic;margin-bottom:12px;text-align:center'>"${escapeHtml(r.summary)}"</div>`:''}
         <div style='margin-bottom:8px;font-size:11px;letter-spacing:.14em;color:#90a6c6;text-transform:uppercase'>Análise do conselho</div>
         ${votesHtml}${reasons}
