@@ -151,10 +151,14 @@ def _build_context(stats, timeframe):
 # ── PARSING ───────────────────────────────────────────────────────────────────
 
 def _parse(raw):
+    if not raw or not raw.strip():
+        raise ValueError("Resposta vazia do modelo")
     raw = re.sub(r"^```(?:json)?", "", raw.strip()).strip()
     raw = re.sub(r"```$", "", raw).strip()
     m = re.search(r"\{.*\}", raw, re.DOTALL)
-    return json.loads(m.group(0) if m else raw)
+    if not m:
+        raise ValueError(f"Nenhum JSON na resposta: {raw[:120]}")
+    return json.loads(m.group(0))
 
 # ── PROVIDERS ─────────────────────────────────────────────────────────────────
 
@@ -173,7 +177,8 @@ def _groq(image_data, mime, prompt):
         timeout=30
     )
     r.raise_for_status()
-    return _parse(r.json()["choices"][0]["message"]["content"])
+    content = r.json()["choices"][0]["message"]["content"]
+    return _parse(content)
 
 def _gemini(image_data, mime, prompt):
     for model in ["gemini-1.5-pro", "gemini-1.5-flash", "gemini-pro-vision"]:
@@ -190,7 +195,8 @@ def _gemini(image_data, mime, prompt):
             r.raise_for_status()
             d = r.json()
             if not d.get("candidates"): continue
-            return _parse(d["candidates"][0]["content"]["parts"][0]["text"])
+            text = d["candidates"][0]["content"]["parts"][0].get("text", "")
+            return _parse(text)
         except Exception:
             continue
     return None
