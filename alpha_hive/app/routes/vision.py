@@ -1,6 +1,6 @@
 from __future__ import annotations
 import base64, hashlib, json, os, re, time, uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 import requests
 import psycopg2
@@ -270,7 +270,7 @@ H) PADRÕES GRÁFICOS: topo/fundo duplo, cabeça e ombros, triângulos, canal, b
 
 I) SESSÃO (se horário visível): asiática=baixa volatilidade, europeia/americana=alta. Spike em horário incomum = notícia → risco alto.
 
-J) TIMING: segundos restantes no candle. 0-20s=agora, 20-40s=aguardar, 40-60s=evitar.
+J) TIMING: segundos restantes no candle. 0-20s=agora, 21-45s=aguardar (próximo candle — PODE ser ENTRADA_FORTE se sinal é claro), 46-60s=evitar. "aguardar" NÃO significa dúvida, significa "entrar no próximo candle".
 
 REGRAS DE VOTAÇÃO (100 votos totais entre call/put/observe):
 - Spike + reversão confirmada → ≥80 votos no oposto ao spike
@@ -407,6 +407,24 @@ def analyze():
 
     # Persiste no banco dedicado (contexto adaptativo futuro)
     result = _normalize_result(result)
+
+    # Calcula horário de entrada e expiração no fuso de Brasília (UTC-3)
+    now_brt = datetime.now(tz=timezone(timedelta(hours=-3)))
+    expiry_minutes = 1 if timeframe == "M1" else 5
+    timing = result.get("entry_timing", "aguardar")
+    if timing == "agora":
+        entry_dt = now_brt
+        expiry_dt = now_brt + timedelta(minutes=expiry_minutes)
+    elif timing == "aguardar":
+        entry_dt = (now_brt + timedelta(minutes=1)).replace(second=0, microsecond=0)
+        expiry_dt = entry_dt + timedelta(minutes=expiry_minutes)
+    else:  # evitar
+        entry_dt = None
+        expiry_dt = None
+    result["entry_time"]      = entry_dt.strftime("%H:%M") if entry_dt else None
+    result["expiry_time"]     = expiry_dt.strftime("%H:%M") if expiry_dt else None
+    result["expiry_duration"] = f"{expiry_minutes} min"
+
     db_id = _save(image_hash, timeframe, result)
     result["analysis_id"] = db_id
 
