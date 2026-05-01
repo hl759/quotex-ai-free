@@ -412,11 +412,14 @@ def analyze():
     now_brt = datetime.now(tz=timezone(timedelta(hours=-3)))
     expiry_minutes = 1 if timeframe == "M1" else 5
     timing = result.get("entry_timing", "aguardar")
+    next_minute = (now_brt + timedelta(minutes=1)).replace(second=0, microsecond=0)
     if timing == "agora":
-        entry_dt = now_brt
-        expiry_dt = now_brt + timedelta(minutes=expiry_minutes)
+        # Entra no PRÓXIMO minuto completo (usuário precisa de tempo para abrir a corretora)
+        entry_dt = next_minute
+        expiry_dt = entry_dt + timedelta(minutes=expiry_minutes)
     elif timing == "aguardar":
-        entry_dt = (now_brt + timedelta(minutes=1)).replace(second=0, microsecond=0)
+        # Aguarda mais um candle: entra no minuto seguinte ao próximo
+        entry_dt = next_minute + timedelta(minutes=1)
         expiry_dt = entry_dt + timedelta(minutes=expiry_minutes)
     else:  # evitar
         entry_dt = None
