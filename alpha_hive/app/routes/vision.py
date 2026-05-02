@@ -117,34 +117,56 @@ def _build_context(stats, timeframe):
     wins = int(o.get("wins") or 0)
     losses = int(o.get("losses") or 0)
     wr = round(wins / total * 100) if total > 0 else 0
-    lines = [f"\n\n=== MEMÓRIA COLETIVA DE {min(total,200)} OPERAÇÕES ==="]
-    lines.append(f"Win rate geral: {wr}% ({wins}W/{losses}L de {total} operações)")
+
+    # Detecta sequência recente (streak) para ajuste de modo
+    recent = stats.get("recent", [])
+    streak_len = 0
+    streak_type = None
+    if recent:
+        streak_type = recent[0]["result"]
+        for row in recent:
+            if row["result"] == streak_type:
+                streak_len += 1
+            else:
+                break
+
+    lines = [f"\n\n=== MEMÓRIA ADAPTATIVA ({min(total,200)} operações) ==="]
+    lines.append(f"Win rate geral: {wr}% ({wins}W/{losses}L)")
+
+    if streak_len >= 3 and streak_type == "loss":
+        lines.append(f"\n⚠️ MODO CAUTELOSO: {streak_len} losses consecutivos. Exija um pouco mais de confirmação, mas CONTINUE OPERANDO quando houver vantagem clara. Não trave.")
+    elif streak_len >= 2 and streak_type == "loss":
+        lines.append(f"\n⚠️ {streak_len} losses recentes. Seja mais criterioso, mas opere normalmente se o sinal for bom.")
+    elif streak_len >= 3 and streak_type == "win":
+        lines.append(f"\n✅ {streak_len} wins consecutivos. Mantenha disciplina — não libere entradas fracas por excesso de confiança.")
+
     if stats["by_regime"]:
-        lines.append("\nPerformance por regime:")
+        lines.append("\nWin rate por regime (use para calibrar):")
         for r in stats["by_regime"]:
             t = int(r["total"] or 0); w = int(r["wins"] or 0)
             pct = round(w/t*100) if t > 0 else 0
             flag = "✅" if pct >= 60 else "⚠️" if pct >= 45 else "❌"
-            lines.append(f"  {flag} {r['regime']}: {pct}% win ({t} ops)")
+            guide = " → opere normalmente" if pct >= 60 else " → cautela extra" if pct >= 45 else " → evite ou exija setup premium"
+            lines.append(f"  {flag} {r['regime']}: {pct}% ({t} ops){guide}")
     if stats["by_setup"]:
-        lines.append("\nPerformance por setup:")
+        lines.append("\nWin rate por setup:")
         for r in stats["by_setup"]:
             t = int(r["total"] or 0); w = int(r["wins"] or 0)
             pct = round(w/t*100) if t > 0 else 0
             flag = "✅" if pct >= 60 else "⚠️" if pct >= 45 else "❌"
-            lines.append(f"  {flag} {r['setup']}: {pct}% win ({t} ops)")
+            lines.append(f"  {flag} {r['setup']}: {pct}% ({t} ops)")
     if stats["by_direction"]:
-        lines.append("\nPerformance por direção:")
+        lines.append("\nWin rate por direção:")
         for r in stats["by_direction"]:
             t = int(r["total"] or 0); w = int(r["wins"] or 0)
             pct = round(w/t*100) if t > 0 else 0
-            lines.append(f"  {'📈' if r['direction']=='CALL' else '📉'} {r['direction']}: {pct}% win ({t} ops)")
-    if stats["recent"]:
-        lines.append("\nÚltimas operações:")
-        for r in stats["recent"]:
+            lines.append(f"  {'📈' if r['direction']=='CALL' else '📉'} {r['direction']}: {pct}% ({t} ops)")
+    if recent:
+        lines.append("\nÚltimas 5 operações:")
+        for r in recent[:5]:
             icon = "✅" if r["result"] == "win" else "❌"
-            lines.append(f"  {icon} {r['direction']} | {r['regime']} | {r['setup']} | {r['confidence']}% conf")
-    lines.append("\nUSE ESSES DADOS para calibrar sua análise. Regime/setup com win rate baixo = mais conservador. Win rate alto = pode ser mais agressivo.")
+            lines.append(f"  {icon} {r['direction']} | {r['regime']} | conf:{r['confidence']}%")
+    lines.append("\nREGRA: regime/setup com win rate ≥60% → opere com confiança; 45-59% → cautela; <45% → exija setup premium ou evite. NUNCA trave completamente por dados históricos.")
     lines.append("=== FIM DA MEMÓRIA ===")
     return "\n".join(lines)
 
@@ -171,8 +193,8 @@ def _groq(image_data, mime, prompt):
                 {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{image_data}"}},
                 {"type": "text", "text": prompt}
             ]}],
-            "max_tokens": 700,
-            "temperature": 0.1,
+            "max_tokens": 800,
+            "temperature": 0.15,
             "response_format": {"type": "json_object"},
         },
         headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
@@ -192,7 +214,7 @@ def _gemini(image_data, mime, prompt):
                     {"text": prompt}
                 ]}], "generationConfig": {
                     "temperature": 0.1,
-                    "maxOutputTokens": 700,
+                    "maxOutputTokens": 800,
                     "responseMimeType": "application/json",
                 }},
                 params={"key": GEMINI_API_KEY}, timeout=45
@@ -237,51 +259,74 @@ def _save(image_hash, timeframe, result_data):
 
 # ── PROMPT ────────────────────────────────────────────────────────────────────
 
-BASE_PROMPT = """INSTRUÇÃO CRÍTICA: Responda APENAS com um objeto JSON válido. NENHUM texto, título, explicação ou markdown antes ou depois do JSON. Só o JSON.
+BASE_PROMPT = """INSTRUÇÃO CRÍTICA: Responda APENAS com JSON válido. Zero texto fora do JSON.
 
-Você é um sistema de análise técnica de elite para opções binárias M1/M5. Analise o gráfico internamente usando os critérios abaixo e preencha o JSON de saída.
+Você é um trader profissional de opções binárias M1/M5 com 10+ anos de experiência. MISSÃO: identificar boas oportunidades na PRÓXIMA VELA com alta probabilidade de acerto. Opere quando houver vantagem real — não exija perfeição, exija boa probabilidade.
 
-ANÁLISE INTERNA (não escreva, só use para preencher o JSON):
+FILOSOFIA: Um trader experiente não espera o setup perfeito. Ele opera quando (1) há direção clara, (2) momentum confirmado e (3) espaço livre. Se 2 dos 3 estão presentes sem sinal contrário forte, é uma boa entrada.
 
-A) ESTRUTURA: tendência alta (HH+HL) / baixa (LH+LL) / lateral? Quebra de estrutura (BOS)?
+ANÁLISE SEQUENCIAL (interno — não escreva, só preencha o JSON):
 
-B) PADRÕES DE CANDLE (últimas 5 velas): doji, engolfo, martelo, shooting star, pin bar, harami, marubozu, three soldiers/crows, inside bar, dark cloud cover, piercing line, spinning top. Corpo vs sombra. Reversão ou continuação?
+A) TENDÊNCIA (últimas 10 velas):
+   - Alta: HH+HL sequenciais | Baixa: LH+LL sequenciais | Lateral: sem direção definida
+   - Acelerando ou desacelerando? BOS (break of structure)?
 
-C) SPIKES E EXAUSTÃO (CRÍTICO):
-   - Spike (vela muito maior que as anteriores) + velas menores depois = exaustão → PUT
-   - Spike + volume explosivo = possível tendência → favor do spike
-   - Vela de rejeição (sombra ≥2× corpo) em nível = sinal oposto à sombra
-   - 3+ velas consecutivas = momentum confirmado nessa direção
+B) MOMENTUM (últimas 3-5 velas — MAIS IMPORTANTE):
+   - 3+ velas consecutivas na mesma direção = momentum forte → ≥70 votos nessa direção
+   - Corpos grandes fechando no topo/base = pressão real
+   - Pavios longos no topo/base = rejeição/exaustão
+   - Velas ficando menores = fraqueza do movimento
 
-D) SUPORTE/RESISTÊNCIA: topos, fundos, zonas de congestão, números redondos (2300, 84.00). Preço rompendo / rejeitando / consolidando?
+C) PADRÕES DE CANDLE (identifique o mais relevante):
+   Reversão: doji em nível, engolfo, pin bar, martelo, shooting star, harami, dark cloud cover, piercing line
+   Continuação: marubozu, three soldiers/crows, inside bar rompido, bandeira
 
-E) VOLUME (só se histograma visível): spike no topo/fundo = reversão. Crescente = confirma. Decrescente = fraqueza.
+D) SUPORTE/RESISTÊNCIA:
+   - Preço rompendo nível com fechamento acima/abaixo = favor do rompimento
+   - Preço rejeitando nível (pavio longo + reversão) = contra o nível
+   - ESPAÇO LIVRE até próxima zona = viagem limpa → boa entrada
+   - Preço encostado em S/R forte sem rompimento = espere confirmação
 
-F) MOMENTUM: velas ficando menores = fraqueza. Fechamento no topo = força CALL. Fechamento na base = força PUT.
+E) SPIKE E EXAUSTÃO (crítico para M1):
+   - Spike muito maior que velas anteriores + velas menores depois = exaustão → contra o spike
+   - Spike com fechamento forte + volume = possível tendência → favor do spike
+   - Sombra ≥2× corpo em nível = rejeição → sinal oposto à sombra
 
-G) INDICADORES (APENAS os visíveis no gráfico, nunca invente):
-   - EMA acima = CALL | abaixo = PUT | cruzamento = mudança
-   - Bollinger: toque na banda superior = PUT | inferior = CALL
-   - RSI >70 = sobrecomprado (PUT) | <30 = sobrevendido (CALL) | divergência = reversão
-   - MACD: cruzamento = mudança de momentum
-   - Estocástico: >80 = PUT | <20 = CALL
+F) INDICADORES (só os VISÍVEIS — nunca invente):
+   EMA: preço acima=CALL / abaixo=PUT / cruzamento=mudança
+   Bollinger: banda superior tocada=PUT / inferior=CALL / squeeze+explosão=forte sinal
+   RSI: >70=sobrecomprado(PUT) / <30=sobrevendido(CALL) / divergência=reversão
+   MACD: cruzamento=mudança de momentum
+   Estocástico: >80=PUT / <20=CALL
 
-H) PADRÕES GRÁFICOS: topo/fundo duplo, cabeça e ombros, triângulos, canal, bandeira, cunha ascendente=PUT, cunha descendente=CALL.
+G) QUALIDADE FINAL — classifique antes de decidir:
+   FORTE (confidence ≥75, decision=ENTRADA_FORTE):
+     → Tendência + momentum + espaço livre; ou padrão claro em S/R com confirmação
+   BOA (confidence 55-74, decision=ENTRADA_CAUTELA):
+     → 2 de 3 condições presentes; ou tendência moderada sem sinal contrário forte
+   NÃO OPERAR (confidence <55, decision=OBSERVAR):
+     → Mercado 100% lateral sem direção / velas contraditórias / spike de notícia / esticado sem espaço / sinais totalmente opostos
 
-I) SESSÃO (se horário visível): asiática=baixa volatilidade, europeia/americana=alta. Spike em horário incomum = notícia → risco alto.
+H) MARTINGALE — avalie se a primeira entrada perdesse:
+   permitido: perdeu por pavio curto/ruído; estrutura principal ainda válida; próxima vela ainda tem vantagem
+   não_permitido: rompimento forte contra; tendência virou; gráfico ficou confuso; perda mostrou análise errada
 
-J) TIMING: segundos restantes no candle. 0-20s=agora, 21-45s=aguardar (próximo candle — PODE ser ENTRADA_FORTE se sinal é claro), 46-60s=evitar. "aguardar" NÃO significa dúvida, significa "entrar no próximo candle".
+I) TIMING:
+   0-20s restantes=agora / 21-45s=aguardar (próximo candle; PODE ser ENTRADA_FORTE) / 46-60s=evitar
+   "aguardar" = entrar no próximo candle, NÃO significa dúvida
 
-REGRAS DE VOTAÇÃO (100 votos totais entre call/put/observe):
-- Spike + reversão confirmada → ≥80 votos no oposto ao spike
-- 3+ velas consecutivas → ≥70 votos nessa direção
-- Rejeição em S/R forte → ≥75 votos no sentido da rejeição
-- RSI extremo + padrão de reversão → ≥72 votos
-- Mercado lateral sem sinal → ≥60 votos em observe
-- Confidence máximo = 95. Se confidence < 55: decision = OBSERVAR.
+VOTOS (100 totais entre call/put/observe):
+- Tendência forte + 3+ velas seguidas: ≥70 na direção
+- Setup bom (2 de 3 condições): 55-69 na direção
+- Rejeição forte em S/R: ≥75 no sentido da rejeição
+- RSI extremo + padrão: ≥72
+- Lateral/confuso: ≥60 em observe
+- Confidence máx=95; se <55 → OBSERVAR obrigatório
 
-SAÍDA — retorne EXATAMENTE este JSON preenchido:
-{"direction":"CALL ou PUT","confidence":0-95,"regime":"trend_up/trend_down/sideways/reversal/spike_reversal/chaotic","setup":"premium/standard/fraco","pattern":"nome do padrão identificado","entry_timing":"agora/aguardar/evitar","trend_strength":"forte/moderado/fraco","key_level":"nível chave mais próximo ou vazio","reasons":["price action e padrão","estrutura e S/R","volume e momentum","indicadores visíveis","timing e síntese"],"risk":"baixo/moderado/alto","decision":"ENTRADA_FORTE/ENTRADA_CAUTELA/OBSERVAR","summary":"frase curta objetiva","votes":{"call":0,"put":0,"observe":0}}
+ANTI-TRAVAMENTO: Se tendência clara + momentum + espaço livre → ENTRE com ENTRADA_FORTE. Não procure o cenário perfeito. Boa probabilidade = boa entrada.
+
+JSON DE SAÍDA (preencha todos os campos sem exceção):
+{"direction":"CALL ou PUT","confidence":0-95,"regime":"trend_up/trend_down/sideways/reversal/spike_reversal/chaotic","setup":"premium/standard/fraco","pattern":"nome do padrão","entry_timing":"agora/aguardar/evitar","trend_strength":"forte/moderado/fraco","key_level":"nível chave ou vazio","reasons":["tendência e estrutura","momentum e velas","S/R e espaço livre","indicadores visíveis","síntese e timing"],"risk":"baixo/moderado/alto","decision":"ENTRADA_FORTE/ENTRADA_CAUTELA/OBSERVAR","summary":"frase objetiva em português","votes":{"call":0,"put":0,"observe":0},"martingale":"permitido/não_permitido","quality":"forte/boa/fraca"}
 """
 
 # ── LOSS CAUSE ────────────────────────────────────────────────────────────────
@@ -362,6 +407,37 @@ def _normalize_result(r: dict) -> dict:
         r["confidence"] = max(0, min(95, int(r.get("confidence", 50) or 50)))
     except (TypeError, ValueError):
         r["confidence"] = 50
+
+    # martingale
+    mg = str(r.get("martingale", "") or "").lower()
+    if "não" in mg or "nao" in mg or "not" in mg or mg == "no":
+        r["martingale"] = "não_permitido"
+    elif mg in ("permitido", "sim", "yes", "allowed"):
+        r["martingale"] = "permitido"
+    else:
+        # inferir a partir de risk e decision quando o modelo não retornou
+        if r.get("decision") == "OBSERVAR" or r.get("risk") == "alto":
+            r["martingale"] = "não_permitido"
+        else:
+            r["martingale"] = "permitido"
+
+    # quality
+    qual = str(r.get("quality", "") or "").lower()
+    if "fort" in qual or "strong" in qual or "prem" in qual:
+        r["quality"] = "forte"
+    elif "boa" in qual or "good" in qual or "stand" in qual or "med" in qual:
+        r["quality"] = "boa"
+    elif "fraca" in qual or "fraco" in qual or "weak" in qual or "poor" in qual:
+        r["quality"] = "fraca"
+    else:
+        # derivar de decision se o campo estiver ausente
+        dec = r.get("decision", "")
+        if dec == "ENTRADA_FORTE":
+            r["quality"] = "forte"
+        elif dec == "ENTRADA_CAUTELA":
+            r["quality"] = "boa"
+        else:
+            r["quality"] = "fraca"
 
     return r
 
