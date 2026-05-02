@@ -820,6 +820,10 @@ async function visionAnalyze(){
     const dirColor=dir==='CALL'?'var(--green)':dir==='PUT'?'var(--purple)':'var(--gold)';
     const confColor=r.confidence>=75?'var(--green)':r.confidence>=55?'var(--gold)':'var(--red)';
     const riskColor=r.risk==='baixo'?'var(--green)':r.risk==='moderado'?'var(--gold)':'var(--red)';
+    const qualityColor=r.quality==='forte'?'var(--green)':r.quality==='boa'?'var(--gold)':'var(--red)';
+    const mgColor=r.martingale==='permitido'?'var(--gold)':'var(--muted)';
+    const mgEmoji=r.martingale==='permitido'?'🔁':'🚫';
+    const mgLabel=r.martingale==='permitido'?'Permitido':'Não permitido';
     const decColor=r.decision==='ENTRADA_FORTE'?'var(--green)':r.decision==='ENTRADA_CAUTELA'?'var(--gold)':'var(--red)';
     const timingColor=r.entry_timing==='agora'?'var(--green)':r.entry_timing==='aguardar'?'var(--gold)':'var(--red)';
     const timingEmoji=r.entry_timing==='agora'?'⚡':r.entry_timing==='aguardar'?'⏳':'🚫';
@@ -884,6 +888,8 @@ async function visionAnalyze(){
           <div class='score-tile'><div class='label'>Força</div><div class='value' style='color:${strengthColor};font-size:13px'>${escapeHtml(r.trend_strength||'--')}</div></div>
           <div class='score-tile'><div class='label'>Setup</div><div class='value' style='color:var(--blue);font-size:13px'>${escapeHtml(r.setup||'--')}</div></div>
           <div class='score-tile'><div class='label'>Risco</div><div class='value' style='color:${riskColor};font-size:13px'>${escapeHtml(r.risk||'--')}</div></div>
+          <div class='score-tile'><div class='label'>Qualidade</div><div class='value' style='color:${qualityColor};font-size:13px'>${escapeHtml(r.quality||'--')}</div></div>
+          <div class='score-tile'><div class='label'>Martingale 1</div><div class='value' style='color:${mgColor};font-size:12px'>${mgEmoji} ${mgLabel}</div></div>
         </div>
         ${r.pattern?`<div style='padding:10px 14px;background:rgba(105,175,255,.06);border:1px solid rgba(105,175,255,.14);border-radius:14px;margin-bottom:10px;text-align:center'><span style='font-size:11px;color:#90a6c6;letter-spacing:.12em;text-transform:uppercase'>Padrão Detectado</span><br><span style='font-size:14px;font-weight:900;color:#c8dcf5'>${escapeHtml(r.pattern)}</span></div>`:''}
         ${r.key_level?`<div style='padding:10px 14px;background:rgba(255,204,89,.05);border:1px solid rgba(255,204,89,.14);border-radius:14px;margin-bottom:10px;text-align:center'><span style='font-size:11px;color:#90a6c6;letter-spacing:.12em;text-transform:uppercase'>Nível Chave</span><br><span style='font-size:13px;color:#ffe08a'>${escapeHtml(r.key_level)}</span></div>`:''}
