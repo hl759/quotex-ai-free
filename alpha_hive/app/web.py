@@ -4,7 +4,7 @@ import os
 import time
 from pathlib import Path
 
-from flask import Flask
+from flask import Flask, send_from_directory
 
 from alpha_hive.app.routes.health import bp as health_bp
 from alpha_hive.app.routes.vision import bp as vision_bp
@@ -38,6 +38,10 @@ def create_app() -> Flask:
         pass
 
     app.config["START_TIME"] = time.time()
+
+    @app.route("/")
+    def index():
+        return send_from_directory(static_folder, "index.html")
 
     app.register_blueprint(health_bp)
     app.register_blueprint(vision_bp)
